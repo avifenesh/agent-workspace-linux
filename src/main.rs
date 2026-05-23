@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, status, launch, windows, screenshot, focus-window, close-window, click, key, type, kill-app, stop"
+            "missing workspace command. Expected: start, list, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, kill-app, stop"
         );
     };
     match command {
@@ -50,6 +50,10 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         "status" => {
             let id = parse_id_option(&args[1..])?;
             print_json(&workspace::status_workspace(&id)?)
+        }
+        "list" => {
+            parse_no_options(&args[1..], "workspace list")?;
+            print_json(&workspace::list_workspaces()?)
         }
         "launch" => {
             let (id, spec) = parse_launch_options(&args[1..])?;
@@ -100,7 +104,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         unknown => {
             bail!(
-                "unknown workspace command '{unknown}'. Expected: start, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, kill-app, stop"
+                "unknown workspace command '{unknown}'. Expected: start, list, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, kill-app, stop"
             )
         }
     }
@@ -159,6 +163,13 @@ fn parse_id_option(args: &[String]) -> Result<String> {
         }
     }
     Ok(id)
+}
+
+fn parse_no_options(args: &[String], command: &str) -> Result<()> {
+    if let Some(arg) = args.first() {
+        bail!("{command} does not accept option '{arg}'");
+    }
+    Ok(())
 }
 
 fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
@@ -392,6 +403,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

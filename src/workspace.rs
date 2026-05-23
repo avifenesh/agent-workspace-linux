@@ -84,6 +84,22 @@ pub struct WorkspaceStatus {
     pub apps: Vec<WorkspaceApp>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceList {
+    pub runtime_base_dir: PathBuf,
+    pub workspaces: Vec<WorkspaceListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceListEntry {
+    pub id: String,
+    pub runtime_dir: PathBuf,
+    pub socket_path: PathBuf,
+    pub running: bool,
+    pub status: Option<WorkspaceStatus>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceApp {
     pub id: String,
@@ -302,6 +318,51 @@ pub fn status_workspace(id: &str) -> Result<WorkspaceStatus> {
     response
         .status
         .ok_or_else(|| anyhow!("workspace daemon returned no status"))
+}
+
+pub fn list_workspaces() -> Result<WorkspaceList> {
+    let runtime_base_dir = runtime_base_dir();
+    if !runtime_base_dir.exists() {
+        return Ok(WorkspaceList {
+            runtime_base_dir,
+            workspaces: Vec::new(),
+        });
+    }
+
+    let mut workspaces = Vec::new();
+    for entry in fs::read_dir(&runtime_base_dir)
+        .with_context(|| format!("failed to read {}", runtime_base_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let id = entry.file_name().to_string_lossy().to_string();
+        if sanitize_workspace_id(&id).is_err() {
+            continue;
+        }
+        let runtime_dir = entry.path();
+        let socket_path = runtime_dir.join("control.sock");
+        let status_result = status_workspace(&id);
+        let (running, status, error) = match status_result {
+            Ok(status) => (true, Some(status), None),
+            Err(error) => (false, None, Some(error.to_string())),
+        };
+        workspaces.push(WorkspaceListEntry {
+            id,
+            runtime_dir,
+            socket_path,
+            running,
+            status,
+            error,
+        });
+    }
+
+    workspaces.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(WorkspaceList {
+        runtime_base_dir,
+        workspaces,
+    })
 }
 
 pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {

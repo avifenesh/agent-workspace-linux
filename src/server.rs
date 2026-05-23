@@ -80,6 +80,32 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_list",
+        description = "List known isolated agent workspace runtime directories and whether each workspace is currently running.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_list(&self) -> Json<workspace::WorkspaceList> {
+        Json(
+            workspace::list_workspaces().unwrap_or_else(|error| workspace::WorkspaceList {
+                runtime_base_dir: std::path::PathBuf::new(),
+                workspaces: vec![workspace::WorkspaceListEntry {
+                    id: "error".to_string(),
+                    runtime_dir: std::path::PathBuf::new(),
+                    socket_path: std::path::PathBuf::new(),
+                    running: false,
+                    status: None,
+                    error: Some(error.to_string()),
+                }],
+            }),
+        )
+    }
+
+    #[tool(
         name = "workspace_launch_app",
         description = "Launch an app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY.",
         annotations(
@@ -321,7 +347,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_list to discover known/running workspaces. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
