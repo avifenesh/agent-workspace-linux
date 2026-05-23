@@ -89,9 +89,28 @@ pub struct WorkspaceApp {
     pub id: String,
     pub pid: u32,
     pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<EnvVar>,
     pub started_at_unix: u64,
     pub running: bool,
     pub exit_status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LaunchSpec {
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<EnvVar>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -123,15 +142,36 @@ pub struct WorkspaceScreenshot {
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcRequest {
     Status,
-    LaunchApp { command: Vec<String> },
+    LaunchApp {
+        command: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<PathBuf>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        env: Vec<EnvVar>,
+    },
     ListWindows,
-    Screenshot { output_path: Option<PathBuf> },
-    FocusWindow { window_id: String },
-    CloseWindow { window_id: String },
-    Click { x: i32, y: i32 },
-    Key { key: String },
-    TypeText { text: String },
-    KillApp { app_id: String },
+    Screenshot {
+        output_path: Option<PathBuf>,
+    },
+    FocusWindow {
+        window_id: String,
+    },
+    CloseWindow {
+        window_id: String,
+    },
+    Click {
+        x: i32,
+        y: i32,
+    },
+    Key {
+        key: String,
+    },
+    TypeText {
+        text: String,
+    },
+    KillApp {
+        app_id: String,
+    },
     Stop,
 }
 
@@ -242,15 +282,32 @@ pub fn status_workspace(id: &str) -> Result<WorkspaceStatus> {
         .ok_or_else(|| anyhow!("workspace daemon returned no status"))
 }
 
-pub fn launch_app(id: &str, command: Vec<String>) -> Result<IpcResponse> {
+pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    if command.is_empty() {
-        bail!("launch command cannot be empty");
-    }
+    validate_launch_spec(&spec)?;
     request(
         &workspace_socket_path(&id),
-        IpcRequest::LaunchApp { command },
+        IpcRequest::LaunchApp {
+            command: spec.command,
+            cwd: spec.cwd,
+            env: spec.env,
+        },
     )
+}
+
+fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
+    if spec.command.is_empty() {
+        bail!("launch command cannot be empty");
+    }
+    if let Some(cwd) = &spec.cwd {
+        if !cwd.is_dir() {
+            bail!("launch cwd {} is not a directory", cwd.display());
+        }
+    }
+    for env_var in &spec.env {
+        validate_env_var(env_var)?;
+    }
+    Ok(())
 }
 
 pub fn list_windows(id: &str) -> Result<IpcResponse> {
@@ -493,28 +550,30 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             },
             false,
         ),
-        IpcRequest::LaunchApp { command } => match spawn_app(state, command) {
-            Ok(()) => (
-                IpcResponse {
-                    ok: true,
-                    message: "app launched in workspace".to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                },
-                false,
-            ),
-            Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                },
-                false,
-            ),
-        },
+        IpcRequest::LaunchApp { command, cwd, env } => {
+            match spawn_app(state, LaunchSpec { command, cwd, env }) {
+                Ok(()) => (
+                    IpcResponse {
+                        ok: true,
+                        message: "app launched in workspace".to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+                Err(error) => (
+                    IpcResponse {
+                        ok: false,
+                        message: error.to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+            }
+        }
         IpcRequest::ListWindows => match list_workspace_windows(&state.status) {
             Ok(windows) => (
                 IpcResponse {
@@ -714,24 +773,30 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     Ok(should_stop)
 }
 
-fn spawn_app(state: &mut DaemonState, command: Vec<String>) -> Result<()> {
-    if command.is_empty() {
-        bail!("launch command cannot be empty");
-    }
-    let mut child_command = Command::new(&command[0]);
-    child_command.args(&command[1..]);
+fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
+    validate_launch_spec(&spec)?;
+    let mut child_command = Command::new(&spec.command[0]);
+    child_command.args(&spec.command[1..]);
     child_command
         .env("DISPLAY", &state.status.display)
         .env("XAUTHORITY", &state.status.xauthority_path)
         .stdin(Stdio::null());
+    if let Some(cwd) = &spec.cwd {
+        child_command.current_dir(cwd);
+    }
+    for env_var in &spec.env {
+        child_command.env(&env_var.name, &env_var.value);
+    }
     let child = child_command
         .spawn()
-        .with_context(|| format!("failed to launch {}", command.join(" ")))?;
+        .with_context(|| format!("failed to launch {}", spec.command.join(" ")))?;
     let pid = child.id();
     let info = WorkspaceApp {
         id: format!("app-{pid}"),
         pid,
-        command,
+        command: spec.command,
+        cwd: spec.cwd,
+        env: spec.env,
         started_at_unix: unix_now(),
         running: true,
         exit_status: None,
@@ -1194,6 +1259,19 @@ fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
         bail!("{label} must be a decimal X11 id");
     }
     Ok(trimmed.to_string())
+}
+
+fn validate_env_var(env_var: &EnvVar) -> Result<()> {
+    if env_var.name.is_empty() {
+        bail!("environment variable name cannot be empty");
+    }
+    if env_var.name.contains('=') {
+        bail!("environment variable name cannot contain '='");
+    }
+    if env_var.name.contains('\0') || env_var.value.contains('\0') {
+        bail!("environment variable cannot contain NUL bytes");
+    }
+    Ok(())
 }
 
 fn first_available_command(commands: &[&str]) -> Check {

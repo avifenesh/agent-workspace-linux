@@ -1,5 +1,6 @@
 use crate::workspace::{
-    self, IpcResponse, WorkspaceStartOptions, WorkspaceStatus, DEFAULT_WORKSPACE_ID,
+    self, EnvVar, IpcResponse, LaunchSpec, WorkspaceStartOptions, WorkspaceStatus,
+    DEFAULT_WORKSPACE_ID,
 };
 use anyhow::Result;
 use rmcp::{
@@ -93,8 +94,12 @@ impl AgentWorkspaceLinux {
     ) -> Json<IpcResponse> {
         let id = params
             .id
+            .clone()
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::launch_app(&id, params.command)))
+        Json(result_response(workspace::launch_app_with_spec(
+            &id,
+            params.into_launch_spec(),
+        )))
     }
 
     #[tool(
@@ -340,6 +345,20 @@ struct WorkspaceLaunchParams {
     #[serde(default)]
     id: Option<String>,
     command: Vec<String>,
+    #[serde(default)]
+    cwd: Option<PathBuf>,
+    #[serde(default)]
+    env: Vec<EnvVar>,
+}
+
+impl WorkspaceLaunchParams {
+    fn into_launch_spec(self) -> LaunchSpec {
+        LaunchSpec {
+            command: self.command,
+            cwd: self.cwd,
+            env: self.env,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]

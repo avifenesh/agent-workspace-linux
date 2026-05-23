@@ -3,7 +3,7 @@ mod workspace;
 
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
-use workspace::{DaemonOptions, WorkspaceStartOptions};
+use workspace::{DaemonOptions, EnvVar, LaunchSpec, WorkspaceStartOptions};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -52,8 +52,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::status_workspace(&id)?)
         }
         "launch" => {
-            let (id, command) = parse_launch_options(&args[1..])?;
-            print_json(&workspace::launch_app(&id, command)?)
+            let (id, spec) = parse_launch_options(&args[1..])?;
+            print_json(&workspace::launch_app_with_spec(&id, spec)?)
         }
         "windows" => {
             let id = parse_id_option(&args[1..])?;
@@ -157,8 +157,10 @@ fn parse_id_option(args: &[String]) -> Result<String> {
     Ok(id)
 }
 
-fn parse_launch_options(args: &[String]) -> Result<(String, Vec<String>)> {
+fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
     let mut id = workspace::default_workspace_id();
+    let mut cwd = None;
+    let mut env = Vec::new();
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -166,23 +168,44 @@ fn parse_launch_options(args: &[String]) -> Result<(String, Vec<String>)> {
                 id = value_after(args, index, "--id")?.to_string();
                 index += 2;
             }
+            "--cwd" => {
+                cwd = Some(PathBuf::from(value_after(args, index, "--cwd")?));
+                index += 2;
+            }
+            "--env" => {
+                env.push(parse_env_assignment(value_after(args, index, "--env")?)?);
+                index += 2;
+            }
             "--" => {
                 let command = args[index + 1..].to_vec();
                 if command.is_empty() {
                     bail!("workspace launch requires a command after --");
                 }
-                return Ok((id, command));
+                return Ok((id, LaunchSpec { command, cwd, env }));
             }
             _ => {
                 let command = args[index..].to_vec();
                 if command.is_empty() {
                     bail!("workspace launch requires a command");
                 }
-                return Ok((id, command));
+                return Ok((id, LaunchSpec { command, cwd, env }));
             }
         }
     }
     bail!("workspace launch requires a command")
+}
+
+fn parse_env_assignment(value: &str) -> Result<EnvVar> {
+    let Some((name, value)) = value.split_once('=') else {
+        bail!("--env requires NAME=VALUE");
+    };
+    if name.is_empty() {
+        bail!("--env requires a non-empty variable name");
+    }
+    Ok(EnvVar {
+        name: name.to_string(),
+        value: value.to_string(),
+    })
 }
 
 fn parse_screenshot_options(args: &[String]) -> Result<(String, Option<PathBuf>)> {
@@ -326,6 +349,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

@@ -27,6 +27,7 @@ cargo run -- workspace start
 cargo run -- workspace start --foreground
 cargo run -- workspace status
 cargo run -- workspace launch -- xterm
+cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
 cargo run -- workspace focus-window 4194316
@@ -57,7 +58,8 @@ socket daemon:
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
 - `workspace launch` asks the daemon to spawn an app with the workspace
-  `DISPLAY` and `XAUTHORITY`.
+  `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
+  environment overrides.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   and `workspace kill-app` inspect or act through the same daemon, scoped to the
