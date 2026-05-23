@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -29,6 +29,7 @@ pub struct RuntimeReport {
     pub xvfb: Check,
     pub xephyr: Check,
     pub xauth: Check,
+    pub xdpyinfo: Check,
     pub window_manager: Check,
     pub xdotool: Check,
     pub screenshot: Check,
@@ -117,6 +118,7 @@ pub fn doctor_report() -> DoctorReport {
         xvfb: command_path_check("Xvfb"),
         xephyr: command_path_check("Xephyr"),
         xauth: command_path_check("xauth"),
+        xdpyinfo: command_path_check("xdpyinfo"),
         window_manager: first_available_command(&["openbox", "i3", "fluxbox"]),
         xdotool: command_path_check("xdotool"),
         screenshot: first_available_command(&["import", "scrot"]),
@@ -130,6 +132,9 @@ pub fn doctor_report() -> DoctorReport {
         blockers.push(
             "Install xauth so workspace displays can use a scoped authority file.".to_string(),
         );
+    }
+    if !runtime.xdpyinfo.ok {
+        blockers.push("Install xdpyinfo so workspace display readiness can be probed.".to_string());
     }
     if !runtime.window_manager.ok {
         blockers.push(
@@ -163,59 +168,31 @@ pub fn doctor_report() -> DoctorReport {
 }
 
 pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
-    let id = sanitize_workspace_id(&options.id)?;
-    if let Ok(status) = status_workspace(&id) {
-        return Ok(IpcResponse {
+    match prepare_workspace_start(options)? {
+        WorkspaceStartPlan::AlreadyRunning(status) => Ok(IpcResponse {
             ok: true,
-            message: format!("workspace {id:?} is already running"),
+            message: format!("workspace {:?} is already running", status.id),
             status: Some(status),
-        });
+        }),
+        WorkspaceStartPlan::Start(daemon_options) => {
+            spawn_detached_daemon(&daemon_options)?;
+            wait_for_socket(&daemon_options.socket_path)?;
+            request(&daemon_options.socket_path, IpcRequest::Status)
+        }
     }
+}
 
-    let runtime = doctor_report();
-    if !runtime.ready_for_x11_workspace {
-        bail!(
-            "workspace runtime is not ready: {}",
-            runtime.blockers.join("; ")
-        );
+pub fn start_workspace_foreground(options: WorkspaceStartOptions) -> Result<()> {
+    match prepare_workspace_start(options)? {
+        WorkspaceStartPlan::AlreadyRunning(status) => {
+            bail!(
+                "workspace {:?} is already running on {}",
+                status.id,
+                status.display
+            )
+        }
+        WorkspaceStartPlan::Start(daemon_options) => run_daemon(daemon_options),
     }
-
-    let runtime_dir = workspace_dir(&id);
-    fs::create_dir_all(&runtime_dir)
-        .with_context(|| format!("failed to create {}", runtime_dir.display()))?;
-    let socket_path = runtime_dir.join("control.sock");
-    remove_stale_socket(&socket_path)?;
-    let xauthority_path = runtime_dir.join("Xauthority");
-    let display = pick_display()?;
-    create_xauthority(&display, &xauthority_path)?;
-
-    let exe = env::current_exe().context("failed to resolve current executable")?;
-    let mut daemon = Command::new(exe);
-    daemon
-        .arg("daemon")
-        .arg("--id")
-        .arg(&id)
-        .arg("--display")
-        .arg(&display)
-        .arg("--width")
-        .arg(options.width.to_string())
-        .arg("--height")
-        .arg(options.height.to_string())
-        .arg("--runtime-dir")
-        .arg(&runtime_dir)
-        .arg("--socket")
-        .arg(&socket_path)
-        .arg("--xauthority")
-        .arg(&xauthority_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    daemon
-        .spawn()
-        .context("failed to spawn agent workspace daemon")?;
-    wait_for_socket(&socket_path)?;
-    request(&socket_path, IpcRequest::Status)
 }
 
 pub fn status_workspace(id: &str) -> Result<WorkspaceStatus> {
@@ -271,14 +248,32 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
         apps: Vec::new(),
     };
 
-    for stream in listener.incoming() {
-        let stream = stream.context("failed to accept workspace IPC connection")?;
-        let should_stop = handle_stream(stream, &mut state)?;
+    eprintln!(
+        "agent workspace daemon listening on {} for display {}",
+        state.status.socket_path.display(),
+        state.status.display
+    );
+    loop {
+        let stream = match listener.accept() {
+            Ok((stream, _addr)) => stream,
+            Err(error) => {
+                eprintln!("workspace IPC accept failed: {error}");
+                continue;
+            }
+        };
+        let should_stop = match handle_stream(stream, &mut state) {
+            Ok(should_stop) => should_stop,
+            Err(error) => {
+                eprintln!("workspace IPC request failed: {error:#}");
+                false
+            }
+        };
         if should_stop {
             break;
         }
     }
 
+    eprintln!("agent workspace daemon stopping");
     for app in &mut state.apps {
         let _ = app.child.kill();
         let _ = app.child.wait();
@@ -290,6 +285,81 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
     let _ = x_server.kill();
     let _ = x_server.wait();
     let _ = fs::remove_file(&state.status.socket_path);
+    Ok(())
+}
+
+enum WorkspaceStartPlan {
+    AlreadyRunning(WorkspaceStatus),
+    Start(DaemonOptions),
+}
+
+fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceStartPlan> {
+    let id = sanitize_workspace_id(&options.id)?;
+    if let Ok(status) = status_workspace(&id) {
+        return Ok(WorkspaceStartPlan::AlreadyRunning(status));
+    }
+
+    let runtime = doctor_report();
+    if !runtime.ready_for_x11_workspace {
+        bail!(
+            "workspace runtime is not ready: {}",
+            runtime.blockers.join("; ")
+        );
+    }
+
+    let runtime_dir = workspace_dir(&id);
+    fs::create_dir_all(&runtime_dir)
+        .with_context(|| format!("failed to create {}", runtime_dir.display()))?;
+    let socket_path = runtime_dir.join("control.sock");
+    remove_stale_socket(&socket_path)?;
+    let xauthority_path = runtime_dir.join("Xauthority");
+    let display = pick_display()?;
+    create_xauthority(&display, &xauthority_path)?;
+
+    Ok(WorkspaceStartPlan::Start(DaemonOptions {
+        id,
+        display,
+        width: options.width,
+        height: options.height,
+        runtime_dir,
+        socket_path,
+        xauthority_path,
+    }))
+}
+
+fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
+    let stdout_path = options.runtime_dir.join("daemon.out.log");
+    let stderr_path = options.runtime_dir.join("daemon.err.log");
+    let exe = env::current_exe().context("failed to resolve current executable")?;
+    let mut daemon = Command::new("setsid");
+    daemon
+        .arg(exe)
+        .arg("daemon")
+        .arg("--id")
+        .arg(&options.id)
+        .arg("--display")
+        .arg(&options.display)
+        .arg("--width")
+        .arg(options.width.to_string())
+        .arg("--height")
+        .arg(options.height.to_string())
+        .arg("--runtime-dir")
+        .arg(&options.runtime_dir)
+        .arg("--socket")
+        .arg(&options.socket_path)
+        .arg("--xauthority")
+        .arg(&options.xauthority_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(fs::File::create(&stdout_path).with_context(
+            || format!("failed to create {}", stdout_path.display()),
+        )?))
+        .stderr(Stdio::from(fs::File::create(&stderr_path).with_context(
+            || format!("failed to create {}", stderr_path.display()),
+        )?));
+
+    daemon
+        .spawn()
+        .context("failed to spawn agent workspace daemon")?;
     Ok(())
 }
 
@@ -501,6 +571,11 @@ fn pick_display() -> Result<String> {
 fn create_xauthority(display: &str, path: &Path) -> Result<()> {
     let cookie = random_cookie()?;
     let _ = fs::remove_file(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::File::create(path).with_context(|| format!("failed to create {}", path.display()))?;
     let output = Command::new("xauth")
         .arg("-f")
         .arg(path)
@@ -521,10 +596,12 @@ fn create_xauthority(display: &str, path: &Path) -> Result<()> {
 }
 
 fn random_cookie() -> Result<String> {
-    let bytes = fs::read("/dev/urandom").context("failed to read /dev/urandom")?;
+    let mut file = fs::File::open("/dev/urandom").context("failed to open /dev/urandom")?;
+    let mut bytes = [0_u8; 16];
+    file.read_exact(&mut bytes)
+        .context("failed to read random X authority cookie")?;
     Ok(bytes
         .into_iter()
-        .take(16)
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>())
 }

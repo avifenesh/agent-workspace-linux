@@ -38,8 +38,12 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
     };
     match command {
         "start" => {
-            let options = parse_start_options(&args[1..])?;
-            print_json(&workspace::start_workspace(options)?)
+            let start = parse_start_options(&args[1..])?;
+            if start.foreground {
+                workspace::start_workspace_foreground(start.options)
+            } else {
+                print_json(&workspace::start_workspace(start.options)?)
+            }
         }
         "status" => {
             let id = parse_id_option(&args[1..])?;
@@ -59,11 +63,21 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
     }
 }
 
-fn parse_start_options(args: &[String]) -> Result<WorkspaceStartOptions> {
+struct ParsedStartOptions {
+    options: WorkspaceStartOptions,
+    foreground: bool,
+}
+
+fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
     let mut options = WorkspaceStartOptions::default();
+    let mut foreground = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "--foreground" => {
+                foreground = true;
+                index += 1;
+            }
             "--id" => {
                 options.id = value_after(args, index, "--id")?.to_string();
                 index += 2;
@@ -83,7 +97,10 @@ fn parse_start_options(args: &[String]) -> Result<WorkspaceStartOptions> {
             flag => bail!("unknown workspace start option '{flag}'"),
         }
     }
-    Ok(options)
+    Ok(ParsedStartOptions {
+        options,
+        foreground,
+    })
 }
 
 fn parse_id_option(args: &[String]) -> Result<String> {
@@ -208,6 +225,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

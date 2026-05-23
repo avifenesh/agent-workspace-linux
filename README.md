@@ -24,6 +24,7 @@ not the host desktop.
 ```bash
 cargo run -- doctor
 cargo run -- workspace start
+cargo run -- workspace start --foreground
 cargo run -- workspace status
 cargo run -- workspace launch -- xterm
 cargo run -- workspace stop
@@ -34,7 +35,7 @@ On Debian/Ubuntu-like systems, the initial X11 workspace runtime is expected to
 need packages along these lines:
 
 ```bash
-sudo apt install xvfb openbox xdotool xauth imagemagick
+sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick
 ```
 
 `doctor` is implemented first so missing runtime dependencies are visible before
@@ -44,6 +45,9 @@ socket daemon:
 - `workspace start` chooses a free X11 display, creates an `xauth` file, starts
   `Xvfb`, starts a lightweight window manager, and binds a control socket under
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`.
+- `workspace start --foreground` runs the same workspace daemon in the current
+  process, which is useful for MCP hosts or dev runners that clean up detached
+  child processes.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`.
 - `workspace status` and `workspace stop` talk to the same socket.
