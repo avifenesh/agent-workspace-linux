@@ -26,6 +26,7 @@ cargo run -- doctor
 cargo run -- workspace start
 cargo run -- workspace start --foreground
 cargo run -- workspace list
+cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace launch -- xterm
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
@@ -61,6 +62,8 @@ socket daemon:
   child processes.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable.
+- `workspace cleanup` removes stale workspace runtime directories while skipping
+  running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
   environment overrides. Each launched app gets workspace-local stdout/stderr
@@ -72,8 +75,8 @@ socket daemon:
 - `workspace status` and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
-`workspace_start`, `workspace_list`, `workspace_status`, `workspace_launch_app`,
-`workspace_list_windows`, `workspace_screenshot`, `workspace_focus_window`,
-`workspace_close_window`, `workspace_click`, `workspace_key`,
-`workspace_type_text`, `workspace_read_app_log`, `workspace_kill_app`, and
-`workspace_stop`.
+`workspace_start`, `workspace_list`, `workspace_cleanup_stale`,
+`workspace_status`, `workspace_launch_app`, `workspace_list_windows`,
+`workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
+`workspace_click`, `workspace_key`, `workspace_type_text`,
+`workspace_read_app_log`, `workspace_kill_app`, and `workspace_stop`.

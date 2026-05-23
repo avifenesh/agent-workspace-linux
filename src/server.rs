@@ -106,6 +106,35 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_cleanup_stale",
+        description = "Remove stale isolated workspace runtime directories. Running workspaces are skipped.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_cleanup_stale(
+        &self,
+        Parameters(params): Parameters<WorkspaceCleanupParams>,
+    ) -> Json<workspace::WorkspaceCleanup> {
+        Json(
+            workspace::cleanup_stale_workspaces(params.id).unwrap_or_else(|error| {
+                workspace::WorkspaceCleanup {
+                    runtime_base_dir: std::path::PathBuf::new(),
+                    removed: Vec::new(),
+                    skipped: vec![workspace::WorkspaceCleanupEntry {
+                        id: "error".to_string(),
+                        runtime_dir: std::path::PathBuf::new(),
+                        reason: error.to_string(),
+                    }],
+                }
+            }),
+        )
+    }
+
+    #[tool(
         name = "workspace_launch_app",
         description = "Launch an app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY.",
         annotations(
@@ -347,7 +376,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_list to discover known/running workspaces. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -388,6 +417,12 @@ impl WorkspaceStartParams {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 struct WorkspaceIdParams {
+    #[serde(default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceCleanupParams {
     #[serde(default)]
     id: Option<String>,
 }

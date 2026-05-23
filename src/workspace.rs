@@ -100,6 +100,20 @@ pub struct WorkspaceListEntry {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceCleanup {
+    pub runtime_base_dir: PathBuf,
+    pub removed: Vec<WorkspaceCleanupEntry>,
+    pub skipped: Vec<WorkspaceCleanupEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceCleanupEntry {
+    pub id: String,
+    pub runtime_dir: PathBuf,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceApp {
     pub id: String,
@@ -362,6 +376,49 @@ pub fn list_workspaces() -> Result<WorkspaceList> {
     Ok(WorkspaceList {
         runtime_base_dir,
         workspaces,
+    })
+}
+
+pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> {
+    let target_id = id.map(|id| sanitize_workspace_id(&id)).transpose()?;
+    let list = list_workspaces()?;
+    let mut removed = Vec::new();
+    let mut skipped = Vec::new();
+
+    for workspace in list.workspaces {
+        if let Some(target_id) = &target_id {
+            if &workspace.id != target_id {
+                continue;
+            }
+        }
+
+        if workspace.running {
+            skipped.push(WorkspaceCleanupEntry {
+                id: workspace.id,
+                runtime_dir: workspace.runtime_dir,
+                reason: "workspace is running".to_string(),
+            });
+            continue;
+        }
+
+        match fs::remove_dir_all(&workspace.runtime_dir) {
+            Ok(()) => removed.push(WorkspaceCleanupEntry {
+                id: workspace.id,
+                runtime_dir: workspace.runtime_dir,
+                reason: "removed stale workspace runtime".to_string(),
+            }),
+            Err(error) => skipped.push(WorkspaceCleanupEntry {
+                id: workspace.id,
+                runtime_dir: workspace.runtime_dir,
+                reason: error.to_string(),
+            }),
+        }
+    }
+
+    Ok(WorkspaceCleanup {
+        runtime_base_dir: list.runtime_base_dir,
+        removed,
+        skipped,
     })
 }
 
