@@ -59,7 +59,8 @@ socket daemon:
   child processes.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
-  environment overrides.
+  environment overrides. Each launched app gets workspace-local stdout/stderr
+  log files reported in `workspace status`.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   and `workspace kill-app` inspect or act through the same daemon, scoped to the

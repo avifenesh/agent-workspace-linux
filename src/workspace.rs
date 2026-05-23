@@ -93,6 +93,10 @@ pub struct WorkspaceApp {
     pub cwd: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<EnvVar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_path: Option<PathBuf>,
     pub started_at_unix: u64,
     pub running: bool,
     pub exit_status: Option<String>,
@@ -775,12 +779,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
 
 fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
     validate_launch_spec(&spec)?;
+    let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
     let mut child_command = Command::new(&spec.command[0]);
     child_command.args(&spec.command[1..]);
     child_command
         .env("DISPLAY", &state.status.display)
         .env("XAUTHORITY", &state.status.xauthority_path)
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(
+            fs::File::create(&log_paths.stdout)
+                .with_context(|| format!("failed to create {}", log_paths.stdout.display()))?,
+        ))
+        .stderr(Stdio::from(
+            fs::File::create(&log_paths.stderr)
+                .with_context(|| format!("failed to create {}", log_paths.stderr.display()))?,
+        ));
     if let Some(cwd) = &spec.cwd {
         child_command.current_dir(cwd);
     }
@@ -791,12 +804,16 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
         .spawn()
         .with_context(|| format!("failed to launch {}", spec.command.join(" ")))?;
     let pid = child.id();
+    let stdout_path = rename_app_log(&log_paths.stdout, pid, "stdout")?;
+    let stderr_path = rename_app_log(&log_paths.stderr, pid, "stderr")?;
     let info = WorkspaceApp {
         id: format!("app-{pid}"),
         pid,
         command: spec.command,
         cwd: spec.cwd,
         env: spec.env,
+        stdout_path: Some(stdout_path),
+        stderr_path: Some(stderr_path),
         started_at_unix: unix_now(),
         running: true,
         exit_status: None,
@@ -804,6 +821,37 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
     state.status.apps.push(info.clone());
     state.apps.push(AppProcess { info, child });
     Ok(())
+}
+
+struct AppLogPaths {
+    stdout: PathBuf,
+    stderr: PathBuf,
+}
+
+fn prepare_app_log_paths(runtime_dir: &Path) -> Result<AppLogPaths> {
+    let log_dir = runtime_dir.join("apps");
+    fs::create_dir_all(&log_dir)
+        .with_context(|| format!("failed to create {}", log_dir.display()))?;
+    let prefix = format!("launch-{}", unix_now_millis());
+    Ok(AppLogPaths {
+        stdout: log_dir.join(format!("{prefix}.stdout.log")),
+        stderr: log_dir.join(format!("{prefix}.stderr.log")),
+    })
+}
+
+fn rename_app_log(path: &Path, pid: u32, stream: &str) -> Result<PathBuf> {
+    let target = path
+        .parent()
+        .ok_or_else(|| anyhow!("app log path has no parent: {}", path.display()))?
+        .join(format!("app-{pid}.{stream}.log"));
+    fs::rename(path, &target).with_context(|| {
+        format!(
+            "failed to move app log {} to {}",
+            path.display(),
+            target.display()
+        )
+    })?;
+    Ok(target)
 }
 
 fn list_workspace_windows(status: &WorkspaceStatus) -> Result<Vec<WorkspaceWindow>> {
@@ -1334,5 +1382,12 @@ fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn unix_now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
         .unwrap_or(0)
 }
