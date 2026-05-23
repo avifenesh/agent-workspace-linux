@@ -8,6 +8,7 @@ use rmcp::{
     tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Clone, Default)]
 pub struct AgentWorkspaceLinux;
@@ -69,6 +70,8 @@ impl AgentWorkspaceLinux {
                 ok: true,
                 message: "workspace status returned".to_string(),
                 status: Some(status),
+                windows: None,
+                screenshot: None,
             },
             Err(error) => error_response(error.to_string(), None),
         })
@@ -95,6 +98,109 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_list_windows",
+        description = "List visible windows inside an isolated agent workspace.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_list_windows(
+        &self,
+        Parameters(params): Parameters<WorkspaceIdParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::list_windows(&id)))
+    }
+
+    #[tool(
+        name = "workspace_screenshot",
+        description = "Capture a screenshot of the isolated agent workspace root display and return the PNG path.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_screenshot(
+        &self,
+        Parameters(params): Parameters<WorkspaceScreenshotParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::screenshot(
+            &id,
+            params.output_path,
+        )))
+    }
+
+    #[tool(
+        name = "workspace_click",
+        description = "Click workspace-local coordinates inside an isolated agent workspace.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_click(
+        &self,
+        Parameters(params): Parameters<WorkspaceClickParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::click(&id, params.x, params.y)))
+    }
+
+    #[tool(
+        name = "workspace_key",
+        description = "Send a key chord to the isolated agent workspace with xdotool syntax, for example Return or ctrl+l.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_key(
+        &self,
+        Parameters(params): Parameters<WorkspaceKeyParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::key(&id, params.key)))
+    }
+
+    #[tool(
+        name = "workspace_type_text",
+        description = "Type literal text into the focused app inside an isolated agent workspace.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_type_text(
+        &self,
+        Parameters(params): Parameters<WorkspaceTypeTextParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::type_text(&id, params.text)))
+    }
+
+    #[tool(
         name = "workspace_stop",
         description = "Stop an isolated agent workspace and terminate apps launched inside it.",
         annotations(
@@ -118,7 +224,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app runs commands only inside the isolated agent workspace; it does not target the user's host desktop. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot and workspace_list_windows to inspect the workspace before acting. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -170,6 +276,36 @@ struct WorkspaceLaunchParams {
     command: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceScreenshotParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    output_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceClickParams {
+    #[serde(default)]
+    id: Option<String>,
+    x: i32,
+    y: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceKeyParams {
+    #[serde(default)]
+    id: Option<String>,
+    key: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceTypeTextParams {
+    #[serde(default)]
+    id: Option<String>,
+    text: String,
+}
+
 fn result_response(result: Result<IpcResponse>) -> IpcResponse {
     match result {
         Ok(response) => response,
@@ -182,5 +318,7 @@ fn error_response(message: String, status: Option<WorkspaceStatus>) -> IpcRespon
         ok: false,
         message,
         status,
+        windows: None,
+        screenshot: None,
     }
 }

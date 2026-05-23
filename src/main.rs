@@ -34,7 +34,9 @@ async fn main() -> Result<()> {
 
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
-        bail!("missing workspace command. Expected: start, status, launch, stop");
+        bail!(
+            "missing workspace command. Expected: start, status, launch, windows, screenshot, click, key, type, stop"
+        );
     };
     match command {
         "start" => {
@@ -53,12 +55,34 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             let (id, command) = parse_launch_options(&args[1..])?;
             print_json(&workspace::launch_app(&id, command)?)
         }
+        "windows" => {
+            let id = parse_id_option(&args[1..])?;
+            print_json(&workspace::list_windows(&id)?)
+        }
+        "screenshot" => {
+            let (id, output_path) = parse_screenshot_options(&args[1..])?;
+            print_json(&workspace::screenshot(&id, output_path)?)
+        }
+        "click" => {
+            let (id, x, y) = parse_click_options(&args[1..])?;
+            print_json(&workspace::click(&id, x, y)?)
+        }
+        "key" => {
+            let (id, key) = parse_one_arg_command(&args[1..], "workspace key requires a key")?;
+            print_json(&workspace::key(&id, key)?)
+        }
+        "type" => {
+            let (id, text) = parse_text_command(&args[1..])?;
+            print_json(&workspace::type_text(&id, text)?)
+        }
         "stop" => {
             let id = parse_id_option(&args[1..])?;
             print_json(&workspace::stop_workspace(&id)?)
         }
         unknown => {
-            bail!("unknown workspace command '{unknown}'. Expected: start, status, launch, stop")
+            bail!(
+                "unknown workspace command '{unknown}'. Expected: start, status, launch, windows, screenshot, click, key, type, stop"
+            )
         }
     }
 }
@@ -146,6 +170,68 @@ fn parse_launch_options(args: &[String]) -> Result<(String, Vec<String>)> {
     bail!("workspace launch requires a command")
 }
 
+fn parse_screenshot_options(args: &[String]) -> Result<(String, Option<PathBuf>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut output_path = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--output" => {
+                output_path = Some(PathBuf::from(value_after(args, index, "--output")?));
+                index += 2;
+            }
+            flag => bail!("unknown workspace screenshot option '{flag}'"),
+        }
+    }
+    Ok((id, output_path))
+}
+
+fn parse_click_options(args: &[String]) -> Result<(String, i32, i32)> {
+    let (id, values) = parse_id_and_args(args)?;
+    if values.len() != 2 {
+        bail!("workspace click requires X and Y coordinates");
+    }
+    let x = values[0].parse().context("click X must be an integer")?;
+    let y = values[1].parse().context("click Y must be an integer")?;
+    Ok((id, x, y))
+}
+
+fn parse_one_arg_command(args: &[String], missing_message: &str) -> Result<(String, String)> {
+    let (id, values) = parse_id_and_args(args)?;
+    if values.len() != 1 {
+        bail!("{missing_message}");
+    }
+    Ok((id, values[0].clone()))
+}
+
+fn parse_text_command(args: &[String]) -> Result<(String, String)> {
+    let (id, values) = parse_id_and_args(args)?;
+    if values.is_empty() {
+        bail!("workspace type requires text");
+    }
+    Ok((id, values.join(" ")))
+}
+
+fn parse_id_and_args(args: &[String]) -> Result<(String, Vec<String>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--" => return Ok((id, args[index + 1..].to_vec())),
+            _ => return Ok((id, args[index..].to_vec())),
+        }
+    }
+    Ok((id, Vec::new()))
+}
+
 fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut id = None;
     let mut display = None;
@@ -225,6 +311,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

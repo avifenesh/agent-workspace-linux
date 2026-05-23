@@ -94,11 +94,41 @@ pub struct WorkspaceApp {
     pub exit_status: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceWindow {
+    pub id: String,
+    pub title: String,
+    pub pid: Option<u32>,
+    pub geometry: WindowGeometry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WindowGeometry {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub screen: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceScreenshot {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub format: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcRequest {
     Status,
     LaunchApp { command: Vec<String> },
+    ListWindows,
+    Screenshot { output_path: Option<PathBuf> },
+    Click { x: i32, y: i32 },
+    Key { key: String },
+    TypeText { text: String },
     Stop,
 }
 
@@ -107,6 +137,10 @@ pub struct IpcResponse {
     pub ok: bool,
     pub message: String,
     pub status: Option<WorkspaceStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<Vec<WorkspaceWindow>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<WorkspaceScreenshot>,
 }
 
 pub fn default_workspace_id() -> String {
@@ -173,6 +207,8 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             ok: true,
             message: format!("workspace {:?} is already running", status.id),
             status: Some(status),
+            windows: None,
+            screenshot: None,
         }),
         WorkspaceStartPlan::Start(daemon_options) => {
             spawn_detached_daemon(&daemon_options)?;
@@ -212,6 +248,40 @@ pub fn launch_app(id: &str, command: Vec<String>) -> Result<IpcResponse> {
         &workspace_socket_path(&id),
         IpcRequest::LaunchApp { command },
     )
+}
+
+pub fn list_windows(id: &str) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::ListWindows)
+}
+
+pub fn screenshot(id: &str, output_path: Option<PathBuf>) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::Screenshot { output_path },
+    )
+}
+
+pub fn click(id: &str, x: i32, y: i32) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::Click { x, y })
+}
+
+pub fn key(id: &str, key: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    if key.trim().is_empty() {
+        bail!("key cannot be empty");
+    }
+    request(&workspace_socket_path(&id), IpcRequest::Key { key })
+}
+
+pub fn type_text(id: &str, text: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    if text.is_empty() {
+        bail!("text cannot be empty");
+    }
+    request(&workspace_socket_path(&id), IpcRequest::TypeText { text })
 }
 
 pub fn stop_workspace(id: &str) -> Result<IpcResponse> {
@@ -389,6 +459,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ok: true,
                 message: "workspace is running".to_string(),
                 status: Some(state.status.clone()),
+                windows: None,
+                screenshot: None,
             },
             false,
         ),
@@ -398,6 +470,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     ok: true,
                     message: "app launched in workspace".to_string(),
                     status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
                 },
                 false,
             ),
@@ -406,6 +480,120 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     ok: false,
                     message: error.to_string(),
                     status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+        },
+        IpcRequest::ListWindows => match list_workspace_windows(&state.status) {
+            Ok(windows) => (
+                IpcResponse {
+                    ok: true,
+                    message: "workspace windows listed".to_string(),
+                    status: Some(state.status.clone()),
+                    windows: Some(windows),
+                    screenshot: None,
+                },
+                false,
+            ),
+            Err(error) => (
+                IpcResponse {
+                    ok: false,
+                    message: error.to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+        },
+        IpcRequest::Screenshot { output_path } => {
+            match capture_workspace_screenshot(&state.status, output_path) {
+                Ok(screenshot) => (
+                    IpcResponse {
+                        ok: true,
+                        message: "workspace screenshot captured".to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: Some(screenshot),
+                    },
+                    false,
+                ),
+                Err(error) => (
+                    IpcResponse {
+                        ok: false,
+                        message: error.to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+            }
+        }
+        IpcRequest::Click { x, y } => match click_workspace(&state.status, x, y) {
+            Ok(()) => (
+                IpcResponse {
+                    ok: true,
+                    message: "workspace click sent".to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+            Err(error) => (
+                IpcResponse {
+                    ok: false,
+                    message: error.to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+        },
+        IpcRequest::Key { key } => match key_workspace(&state.status, key) {
+            Ok(()) => (
+                IpcResponse {
+                    ok: true,
+                    message: "workspace key sent".to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+            Err(error) => (
+                IpcResponse {
+                    ok: false,
+                    message: error.to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+        },
+        IpcRequest::TypeText { text } => match type_workspace_text(&state.status, text) {
+            Ok(()) => (
+                IpcResponse {
+                    ok: true,
+                    message: "workspace text typed".to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+            Err(error) => (
+                IpcResponse {
+                    ok: false,
+                    message: error.to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
                 },
                 false,
             ),
@@ -415,6 +603,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ok: true,
                 message: "workspace stopping".to_string(),
                 status: Some(state.status.clone()),
+                windows: None,
+                screenshot: None,
             },
             true,
         ),
@@ -450,6 +640,191 @@ fn spawn_app(state: &mut DaemonState, command: Vec<String>) -> Result<()> {
     state.status.apps.push(info.clone());
     state.apps.push(AppProcess { info, child });
     Ok(())
+}
+
+fn list_workspace_windows(status: &WorkspaceStatus) -> Result<Vec<WorkspaceWindow>> {
+    let output = workspace_command(status, "xdotool")
+        .args(["search", "--onlyvisible", "--name", "."])
+        .output()
+        .context("failed to run xdotool window search")?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let id = line.trim();
+            (!id.is_empty()).then(|| window_info(status, id))
+        })
+        .collect()
+}
+
+fn window_info(status: &WorkspaceStatus, id: &str) -> Result<WorkspaceWindow> {
+    let title = workspace_command(status, "xdotool")
+        .args(["getwindowname", id])
+        .output()
+        .with_context(|| format!("failed to read window name for {id}"))
+        .and_then(|output| output_text(output, "xdotool getwindowname"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let pid = workspace_command(status, "xdotool")
+        .args(["getwindowpid", id])
+        .output()
+        .ok()
+        .and_then(|output| output.status.success().then_some(output.stdout))
+        .and_then(|stdout| String::from_utf8(stdout).ok())
+        .and_then(|text| text.trim().parse::<u32>().ok());
+    let geometry_output = workspace_command(status, "xdotool")
+        .args(["getwindowgeometry", "--shell", id])
+        .output()
+        .with_context(|| format!("failed to read window geometry for {id}"))?;
+    let geometry_text = output_text(geometry_output, "xdotool getwindowgeometry")?;
+
+    Ok(WorkspaceWindow {
+        id: id.to_string(),
+        title,
+        pid,
+        geometry: parse_window_geometry(&geometry_text)?,
+    })
+}
+
+fn parse_window_geometry(text: &str) -> Result<WindowGeometry> {
+    let mut x = None;
+    let mut y = None;
+    let mut width = None;
+    let mut height = None;
+    let mut screen = None;
+
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key {
+            "X" => x = value.parse::<i32>().ok(),
+            "Y" => y = value.parse::<i32>().ok(),
+            "WIDTH" => width = value.parse::<u32>().ok(),
+            "HEIGHT" => height = value.parse::<u32>().ok(),
+            "SCREEN" => screen = value.parse::<i32>().ok(),
+            _ => {}
+        }
+    }
+
+    Ok(WindowGeometry {
+        x: x.context("window geometry missing X")?,
+        y: y.context("window geometry missing Y")?,
+        width: width.context("window geometry missing WIDTH")?,
+        height: height.context("window geometry missing HEIGHT")?,
+        screen,
+    })
+}
+
+fn capture_workspace_screenshot(
+    status: &WorkspaceStatus,
+    output_path: Option<PathBuf>,
+) -> Result<WorkspaceScreenshot> {
+    let path = resolve_screenshot_path(status, output_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    if command_path_check("import").ok {
+        let output = workspace_command(status, "import")
+            .args(["-window", "root"])
+            .arg(&path)
+            .output()
+            .context("failed to run import for workspace screenshot")?;
+        output_text(output, "import -window root")?;
+    } else if command_path_check("scrot").ok {
+        let output = workspace_command(status, "scrot")
+            .arg(&path)
+            .output()
+            .context("failed to run scrot for workspace screenshot")?;
+        output_text(output, "scrot")?;
+    } else {
+        bail!("missing screenshot command: install ImageMagick import or scrot");
+    }
+
+    Ok(WorkspaceScreenshot {
+        path,
+        width: status.width,
+        height: status.height,
+        format: "png".to_string(),
+    })
+}
+
+fn resolve_screenshot_path(status: &WorkspaceStatus, output_path: Option<PathBuf>) -> PathBuf {
+    match output_path {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => status.runtime_dir.join(path),
+        None => status
+            .runtime_dir
+            .join(format!("screenshot-{}.png", unix_now())),
+    }
+}
+
+fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32) -> Result<()> {
+    if x < 0 || y < 0 || x as u32 >= status.width || y as u32 >= status.height {
+        bail!(
+            "click coordinates {x},{y} are outside workspace bounds {}x{}",
+            status.width,
+            status.height
+        );
+    }
+    let output = workspace_command(status, "xdotool")
+        .args(["mousemove", "--sync", &x.to_string(), &y.to_string()])
+        .args(["click", "1"])
+        .output()
+        .context("failed to run xdotool click")?;
+    output_text(output, "xdotool click")?;
+    Ok(())
+}
+
+fn key_workspace(status: &WorkspaceStatus, key: String) -> Result<()> {
+    if key.trim().is_empty() {
+        bail!("key cannot be empty");
+    }
+    let output = workspace_command(status, "xdotool")
+        .args(["key", "--clearmodifiers", key.trim()])
+        .output()
+        .context("failed to run xdotool key")?;
+    output_text(output, "xdotool key")?;
+    Ok(())
+}
+
+fn type_workspace_text(status: &WorkspaceStatus, text: String) -> Result<()> {
+    if text.is_empty() {
+        bail!("text cannot be empty");
+    }
+    let output = workspace_command(status, "xdotool")
+        .args(["type", "--clearmodifiers", "--delay", "1", &text])
+        .output()
+        .context("failed to run xdotool type")?;
+    output_text(output, "xdotool type")?;
+    Ok(())
+}
+
+fn workspace_command(status: &WorkspaceStatus, program: &str) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env("DISPLAY", &status.display)
+        .env("XAUTHORITY", &status.xauthority_path)
+        .stdin(Stdio::null());
+    command
+}
+
+fn output_text(output: std::process::Output, description: &str) -> Result<String> {
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        bail!("{description} failed: {detail}");
+    }
 }
 
 fn refresh_apps(state: &mut DaemonState) {
