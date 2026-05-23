@@ -1,8 +1,10 @@
+mod profile;
 mod server;
 mod workspace;
 
 use anyhow::{bail, Context, Result};
-use std::path::PathBuf;
+use profile::WorkspaceProfile;
+use std::{fs, path::PathBuf};
 use workspace::{DaemonOptions, EnvVar, LaunchSpec, WorkspaceStartOptions};
 
 #[tokio::main(flavor = "current_thread")]
@@ -14,6 +16,10 @@ async fn main() -> Result<()> {
             print_json(&report)
         }
         Some("mcp") => server::serve_mcp().await,
+        Some("profile") => {
+            args.remove(0);
+            handle_profile(args)
+        }
         Some("workspace") => {
             args.remove(0);
             handle_workspace(args)
@@ -27,7 +33,40 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Some(command) => {
-            bail!("unknown command '{command}'. Expected one of: doctor, mcp, workspace, --help")
+            bail!(
+                "unknown command '{command}'. Expected one of: doctor, mcp, profile, workspace, --help"
+            )
+        }
+    }
+}
+
+fn handle_profile(args: Vec<String>) -> Result<()> {
+    let Some(command) = args.first().map(String::as_str) else {
+        bail!("missing profile command. Expected: path, list, get, put, delete");
+    };
+    match command {
+        "path" => {
+            parse_no_options(&args[1..], "profile path")?;
+            print_json(&profile::profile_path())
+        }
+        "list" => {
+            parse_no_options(&args[1..], "profile list")?;
+            print_json(&profile::list_profiles()?)
+        }
+        "get" => {
+            let id = parse_required_id_arg(&args[1..], "profile get requires an id")?;
+            print_json(&profile::get_profile(&id)?)
+        }
+        "put" => {
+            let profile = parse_profile_put_options(&args[1..])?;
+            print_json(&profile::put_profile(profile)?)
+        }
+        "delete" => {
+            let id = parse_required_id_arg(&args[1..], "profile delete requires an id")?;
+            print_json(&profile::delete_profile(&id)?)
+        }
+        unknown => {
+            bail!("unknown profile command '{unknown}'. Expected: path, list, get, put, delete")
         }
     }
 }
@@ -174,6 +213,32 @@ fn parse_no_options(args: &[String], command: &str) -> Result<()> {
         bail!("{command} does not accept option '{arg}'");
     }
     Ok(())
+}
+
+fn parse_required_id_arg(args: &[String], missing_message: &str) -> Result<String> {
+    if args.len() != 1 {
+        bail!("{missing_message}");
+    }
+    Ok(args[0].clone())
+}
+
+fn parse_profile_put_options(args: &[String]) -> Result<WorkspaceProfile> {
+    let mut json_path = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                json_path = Some(PathBuf::from(value_after(args, index, "--json")?));
+                index += 2;
+            }
+            flag => bail!("unknown profile put option '{flag}'. Expected: --json PATH"),
+        }
+    }
+    let json_path = json_path.context("profile put requires --json PATH")?;
+    let content = fs::read_to_string(&json_path)
+        .with_context(|| format!("failed to read {}", json_path.display()))?;
+    serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse profile JSON from {}", json_path.display()))
 }
 
 fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {

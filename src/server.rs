@@ -1,3 +1,4 @@
+use crate::profile::{self, WorkspaceProfile};
 use crate::workspace::{
     self, EnvVar, IpcResponse, LaunchSpec, WorkspaceStartOptions, WorkspaceStatus,
     DEFAULT_WORKSPACE_ID,
@@ -28,6 +29,127 @@ impl AgentWorkspaceLinux {
     )]
     fn workspace_doctor(&self) -> Json<workspace::DoctorReport> {
         Json(workspace::doctor_report())
+    }
+
+    #[tool(
+        name = "profile_path",
+        description = "Return the local JSON file path used to persist agent workspace profiles.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn profile_path(&self) -> Json<profile::ProfilePath> {
+        Json(profile::profile_path())
+    }
+
+    #[tool(
+        name = "profile_list",
+        description = "List saved agent workspace profiles.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn profile_list(&self) -> Json<profile::ProfileList> {
+        Json(
+            profile::list_profiles().unwrap_or_else(|error| profile::ProfileList {
+                path: std::path::PathBuf::new(),
+                profiles: vec![WorkspaceProfile {
+                    id: "error".to_string(),
+                    description: Some(error.to_string()),
+                    width: None,
+                    height: None,
+                    cwd: None,
+                    env: Vec::new(),
+                    mounts: Vec::new(),
+                    network: Default::default(),
+                    setup_commands: Vec::new(),
+                }],
+            }),
+        )
+    }
+
+    #[tool(
+        name = "profile_get",
+        description = "Get one saved agent workspace profile by id.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn profile_get(
+        &self,
+        Parameters(params): Parameters<ProfileIdParams>,
+    ) -> Json<ProfileGetResult> {
+        Json(match profile::get_profile(&params.id) {
+            Ok(profile) => ProfileGetResult {
+                ok: true,
+                message: "profile returned".to_string(),
+                profile: Some(profile),
+            },
+            Err(error) => ProfileGetResult {
+                ok: false,
+                message: error.to_string(),
+                profile: None,
+            },
+        })
+    }
+
+    #[tool(
+        name = "profile_put",
+        description = "Create or replace an agent workspace profile. Mounts, network, and setup commands are persisted as declared intent; only width, height, cwd, and env are currently enforceable.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn profile_put(
+        &self,
+        Parameters(params): Parameters<ProfilePutParams>,
+    ) -> Json<ProfileGetResult> {
+        Json(match profile::put_profile(params.profile) {
+            Ok(profile) => ProfileGetResult {
+                ok: true,
+                message: "profile saved".to_string(),
+                profile: Some(profile),
+            },
+            Err(error) => ProfileGetResult {
+                ok: false,
+                message: error.to_string(),
+                profile: None,
+            },
+        })
+    }
+
+    #[tool(
+        name = "profile_delete",
+        description = "Delete one saved agent workspace profile by id.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn profile_delete(
+        &self,
+        Parameters(params): Parameters<ProfileIdParams>,
+    ) -> Json<profile::ProfileDeleteResult> {
+        Json(
+            profile::delete_profile(&params.id).unwrap_or(profile::ProfileDeleteResult {
+                id: params.id,
+                deleted: false,
+            }),
+        )
     }
 
     #[tool(
@@ -376,7 +498,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles; profile mounts, network, and setup commands are persisted as declared intent until enforcement exists. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -387,6 +509,24 @@ pub async fn serve_mcp() -> Result<()> {
         .waiting()
         .await?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct ProfileIdParams {
+    id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct ProfilePutParams {
+    profile: WorkspaceProfile,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct ProfileGetResult {
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<WorkspaceProfile>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]

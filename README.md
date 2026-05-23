@@ -19,10 +19,20 @@ The first target is a small X11-backed workspace:
 The key invariant is that workspace input must only target the agent workspace,
 not the host desktop.
 
+Profiles are persisted in a local JSON file under the user's config directory.
+Profile mounts, network policy, and setup commands are stored as declared intent
+for the future Codex app/profile UI; this X11 runtime only enforces display size,
+launch cwd, and environment overrides today.
+
 ## Commands
 
 ```bash
 cargo run -- doctor
+cargo run -- profile path
+cargo run -- profile list
+cargo run -- profile put --json ./profile.json
+cargo run -- profile get project-dev
+cargo run -- profile delete project-dev
 cargo run -- workspace start
 cargo run -- workspace start --foreground
 cargo run -- workspace list
@@ -75,6 +85,7 @@ socket daemon:
 - `workspace status` and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
+`profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,
 `workspace_start`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_launch_app`, `workspace_list_windows`,
 `workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
