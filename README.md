@@ -21,7 +21,7 @@ not the host desktop.
 
 Profiles are persisted in a local JSON file under the user's config directory.
 Profile mounts, network policy, and setup commands are stored as declared intent
-for the future Codex app/profile UI; this X11 runtime only enforces display size,
+for the future Codex app/profile UI; this X11 runtime only applies display size,
 launch cwd, and environment overrides today.
 
 ## Commands
@@ -33,12 +33,12 @@ cargo run -- profile list
 cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
 cargo run -- profile delete project-dev
-cargo run -- workspace start
+cargo run -- workspace start --profile project-dev
 cargo run -- workspace start --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
-cargo run -- workspace launch -- xterm
+cargo run -- workspace launch --profile project-dev -- xterm
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
@@ -66,7 +66,8 @@ socket daemon:
 
 - `workspace start` chooses a free X11 display, creates an `xauth` file, starts
   `Xvfb`, starts a lightweight window manager, and binds a control socket under
-  `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`.
+  `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
+  profile width/height are applied unless explicit flags override them.
 - `workspace start --foreground` runs the same workspace daemon in the current
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
@@ -76,8 +77,9 @@ socket daemon:
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
-  environment overrides. Each launched app gets workspace-local stdout/stderr
-  log files reported in `workspace status`.
+  environment overrides. With `--profile`, profile cwd/env are applied unless
+  explicit flags override them. Each launched app gets workspace-local
+  stdout/stderr log files reported in `workspace status`.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   `workspace logs`, and `workspace kill-app` inspect or act through the same

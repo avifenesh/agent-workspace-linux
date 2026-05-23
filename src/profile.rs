@@ -1,4 +1,4 @@
-use crate::workspace::EnvVar;
+use crate::workspace::{EnvVar, LaunchSpec, WorkspaceStartOptions};
 use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -204,6 +204,56 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn apply_profile_to_start_options(
+    profile_id: &str,
+    options: &mut WorkspaceStartOptions,
+    width_explicit: bool,
+    height_explicit: bool,
+) -> Result<WorkspaceProfile> {
+    let profile = get_profile(profile_id)?;
+    if !width_explicit {
+        if let Some(width) = profile.width {
+            options.width = width;
+        }
+    }
+    if !height_explicit {
+        if let Some(height) = profile.height {
+            options.height = height;
+        }
+    }
+    Ok(profile)
+}
+
+pub fn apply_profile_to_launch_spec(
+    profile_id: &str,
+    spec: &mut LaunchSpec,
+    cwd_explicit: bool,
+) -> Result<WorkspaceProfile> {
+    let profile = get_profile(profile_id)?;
+    if !cwd_explicit {
+        if let Some(cwd) = profile.cwd.clone() {
+            spec.cwd = Some(cwd);
+        }
+    }
+    let explicit_env = std::mem::take(&mut spec.env);
+    spec.env = merged_env(profile.env.clone(), explicit_env);
+    Ok(profile)
+}
+
+fn merged_env(mut base: Vec<EnvVar>, overrides: Vec<EnvVar>) -> Vec<EnvVar> {
+    for override_var in overrides {
+        if let Some(existing) = base
+            .iter_mut()
+            .find(|base_var| base_var.name == override_var.name)
+        {
+            *existing = override_var;
+        } else {
+            base.push(override_var);
+        }
+    }
+    base
 }
 
 fn read_store(path: &Path) -> Result<ProfileStore> {

@@ -166,9 +166,9 @@ impl AgentWorkspaceLinux {
         &self,
         Parameters(params): Parameters<WorkspaceStartParams>,
     ) -> Json<IpcResponse> {
-        Json(result_response(workspace::start_workspace(
-            params.into_options(),
-        )))
+        Json(result_response(
+            params.into_options().and_then(workspace::start_workspace),
+        ))
     }
 
     #[tool(
@@ -274,10 +274,11 @@ impl AgentWorkspaceLinux {
             .id
             .clone()
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::launch_app_with_spec(
-            &id,
-            params.into_launch_spec(),
-        )))
+        Json(result_response(
+            params
+                .into_launch_spec()
+                .and_then(|spec| workspace::launch_app_with_spec(&id, spec)),
+        ))
     }
 
     #[tool(
@@ -534,14 +535,26 @@ struct WorkspaceStartParams {
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
 }
 
 impl WorkspaceStartParams {
-    fn into_options(self) -> WorkspaceStartOptions {
+    fn into_options(self) -> Result<WorkspaceStartOptions> {
+        let width_explicit = self.width.is_some();
+        let height_explicit = self.height.is_some();
         let mut options = WorkspaceStartOptions::default();
+        if let Some(profile_id) = self.profile {
+            profile::apply_profile_to_start_options(
+                &profile_id,
+                &mut options,
+                width_explicit,
+                height_explicit,
+            )?;
+        }
         if let Some(id) = self.id {
             options.id = id;
         }
@@ -551,7 +564,7 @@ impl WorkspaceStartParams {
         if let Some(height) = self.height {
             options.height = height;
         }
-        options
+        Ok(options)
     }
 }
 
@@ -571,6 +584,8 @@ struct WorkspaceCleanupParams {
 struct WorkspaceLaunchParams {
     #[serde(default)]
     id: Option<String>,
+    #[serde(default)]
+    profile: Option<String>,
     command: Vec<String>,
     #[serde(default)]
     cwd: Option<PathBuf>,
@@ -579,12 +594,17 @@ struct WorkspaceLaunchParams {
 }
 
 impl WorkspaceLaunchParams {
-    fn into_launch_spec(self) -> LaunchSpec {
-        LaunchSpec {
+    fn into_launch_spec(self) -> Result<LaunchSpec> {
+        let cwd_explicit = self.cwd.is_some();
+        let mut spec = LaunchSpec {
             command: self.command,
             cwd: self.cwd,
             env: self.env,
+        };
+        if let Some(profile_id) = self.profile {
+            profile::apply_profile_to_launch_spec(&profile_id, &mut spec, cwd_explicit)?;
         }
+        Ok(spec)
     }
 }
 
