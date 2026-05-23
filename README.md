@@ -35,6 +35,7 @@ cargo run -- workspace close-window 4194316
 cargo run -- workspace click 100 120
 cargo run -- workspace key Return
 cargo run -- workspace type "hello from the agent workspace"
+cargo run -- workspace logs --stream stdout app-12345
 cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop
 cargo run -- mcp
@@ -63,12 +64,13 @@ socket daemon:
   log files reported in `workspace status`.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
-  and `workspace kill-app` inspect or act through the same daemon, scoped to the
-  workspace display.
+  `workspace logs`, and `workspace kill-app` inspect or act through the same
+  daemon, scoped to the workspace display.
 - `workspace status` and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_start`, `workspace_status`, `workspace_launch_app`,
 `workspace_list_windows`, `workspace_screenshot`, `workspace_focus_window`,
 `workspace_close_window`, `workspace_click`, `workspace_key`,
-`workspace_type_text`, `workspace_kill_app`, and `workspace_stop`.
+`workspace_type_text`, `workspace_read_app_log`, `workspace_kill_app`, and
+`workspace_stop`.

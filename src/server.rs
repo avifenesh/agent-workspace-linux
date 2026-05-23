@@ -73,6 +73,7 @@ impl AgentWorkspaceLinux {
                 status: Some(status),
                 windows: None,
                 screenshot: None,
+                app_log: None,
             },
             Err(error) => error_response(error.to_string(), None),
         })
@@ -252,6 +253,31 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_read_app_log",
+        description = "Read stdout or stderr captured from an app launched inside an isolated agent workspace.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_read_app_log(
+        &self,
+        Parameters(params): Parameters<WorkspaceReadAppLogParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::read_app_log(
+            &id,
+            params.app_id,
+            params.stream.unwrap_or_else(|| "stdout".to_string()),
+            params.tail_bytes,
+        )))
+    }
+
+    #[tool(
         name = "workspace_kill_app",
         description = "Terminate an app launched inside an isolated agent workspace by app id or pid.",
         annotations(
@@ -295,7 +321,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot and workspace_list_windows to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -399,6 +425,17 @@ struct WorkspaceTypeTextParams {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceReadAppLogParams {
+    #[serde(default)]
+    id: Option<String>,
+    app_id: String,
+    #[serde(default)]
+    stream: Option<String>,
+    #[serde(default)]
+    tail_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 struct WorkspaceKillAppParams {
     #[serde(default)]
     id: Option<String>,
@@ -419,5 +456,6 @@ fn error_response(message: String, status: Option<WorkspaceStatus>) -> IpcRespon
         status,
         windows: None,
         screenshot: None,
+        app_log: None,
     }
 }

@@ -142,6 +142,16 @@ pub struct WorkspaceScreenshot {
     pub format: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceAppLog {
+    pub app_id: String,
+    pub stream: String,
+    pub path: PathBuf,
+    pub content: String,
+    pub bytes_read: u64,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcRequest {
@@ -173,6 +183,11 @@ pub enum IpcRequest {
     TypeText {
         text: String,
     },
+    ReadAppLog {
+        app_id: String,
+        stream: String,
+        tail_bytes: Option<u64>,
+    },
     KillApp {
         app_id: String,
     },
@@ -188,6 +203,8 @@ pub struct IpcResponse {
     pub windows: Option<Vec<WorkspaceWindow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<WorkspaceScreenshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_log: Option<WorkspaceAppLog>,
 }
 
 pub fn default_workspace_id() -> String {
@@ -256,6 +273,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             status: Some(status),
             windows: None,
             screenshot: None,
+            app_log: None,
         }),
         WorkspaceStartPlan::Start(daemon_options) => {
             spawn_detached_daemon(&daemon_options)?;
@@ -364,6 +382,27 @@ pub fn type_text(id: &str, text: String) -> Result<IpcResponse> {
         bail!("text cannot be empty");
     }
     request(&workspace_socket_path(&id), IpcRequest::TypeText { text })
+}
+
+pub fn read_app_log(
+    id: &str,
+    app_id: String,
+    stream: String,
+    tail_bytes: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    if app_id.trim().is_empty() {
+        bail!("app id cannot be empty");
+    }
+    validate_log_stream(&stream)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ReadAppLog {
+            app_id,
+            stream,
+            tail_bytes,
+        },
+    )
 }
 
 pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
@@ -551,6 +590,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 status: Some(state.status.clone()),
                 windows: None,
                 screenshot: None,
+                app_log: None,
             },
             false,
         ),
@@ -563,6 +603,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -573,6 +614,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -586,6 +628,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: Some(windows),
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -596,6 +639,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -609,6 +653,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: Some(screenshot),
+                        app_log: None,
                     },
                     false,
                 ),
@@ -619,6 +664,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -633,6 +679,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -643,6 +690,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -657,6 +705,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -667,6 +716,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         status: Some(state.status.clone()),
                         windows: None,
                         screenshot: None,
+                        app_log: None,
                     },
                     false,
                 ),
@@ -680,6 +730,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -690,6 +741,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -702,6 +754,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -712,6 +765,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -724,6 +778,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -734,6 +789,35 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
+                },
+                false,
+            ),
+        },
+        IpcRequest::ReadAppLog {
+            app_id,
+            stream,
+            tail_bytes,
+        } => match read_workspace_app_log(state, &app_id, &stream, tail_bytes) {
+            Ok(app_log) => (
+                IpcResponse {
+                    ok: true,
+                    message: "workspace app log read".to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                    app_log: Some(app_log),
+                },
+                false,
+            ),
+            Err(error) => (
+                IpcResponse {
+                    ok: false,
+                    message: error.to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -746,6 +830,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -756,6 +841,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
+                    app_log: None,
                 },
                 false,
             ),
@@ -767,6 +853,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 status: Some(state.status.clone()),
                 windows: None,
                 screenshot: None,
+                app_log: None,
             },
             true,
         ),
@@ -1037,6 +1124,49 @@ fn type_workspace_text(status: &WorkspaceStatus, text: String) -> Result<()> {
         .context("failed to run xdotool type")?;
     output_text(output, "xdotool type")?;
     Ok(())
+}
+
+fn read_workspace_app_log(
+    state: &mut DaemonState,
+    app_id: &str,
+    stream: &str,
+    tail_bytes: Option<u64>,
+) -> Result<WorkspaceAppLog> {
+    refresh_apps(state);
+    let stream = validate_log_stream(stream)?;
+    let app = state
+        .status
+        .apps
+        .iter()
+        .find(|app| matches_app_id(app, app_id))
+        .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
+    let path = match stream.as_str() {
+        "stdout" => app.stdout_path.as_ref(),
+        "stderr" => app.stderr_path.as_ref(),
+        _ => None,
+    }
+    .ok_or_else(|| anyhow!("workspace app {} has no {stream} log path", app.id))?;
+    let (content, bytes_read, truncated) = read_log_content(path, tail_bytes)?;
+
+    Ok(WorkspaceAppLog {
+        app_id: app.id.clone(),
+        stream,
+        path: path.clone(),
+        content,
+        bytes_read,
+        truncated,
+    })
+}
+
+fn read_log_content(path: &Path, tail_bytes: Option<u64>) -> Result<(String, u64, bool)> {
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let total = bytes.len();
+    let limit = tail_bytes
+        .map(|value| value.min(usize::MAX as u64) as usize)
+        .unwrap_or(total);
+    let start = total.saturating_sub(limit);
+    let content = String::from_utf8_lossy(&bytes[start..]).to_string();
+    Ok((content, (total - start) as u64, start > 0))
 }
 
 fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
@@ -1320,6 +1450,14 @@ fn validate_env_var(env_var: &EnvVar) -> Result<()> {
         bail!("environment variable cannot contain NUL bytes");
     }
     Ok(())
+}
+
+fn validate_log_stream(stream: &str) -> Result<String> {
+    match stream.trim() {
+        "stdout" => Ok("stdout".to_string()),
+        "stderr" => Ok("stderr".to_string()),
+        _ => bail!("log stream must be 'stdout' or 'stderr'"),
+    }
 }
 
 fn first_available_command(commands: &[&str]) -> Check {
