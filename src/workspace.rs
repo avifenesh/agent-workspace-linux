@@ -126,9 +126,12 @@ pub enum IpcRequest {
     LaunchApp { command: Vec<String> },
     ListWindows,
     Screenshot { output_path: Option<PathBuf> },
+    FocusWindow { window_id: String },
+    CloseWindow { window_id: String },
     Click { x: i32, y: i32 },
     Key { key: String },
     TypeText { text: String },
+    KillApp { app_id: String },
     Stop,
 }
 
@@ -263,6 +266,24 @@ pub fn screenshot(id: &str, output_path: Option<PathBuf>) -> Result<IpcResponse>
     )
 }
 
+pub fn focus_window(id: &str, window_id: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let window_id = sanitize_x11_id(&window_id, "window id")?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::FocusWindow { window_id },
+    )
+}
+
+pub fn close_window(id: &str, window_id: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let window_id = sanitize_x11_id(&window_id, "window id")?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::CloseWindow { window_id },
+    )
+}
+
 pub fn click(id: &str, x: i32, y: i32) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::Click { x, y })
@@ -282,6 +303,14 @@ pub fn type_text(id: &str, text: String) -> Result<IpcResponse> {
         bail!("text cannot be empty");
     }
     request(&workspace_socket_path(&id), IpcRequest::TypeText { text })
+}
+
+pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    if app_id.trim().is_empty() {
+        bail!("app id cannot be empty");
+    }
+    request(&workspace_socket_path(&id), IpcRequest::KillApp { app_id })
 }
 
 pub fn stop_workspace(id: &str) -> Result<IpcResponse> {
@@ -532,6 +561,54 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ),
             }
         }
+        IpcRequest::FocusWindow { window_id } => {
+            match focus_workspace_window(&state.status, &window_id) {
+                Ok(()) => (
+                    IpcResponse {
+                        ok: true,
+                        message: "workspace window focused".to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+                Err(error) => (
+                    IpcResponse {
+                        ok: false,
+                        message: error.to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+            }
+        }
+        IpcRequest::CloseWindow { window_id } => {
+            match close_workspace_window(&state.status, &window_id) {
+                Ok(()) => (
+                    IpcResponse {
+                        ok: true,
+                        message: "workspace window close requested".to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+                Err(error) => (
+                    IpcResponse {
+                        ok: false,
+                        message: error.to_string(),
+                        status: Some(state.status.clone()),
+                        windows: None,
+                        screenshot: None,
+                    },
+                    false,
+                ),
+            }
+        }
         IpcRequest::Click { x, y } => match click_workspace(&state.status, x, y) {
             Ok(()) => (
                 IpcResponse {
@@ -581,6 +658,28 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 IpcResponse {
                     ok: true,
                     message: "workspace text typed".to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+            Err(error) => (
+                IpcResponse {
+                    ok: false,
+                    message: error.to_string(),
+                    status: Some(state.status.clone()),
+                    windows: None,
+                    screenshot: None,
+                },
+                false,
+            ),
+        },
+        IpcRequest::KillApp { app_id } => match kill_workspace_app(state, &app_id) {
+            Ok(message) => (
+                IpcResponse {
+                    ok: true,
+                    message,
                     status: Some(state.status.clone()),
                     windows: None,
                     screenshot: None,
@@ -766,6 +865,26 @@ fn resolve_screenshot_path(status: &WorkspaceStatus, output_path: Option<PathBuf
     }
 }
 
+fn focus_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<()> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    let output = workspace_command(status, "xdotool")
+        .args(["windowactivate", "--sync", &window_id])
+        .output()
+        .context("failed to run xdotool windowactivate")?;
+    output_text(output, "xdotool windowactivate")?;
+    Ok(())
+}
+
+fn close_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<()> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    let output = workspace_command(status, "xdotool")
+        .args(["windowclose", &window_id])
+        .output()
+        .context("failed to run xdotool windowclose")?;
+    output_text(output, "xdotool windowclose")?;
+    Ok(())
+}
+
 fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32) -> Result<()> {
     if x < 0 || y < 0 || x as u32 >= status.width || y as u32 >= status.height {
         bail!(
@@ -805,6 +924,51 @@ fn type_workspace_text(status: &WorkspaceStatus, text: String) -> Result<()> {
         .context("failed to run xdotool type")?;
     output_text(output, "xdotool type")?;
     Ok(())
+}
+
+fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
+    let app_id = app_id.trim();
+    if app_id.is_empty() {
+        bail!("app id cannot be empty");
+    }
+
+    let message = {
+        let app = state
+            .apps
+            .iter_mut()
+            .find(|app| matches_app_id(&app.info, app_id))
+            .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
+
+        if !app.info.running {
+            format!("workspace app {} is already stopped", app.info.id)
+        } else if let Some(status) = app
+            .child
+            .try_wait()
+            .context("failed to check app process status")?
+        {
+            app.info.running = false;
+            app.info.exit_status = Some(status.to_string());
+            format!("workspace app {} is already stopped", app.info.id)
+        } else {
+            app.child
+                .kill()
+                .with_context(|| format!("failed to kill workspace app {}", app.info.id))?;
+            let status = app
+                .child
+                .wait()
+                .with_context(|| format!("failed to wait for workspace app {}", app.info.id))?;
+            app.info.running = false;
+            app.info.exit_status = Some(status.to_string());
+            format!("workspace app {} killed", app.info.id)
+        }
+    };
+
+    state.status.apps = state.apps.iter().map(|app| app.info.clone()).collect();
+    Ok(message)
+}
+
+fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
+    app.id == app_id || app.pid.to_string() == app_id
 }
 
 fn workspace_command(status: &WorkspaceStatus, program: &str) -> Command {
@@ -1017,6 +1181,17 @@ fn sanitize_workspace_id(id: &str) -> Result<String> {
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
     {
         bail!("workspace id may only contain ASCII letters, numbers, '-' and '_'");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        bail!("{label} cannot be empty");
+    }
+    if !trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        bail!("{label} must be a decimal X11 id");
     }
     Ok(trimmed.to_string())
 }

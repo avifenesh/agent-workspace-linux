@@ -141,6 +141,52 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_focus_window",
+        description = "Focus a visible window inside an isolated agent workspace by X11 window id.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_focus_window(
+        &self,
+        Parameters(params): Parameters<WorkspaceWindowTargetParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::focus_window(
+            &id,
+            params.window_id,
+        )))
+    }
+
+    #[tool(
+        name = "workspace_close_window",
+        description = "Request that a window inside an isolated agent workspace close by X11 window id.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_close_window(
+        &self,
+        Parameters(params): Parameters<WorkspaceWindowTargetParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::close_window(
+            &id,
+            params.window_id,
+        )))
+    }
+
+    #[tool(
         name = "workspace_click",
         description = "Click workspace-local coordinates inside an isolated agent workspace.",
         annotations(
@@ -201,6 +247,26 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_kill_app",
+        description = "Terminate an app launched inside an isolated agent workspace by app id or pid.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_kill_app(
+        &self,
+        Parameters(params): Parameters<WorkspaceKillAppParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::kill_app(&id, params.app_id)))
+    }
+
+    #[tool(
         name = "workspace_stop",
         description = "Stop an isolated agent workspace and terminate apps launched inside it.",
         annotations(
@@ -224,7 +290,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot and workspace_list_windows to inspect the workspace before acting. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot and workspace_list_windows to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -285,6 +351,13 @@ struct WorkspaceScreenshotParams {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceWindowTargetParams {
+    #[serde(default)]
+    id: Option<String>,
+    window_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 struct WorkspaceClickParams {
     #[serde(default)]
     id: Option<String>,
@@ -304,6 +377,13 @@ struct WorkspaceTypeTextParams {
     #[serde(default)]
     id: Option<String>,
     text: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceKillAppParams {
+    #[serde(default)]
+    id: Option<String>,
+    app_id: String,
 }
 
 fn result_response(result: Result<IpcResponse>) -> IpcResponse {

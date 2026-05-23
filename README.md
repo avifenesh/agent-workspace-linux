@@ -29,9 +29,12 @@ cargo run -- workspace status
 cargo run -- workspace launch -- xterm
 cargo run -- workspace windows
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
+cargo run -- workspace focus-window 4194316
+cargo run -- workspace close-window 4194316
 cargo run -- workspace click 100 120
 cargo run -- workspace key Return
 cargo run -- workspace type "hello from the agent workspace"
+cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop
 cargo run -- mcp
 ```
@@ -55,12 +58,14 @@ socket daemon:
   child processes.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`.
-- `workspace windows`, `workspace screenshot`, `workspace click`, `workspace key`,
-  and `workspace type` inspect or act through the same daemon, scoped to the
+- `workspace windows`, `workspace screenshot`, `workspace focus-window`,
+  `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
+  and `workspace kill-app` inspect or act through the same daemon, scoped to the
   workspace display.
 - `workspace status` and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_start`, `workspace_status`, `workspace_launch_app`,
-`workspace_list_windows`, `workspace_screenshot`, `workspace_click`,
-`workspace_key`, `workspace_type_text`, and `workspace_stop`.
+`workspace_list_windows`, `workspace_screenshot`, `workspace_focus_window`,
+`workspace_close_window`, `workspace_click`, `workspace_key`,
+`workspace_type_text`, `workspace_kill_app`, and `workspace_stop`.

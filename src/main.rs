@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, status, launch, windows, screenshot, click, key, type, stop"
+            "missing workspace command. Expected: start, status, launch, windows, screenshot, focus-window, close-window, click, key, type, kill-app, stop"
         );
     };
     match command {
@@ -63,6 +63,16 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             let (id, output_path) = parse_screenshot_options(&args[1..])?;
             print_json(&workspace::screenshot(&id, output_path)?)
         }
+        "focus-window" => {
+            let (id, window_id) =
+                parse_one_arg_command(&args[1..], "workspace focus-window requires a window id")?;
+            print_json(&workspace::focus_window(&id, window_id)?)
+        }
+        "close-window" => {
+            let (id, window_id) =
+                parse_one_arg_command(&args[1..], "workspace close-window requires a window id")?;
+            print_json(&workspace::close_window(&id, window_id)?)
+        }
         "click" => {
             let (id, x, y) = parse_click_options(&args[1..])?;
             print_json(&workspace::click(&id, x, y)?)
@@ -75,13 +85,18 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             let (id, text) = parse_text_command(&args[1..])?;
             print_json(&workspace::type_text(&id, text)?)
         }
+        "kill-app" => {
+            let (id, app_id) =
+                parse_one_arg_command(&args[1..], "workspace kill-app requires an app id or pid")?;
+            print_json(&workspace::kill_app(&id, app_id)?)
+        }
         "stop" => {
             let id = parse_id_option(&args[1..])?;
             print_json(&workspace::stop_workspace(&id)?)
         }
         unknown => {
             bail!(
-                "unknown workspace command '{unknown}'. Expected: start, status, launch, windows, screenshot, click, key, type, stop"
+                "unknown workspace command '{unknown}'. Expected: start, status, launch, windows, screenshot, focus-window, close-window, click, key, type, kill-app, stop"
             )
         }
     }
@@ -311,6 +326,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux workspace start [--foreground] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }
