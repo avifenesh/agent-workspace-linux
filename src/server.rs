@@ -456,6 +456,41 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_run_profile_setup",
+        description = "Launch setup commands declared by a saved profile inside an already running isolated workspace. Commands are launched as workspace apps and their stdout/stderr logs are available through workspace_read_app_log.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_run_profile_setup(
+        &self,
+        Parameters(params): Parameters<WorkspaceSetupParams>,
+    ) -> Json<ProfileSetupResult> {
+        Json(
+            match profile::launch_profile_setup(
+                &params
+                    .id
+                    .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
+                &params.profile,
+            ) {
+                Ok(run) => ProfileSetupResult {
+                    ok: true,
+                    message: "profile setup launched".to_string(),
+                    run: Some(run),
+                },
+                Err(error) => ProfileSetupResult {
+                    ok: false,
+                    message: error.to_string(),
+                    run: None,
+                },
+            },
+        )
+    }
+
+    #[tool(
         name = "workspace_kill_app",
         description = "Terminate an app launched inside an isolated agent workspace by app id or pid.",
         annotations(
@@ -499,7 +534,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles; profile mounts, network, and setup commands are persisted as declared intent until enforcement exists. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles; profile mounts and network are persisted as declared intent until enforcement exists. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -528,6 +563,14 @@ struct ProfileGetResult {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     profile: Option<WorkspaceProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct ProfileSetupResult {
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<profile::ProfileSetupRun>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -654,6 +697,13 @@ struct WorkspaceReadAppLogParams {
     stream: Option<String>,
     #[serde(default)]
     tail_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceSetupParams {
+    #[serde(default)]
+    id: Option<String>,
+    profile: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

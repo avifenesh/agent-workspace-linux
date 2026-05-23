@@ -1,4 +1,4 @@
-use crate::workspace::{EnvVar, LaunchSpec, WorkspaceStartOptions};
+use crate::workspace::{self, EnvVar, IpcResponse, LaunchSpec, WorkspaceStartOptions};
 use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -110,6 +110,13 @@ pub struct ProfilePath {
 pub struct ProfileDeleteResult {
     pub id: String,
     pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileSetupRun {
+    pub workspace_id: String,
+    pub profile_id: String,
+    pub launched: Vec<IpcResponse>,
 }
 
 pub fn profiles_path() -> PathBuf {
@@ -240,6 +247,37 @@ pub fn apply_profile_to_launch_spec(
     let explicit_env = std::mem::take(&mut spec.env);
     spec.env = merged_env(profile.env.clone(), explicit_env);
     Ok(profile)
+}
+
+pub fn setup_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
+    let profile = get_profile(profile_id)?;
+    profile
+        .setup_commands
+        .iter()
+        .map(|setup| {
+            if setup.command.is_empty() {
+                bail!("profile setup command cannot be empty");
+            }
+            Ok(LaunchSpec {
+                command: setup.command.clone(),
+                cwd: setup.cwd.clone().or_else(|| profile.cwd.clone()),
+                env: merged_env(profile.env.clone(), setup.env.clone()),
+            })
+        })
+        .collect()
+}
+
+pub fn launch_profile_setup(workspace_id: &str, profile_id: &str) -> Result<ProfileSetupRun> {
+    let specs = setup_launch_specs(profile_id)?;
+    let mut launched = Vec::new();
+    for spec in specs {
+        launched.push(workspace::launch_app_with_spec(workspace_id, spec)?);
+    }
+    Ok(ProfileSetupRun {
+        workspace_id: workspace_id.to_string(),
+        profile_id: profile_id.to_string(),
+        launched,
+    })
 }
 
 fn merged_env(mut base: Vec<EnvVar>, overrides: Vec<EnvVar>) -> Vec<EnvVar> {
