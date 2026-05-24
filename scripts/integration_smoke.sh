@@ -13,6 +13,7 @@ need() {
 
 need jq
 need python3
+need xmessage
 
 cargo build --manifest-path "$ROOT_DIR/Cargo.toml" >/dev/null
 
@@ -208,6 +209,32 @@ assert_json '.succeeded == true and (.stdout.content | contains("ro-blocked")) a
 grep -q '^rw-ok$' "$MOUNT_RW_HOST/out.txt"
 test ! -e "$MOUNT_RO_HOST/nope.txt"
 run_awl workspace stop --id "$MOUNT_ID" > /dev/null
+
+echo "== window, screenshot, input, clipboard, and artifacts =="
+GUI_ID="gui-smoke-$$"
+WORKSPACE_IDS+=("$GUI_ID")
+run_awl workspace start --ack-hidden-workspace --id "$GUI_ID" --purpose "GUI smoke" > "$SMOKE_DIR/gui-start.json"
+run_awl workspace launch --id "$GUI_ID" --name message --wait-window --screenshot-window --window-timeout-ms 10000 -- xmessage -buttons OK:0 -default OK "Agent workspace smoke" > "$SMOKE_DIR/gui-launch.json"
+assert_json '.ok == true and (.screenshot.bytes > 0) and ((.windows | length) > 0) and .apps[0].running == true' "$SMOKE_DIR/gui-launch.json"
+GUI_APP_ID="$(jq -r '.apps[0].id' "$SMOKE_DIR/gui-launch.json")"
+run_awl workspace windows --id "$GUI_ID" --class xmessage > "$SMOKE_DIR/gui-windows.json"
+assert_json '(.windows | length) > 0 and .windows[0].title == "xmessage"' "$SMOKE_DIR/gui-windows.json"
+run_awl workspace screenshot --id "$GUI_ID" --output "$SMOKE_DIR/gui-root.png" > "$SMOKE_DIR/gui-screenshot.json"
+assert_json '.screenshot.bytes > 0 and .screenshot.path == $path' "$SMOKE_DIR/gui-screenshot.json" --arg path "$SMOKE_DIR/gui-root.png"
+test -s "$SMOKE_DIR/gui-root.png"
+run_awl workspace clipboard-set --id "$GUI_ID" "clipboard-smoke" > "$SMOKE_DIR/gui-clipboard-set.json"
+assert_json '.clipboard.bytes == 15 and .clipboard.content == null' "$SMOKE_DIR/gui-clipboard-set.json"
+run_awl workspace clipboard-get --id "$GUI_ID" > "$SMOKE_DIR/gui-clipboard-get.json"
+assert_json '.clipboard.content == "clipboard-smoke"' "$SMOKE_DIR/gui-clipboard-get.json"
+run_awl workspace observe --id "$GUI_ID" --screenshot --events --events-tail 20 > "$SMOKE_DIR/gui-observe.json"
+assert_json '.screenshot.bytes > 0 and (.events[] | select(.kind == "app_launch" and .detail.app_id == $app_id))' "$SMOKE_DIR/gui-observe.json" --arg app_id "$GUI_APP_ID"
+run_awl workspace key-window --id "$GUI_ID" --title xmessage Return > "$SMOKE_DIR/gui-key.json"
+assert_json '.ok == true and .windows[0].title == "xmessage"' "$SMOKE_DIR/gui-key.json"
+run_awl workspace wait-app --id "$GUI_ID" --timeout-ms 5000 "$GUI_APP_ID" > "$SMOKE_DIR/gui-wait.json"
+assert_json '.ok == true and .apps[0].running == false and .apps[0].exit_code == 0' "$SMOKE_DIR/gui-wait.json"
+run_awl workspace stop --id "$GUI_ID" > /dev/null
+run_awl workspace artifacts --id "$GUI_ID" --existing > "$SMOKE_DIR/gui-artifacts.json"
+assert_json '(.files[] | select(.kind == "manifest" and .exists == true)) and (.files[] | select(.kind == "event_log" and .exists == true and .bytes > 0)) and (.files[] | select(.kind == "app_log" and .exists == true)) and (.files[] | select(.kind == "screenshot" and .exists == true and .bytes > 0))' "$SMOKE_DIR/gui-artifacts.json"
 
 echo "== self-stop from workspace app =="
 SELF_STOP_ID="self-stop-smoke-$$"
