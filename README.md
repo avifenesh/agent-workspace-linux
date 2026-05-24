@@ -260,9 +260,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   `--since SEQUENCE` returns events after a previously seen sequence, and
   `--tail N` can cap the returned window. App launches and exits are recorded
-  with structured metadata, including launch log paths and app lifecycle
-  timing. Typed text is logged as metadata such as character count, not raw
-  text.
+  with structured metadata, including launch log paths, wait results, and app
+  lifecycle timing. Typed text is logged as metadata such as character count,
+  not raw text.
 - `workspace setup --profile` launches the profile's setup commands as ordinary
   workspace apps; with `--wait`, commands are supervised in sequence and the
   result reports whether they completed and exited successfully. Their status

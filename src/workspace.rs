@@ -4129,6 +4129,13 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "stopped": stopped,
                         "kill_on_timeout": kill_on_timeout,
                         "killed_on_timeout": killed_on_timeout,
+                        "app_id": &app.id,
+                        "name": app.name.as_deref(),
+                        "running": app.running,
+                        "exit_code": app.exit_code,
+                        "exit_signal": app.exit_signal,
+                        "stopped_at_unix": app.stopped_at_unix,
+                        "runtime_seconds": app.runtime_seconds,
                     }),
                 )?;
                 let message = if killed_on_timeout {
