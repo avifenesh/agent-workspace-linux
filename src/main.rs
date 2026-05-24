@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
 fn handle_profile(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
-        bail!("missing profile command. Expected: path, list, get, check, template, put, delete");
+        bail!("missing profile command. Expected: path, list, get, check, template, put, export, delete");
     };
     match command {
         "path" => {
@@ -73,12 +73,16 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             let (profile, replace, dry_run) = parse_profile_put_options(&args[1..])?;
             print_json(&profile::put_profile(profile, replace, dry_run)?)
         }
+        "export" => {
+            let (id, output_path, replace) = parse_profile_export_options(&args[1..])?;
+            print_json(&profile::export_profile(&id, output_path, replace)?)
+        }
         "delete" => {
             let (id, dry_run) = parse_profile_delete_options(&args[1..])?;
             print_json(&profile::delete_profile(&id, dry_run)?)
         }
         unknown => {
-            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, delete")
+            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, export, delete")
         }
     }
 }
@@ -1029,6 +1033,47 @@ fn parse_profile_template_options(
         }
     }
     Ok((kind, id, host_path))
+}
+
+fn parse_profile_export_options(args: &[String]) -> Result<(String, Option<PathBuf>, bool)> {
+    let mut id = None;
+    let mut output_path = None;
+    let mut replace = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--output" => {
+                output_path = Some(PathBuf::from(value_after(args, index, "--output")?));
+                index += 2;
+            }
+            "--replace" => {
+                replace = true;
+                index += 1;
+            }
+            "--" => {
+                if id.is_some() || index + 2 != args.len() {
+                    bail!("profile export requires exactly one id");
+                }
+                id = Some(args[index + 1].clone());
+                break;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown profile export option '{value}'")
+            }
+            value => {
+                if id.is_some() {
+                    bail!("profile export accepts only one id");
+                }
+                id = Some(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    Ok((
+        id.context("profile export requires an id")?,
+        output_path,
+        replace,
+    ))
 }
 
 fn parse_profile_delete_options(args: &[String]) -> Result<(String, bool)> {
@@ -3237,8 +3282,9 @@ Usage:
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
   agent-workspace-linux mcp
-  agent-workspace-linux profile path|list|get|check|template|put|delete
+  agent-workspace-linux profile path|list|get|check|template|put|export|delete
   agent-workspace-linux profile put --json PATH [--replace] [--dry-run]
+  agent-workspace-linux profile export ID [--output PATH] [--replace]
   agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]

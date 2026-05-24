@@ -109,14 +109,24 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 "Returns currently running apps without stopping the workspace.",
             ),
         ],
-        explicit_overrides: vec![rule(
-            "profile-replace",
-            "explicit_override",
-            &["profile put", "profile_put"],
-            "Saving a profile with an existing id is rejected.",
-            "--replace or replace=true",
-            "Allows intentional overwrite of a saved environment profile.",
-        )],
+        explicit_overrides: vec![
+            rule(
+                "profile-replace",
+                "explicit_override",
+                &["profile put", "profile_put"],
+                "Saving a profile with an existing id is rejected.",
+                "--replace or replace=true",
+                "Allows intentional overwrite of a saved environment profile.",
+            ),
+            rule(
+                "profile-export-replace",
+                "explicit_override",
+                &["profile export", "profile_export"],
+                "Exporting to an existing output file is rejected.",
+                "--replace or replace=true",
+                "Allows intentional overwrite of an existing exported profile JSON file.",
+            ),
+        ],
         timeout_terminations: vec![
             rule(
                 "run-app-kill-on-timeout",

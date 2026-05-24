@@ -103,6 +103,17 @@ pub struct ProfilePutResult {
     pub existing_profile: Option<WorkspaceProfile>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileExportResult {
+    pub id: String,
+    pub wrote: bool,
+    pub would_write: bool,
+    pub replace: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<PathBuf>,
+    pub profile: WorkspaceProfile,
+}
+
 impl ProfilePutResult {
     pub fn error(profile: WorkspaceProfile, replace: bool, dry_run: bool, message: String) -> Self {
         Self {
@@ -227,6 +238,35 @@ pub fn get_profile(id: &str) -> Result<WorkspaceProfile> {
         .into_iter()
         .find(|profile| profile.id == id)
         .ok_or_else(|| anyhow::anyhow!("profile {id:?} was not found"))
+}
+
+pub fn export_profile(
+    id: &str,
+    output_path: Option<PathBuf>,
+    replace: bool,
+) -> Result<ProfileExportResult> {
+    let profile = get_profile(id)?;
+    let would_write = output_path.is_some();
+    if let Some(path) = &output_path {
+        if path.exists() && !replace {
+            bail!(
+                "profile export output {} already exists; pass --replace or set replace=true to overwrite it",
+                path.display()
+            );
+        }
+        let content = serde_json::to_string_pretty(&profile)
+            .context("failed to serialize profile for export")?;
+        fs::write(path, format!("{content}\n"))
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(ProfileExportResult {
+        id: profile.id.clone(),
+        wrote: output_path.is_some(),
+        would_write,
+        replace,
+        output_path,
+        profile,
+    })
 }
 
 pub fn template_profile(

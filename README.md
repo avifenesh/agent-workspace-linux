@@ -45,6 +45,7 @@ cargo run -- profile put --json ./profile.json --dry-run --replace
 cargo run -- profile put --json ./profile.json --replace
 cargo run -- profile get project-dev
 cargo run -- profile check project-dev
+cargo run -- profile export project-dev --output ./profile-export.json
 cargo run -- profile delete --dry-run project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-unenforced-policy --profile project-dev
@@ -157,6 +158,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   profile and, when the id already exists, the existing saved profile.
   `profile put --json` creates a saved profile by id. If that id already exists,
   it fails unless `--replace` is passed explicitly.
+- `profile export ID --output PATH` writes a saved profile as pretty JSON for
+  file-picker/import flows. Existing output files are not overwritten unless
+  `--replace` is passed explicitly.
 - `profile delete --dry-run` returns the saved profile that would be removed
   without deleting it, so a UI can ask for confirmation with the full profile
   content visible.
@@ -340,7 +344,7 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`, `profile_check`,
-`profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
+`profile_template`, `profile_put`, `profile_export`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_manifest`, `workspace_artifacts`,
 `workspace_ipc_info`, `workspace_env`, `workspace_launch_app`, `workspace_run_app`,
@@ -368,6 +372,8 @@ approval UI flows.
 `profile_put` accepts `dry_run=true` to preview whether a profile would be
 created, replaced, or rejected. It rejects existing profile ids by default; set
 `replace=true` only when intentionally overwriting a saved environment profile.
+`profile_export` returns a saved profile and can write it to `output_path`;
+existing files require `replace=true` before they are overwritten.
 `profile_delete` accepts `dry_run=true` to return the profile that would be
 removed without deleting it.
 `workspace_close_window` and `workspace_close_matching_window` accept
