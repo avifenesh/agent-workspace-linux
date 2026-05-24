@@ -156,11 +156,11 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable. Running and stale runtime directories can
   include a durable manifest with the hidden-workspace acknowledgement, purpose,
-  profile, display, dimensions, IPC paths captured at startup, and stop
-  timestamp when the workspace shut down cleanly. The manifest also preserves
-  the final IPC event sequence and app snapshot, so stopped workspaces can
-  still correlate event history and show what was running when they were torn
-  down.
+  profile, display, dimensions, IPC paths captured at startup, event log path,
+  and stop timestamp when the workspace shut down cleanly. The manifest also
+  preserves the final IPC event sequence and app snapshot, so stopped workspaces
+  can still correlate event history and show what was running when they were
+  torn down.
 - `workspace manifest` reads that saved manifest directly from disk without
   contacting the workspace daemon, making it suitable for stopped workspaces or
   post-run audit views. `workspace status` remains live IPC state.

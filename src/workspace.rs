@@ -240,6 +240,8 @@ pub struct WorkspaceManifest {
     pub socket_path: PathBuf,
     pub xauthority_path: PathBuf,
     #[serde(default)]
+    pub event_log_path: PathBuf,
+    #[serde(default)]
     pub last_event_sequence: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<WorkspaceApp>,
@@ -2128,6 +2130,7 @@ fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) ->
         runtime_dir: status.runtime_dir.clone(),
         socket_path: status.socket_path.clone(),
         xauthority_path: status.xauthority_path.clone(),
+        event_log_path: status.runtime_dir.join(EVENT_LOG_FILE),
         last_event_sequence: status.last_event_sequence,
         apps: status.apps.clone(),
     }
