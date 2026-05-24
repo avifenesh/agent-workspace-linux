@@ -195,9 +195,24 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             }
         }
         "close-window" => {
-            let (id, window_id) =
-                parse_one_arg_command(&args[1..], "workspace close-window requires a window id")?;
-            print_json(&workspace::close_window(&id, window_id)?)
+            let (id, target) = parse_close_window_options(&args[1..])?;
+            match target {
+                CloseWindowTarget::WindowId(window_id) => {
+                    print_json(&workspace::close_window(&id, window_id)?)
+                }
+                CloseWindowTarget::Match {
+                    title_contains,
+                    pid,
+                    app_id,
+                    timeout_ms,
+                } => print_json(&workspace::close_matching_window(
+                    &id,
+                    title_contains,
+                    pid,
+                    app_id,
+                    timeout_ms,
+                )?),
+            }
         }
         "click" => {
             let (id, x, y) = parse_click_options(&args[1..])?;
@@ -975,6 +990,88 @@ fn parse_focus_window_options(args: &[String]) -> Result<(String, FocusWindowTar
     ))
 }
 
+enum CloseWindowTarget {
+    WindowId(String),
+    Match {
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: Option<u64>,
+    },
+}
+
+fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTarget)> {
+    let mut id = workspace::default_workspace_id();
+    let mut window_id = None;
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
+    let mut timeout_ms = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace close-window option '{value}'")
+            }
+            value => {
+                if window_id.is_some() {
+                    bail!("workspace close-window accepts only one window id");
+                }
+                window_id = Some(value.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    if let Some(window_id) = window_id {
+        if has_match_filter || timeout_ms.is_some() {
+            bail!("workspace close-window accepts either a window id or match options, not both");
+        }
+        return Ok((id, CloseWindowTarget::WindowId(window_id)));
+    }
+    if !has_match_filter {
+        bail!("workspace close-window requires a window id or --title, --pid, or --app");
+    }
+    Ok((
+        id,
+        CloseWindowTarget::Match {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        },
+    ))
+}
+
 fn parse_click_options(args: &[String]) -> Result<(String, i32, i32)> {
     let (id, values) = parse_id_and_args(args)?;
     if values.len() != 2 {
@@ -1535,6 +1632,7 @@ Usage:
   agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace close-window [--id ID] WINDOW_ID
+  agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace click [--id ID] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y

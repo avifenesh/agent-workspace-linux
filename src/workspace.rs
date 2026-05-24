@@ -300,6 +300,12 @@ pub enum IpcRequest {
     CloseWindow {
         window_id: String,
     },
+    CloseMatchingWindow {
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: u64,
+    },
     Click {
         x: i32,
         y: i32,
@@ -736,6 +742,26 @@ pub fn close_window(id: &str, window_id: String) -> Result<IpcResponse> {
     request(
         &workspace_socket_path(&id),
         IpcRequest::CloseWindow { window_id },
+    )
+}
+
+pub fn close_matching_window(
+    id: &str,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_match_options(&title_contains, pid, &app_id, true)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::CloseMatchingWindow {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
     )
 }
 
@@ -1561,6 +1587,65 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ),
             }
         }
+        IpcRequest::CloseMatchingWindow {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_match_options(
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+                true,
+            ) {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match close_matching_workspace_window(state, &criteria) {
+                    Ok(Some(window)) => {
+                        record_event(
+                            state,
+                            "close_window",
+                            serde_json::json!({
+                                "window_id": &window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response = response_with_status(
+                            true,
+                            "workspace matching window close requested",
+                            &state.status,
+                        );
+                        response.windows = Some(vec![window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
         IpcRequest::Click { x, y } => match click_workspace(&state.status, x, y) {
             Ok(()) => {
                 record_event(state, "click", serde_json::json!({ "x": x, "y": y }))?;
@@ -2340,6 +2425,17 @@ fn focus_matching_workspace_window(
         return Ok(None);
     };
     focus_workspace_window(&state.status, &window.id)?;
+    Ok(Some(window))
+}
+
+fn close_matching_workspace_window(
+    state: &mut DaemonState,
+    criteria: &WindowWaitCriteria,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = wait_workspace_window(state, criteria)?.into_iter().next() else {
+        return Ok(None);
+    };
+    close_workspace_window(&state.status, &window.id)?;
     Ok(Some(window))
 }
 

@@ -61,6 +61,7 @@ cargo run -- workspace screenshot-window --title xterm --output /tmp/agent-windo
 cargo run -- workspace focus-window 4194316
 cargo run -- workspace focus-window --title xterm --timeout-ms 10000
 cargo run -- workspace close-window 4194316
+cargo run -- workspace close-window --title xterm --timeout-ms 10000
 cargo run -- workspace click 100 120
 cargo run -- workspace click-window --title xterm 24 32
 cargo run -- workspace key Return
@@ -135,10 +136,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace display. `active-window` reports the current workspace-local focus,
   and `observe` returns status, visible windows, active window, and optionally a
   root screenshot in one IPC call. `focus-window`, `screenshot-window`,
-  `key-window`, and `type-window` can use either a raw X11 window id or the same
-  title/pid/app filters as `wait-window`; app filters match the launched process
-  and its child processes. `click-window` resolves the same targets and clicks
-  window-relative coordinates.
+  `close-window`, `key-window`, and `type-window` can use either a raw X11
+  window id or the same title/pid/app filters as `wait-window`; app filters
+  match the launched process and its child processes. `click-window` resolves
+  the same targets and clicks window-relative coordinates.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   App launches and exits are recorded with structured metadata. Typed text is
   logged as metadata such as character count, not raw text.
@@ -168,7 +169,7 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_active_window`, `workspace_observe`, `workspace_wait_window`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
 `workspace_focus_matching_window`, `workspace_close_window`, `workspace_click`,
-`workspace_click_window`, `workspace_key`, `workspace_key_window`,
-`workspace_type_text`, `workspace_type_window`, `workspace_read_app_log`,
-`workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`.
+`workspace_close_matching_window`, `workspace_click_window`, `workspace_key`,
+`workspace_key_window`, `workspace_type_text`, `workspace_type_window`,
+`workspace_read_app_log`, `workspace_wait_app`, `workspace_events`,
+`workspace_run_profile_setup`, `workspace_kill_app`, and `workspace_stop`.
