@@ -100,7 +100,7 @@ cargo run -- workspace wait-app --timeout-ms 30000 terminal
 cargo run -- workspace events --tail 20
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000
 cargo run -- workspace kill-app app-12345
-cargo run -- workspace stop
+cargo run -- workspace stop --timeout-ms 30000
 cargo run -- mcp
 ```
 
@@ -224,7 +224,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   start timestamp, hidden-workspace acknowledgement, unenforced-policy
   acknowledgement, applied policy snapshot, policy backend candidates discovered
   at start time, and which parts are currently enforced. `workspace status` and
-  `workspace stop` talk to the same socket.
+  `workspace stop` talk to the same socket. `workspace stop` waits for the
+  daemon IPC socket to close before returning; `--timeout-ms` overrides the
+  default 30000ms wait.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
@@ -246,6 +248,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
 `workspace_kill_app`, and `workspace_stop`. `workspace_list_apps` can filter by
 app id/pid/name, app name substring, profile id, or running/stopped state.
+`workspace_stop` accepts `timeout_ms` to control how long it waits for the
+daemon IPC socket to close after requesting shutdown.
 `workspace_list_windows` and window-targeted tools can filter by title, class,
 pid, app id, or app name, with class matching `wm_class` and `wm_instance`.
 `workspace_list_windows` accepts `include_hidden=true` to return

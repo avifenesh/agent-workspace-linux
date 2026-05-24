@@ -531,8 +531,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::kill_app(&id, app_id)?)
         }
         "stop" => {
-            let id = parse_id_option(&args[1..])?;
-            print_json(&workspace::stop_workspace(&id)?)
+            let (id, timeout_ms) = parse_stop_options(&args[1..])?;
+            print_json(&workspace::stop_workspace(&id, timeout_ms)?)
         }
         unknown => {
             bail!(
@@ -2640,6 +2640,30 @@ fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>)> {
     Ok((id, tail))
 }
 
+fn parse_stop_options(args: &[String]) -> Result<(String, Option<u64>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut timeout_ms = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            flag => bail!("unknown workspace stop option '{flag}'"),
+        }
+    }
+    Ok((id, timeout_ms))
+}
+
 fn parse_workspace_setup_options(
     args: &[String],
 ) -> Result<(String, String, profile::ProfileSetupOptions)> {
@@ -2908,6 +2932,6 @@ Usage:
   agent-workspace-linux workspace events [--id ID] [--tail N]
   agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME
-  agent-workspace-linux workspace stop [--id ID]"#
+  agent-workspace-linux workspace stop [--id ID] [--timeout-ms N]"#
     );
 }

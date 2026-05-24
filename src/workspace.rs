@@ -19,6 +19,7 @@ use std::{
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
 const DEFAULT_APP_WAIT_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_STOP_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_CLICK_BUTTON: u8 = 1;
 const DEFAULT_CLICK_COUNT: u8 = 1;
 const DEFAULT_SCROLL_AMOUNT: u8 = 1;
@@ -1602,9 +1603,18 @@ pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
     request(&workspace_socket_path(&id), IpcRequest::KillApp { app_id })
 }
 
-pub fn stop_workspace(id: &str) -> Result<IpcResponse> {
+pub fn stop_workspace(id: &str, timeout_ms: Option<u64>) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    request(&workspace_socket_path(&id), IpcRequest::Stop)
+    let socket_path = workspace_socket_path(&id);
+    let mut response = request(&socket_path, IpcRequest::Stop)?;
+    if response.ok {
+        wait_for_socket_removed(
+            &socket_path,
+            Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_STOP_WAIT_TIMEOUT_MS)),
+        )?;
+        response.message = "workspace stopped".to_string();
+    }
+    Ok(response)
 }
 
 pub fn run_daemon(options: DaemonOptions) -> Result<()> {
@@ -5382,6 +5392,20 @@ fn wait_for_socket(socket_path: &Path) -> Result<()> {
         thread::sleep(Duration::from_millis(100));
     }
     bail!("timed out waiting for workspace IPC socket");
+}
+
+fn wait_for_socket_removed(socket_path: &Path, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !socket_path.exists() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    bail!(
+        "timed out waiting for workspace IPC socket {} to be removed",
+        socket_path.display()
+    );
 }
 
 fn pick_display() -> Result<String> {
