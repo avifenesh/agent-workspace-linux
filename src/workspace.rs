@@ -276,6 +276,14 @@ pub enum IpcRequest {
     Screenshot {
         output_path: Option<PathBuf>,
     },
+    ScreenshotWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        output_path: Option<PathBuf>,
+        timeout_ms: u64,
+    },
     FocusWindow {
         window_id: String,
     },
@@ -648,6 +656,30 @@ pub fn screenshot(id: &str, output_path: Option<PathBuf>) -> Result<IpcResponse>
     request(
         &workspace_socket_path(&id),
         IpcRequest::Screenshot { output_path },
+    )
+}
+
+pub fn screenshot_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    output_path: Option<PathBuf>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ScreenshotWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            output_path,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
     )
 }
 
@@ -1316,6 +1348,74 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
+            }
+        }
+        IpcRequest::ScreenshotWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            output_path,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            ) {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match screenshot_workspace_window(
+                    state,
+                    window_id.as_deref(),
+                    &criteria,
+                    output_path,
+                ) {
+                    Ok(Some(result)) => {
+                        record_event(
+                            state,
+                            "screenshot_window",
+                            serde_json::json!({
+                                "path": result.screenshot.path.display().to_string(),
+                                "window_id": &result.window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response = response_with_status(
+                            true,
+                            "workspace window screenshot captured",
+                            &state.status,
+                        );
+                        response.screenshot = Some(result.screenshot);
+                        response.windows = Some(vec![result.window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
             }
         }
         IpcRequest::FocusWindow { window_id } => {
@@ -2334,6 +2434,62 @@ fn capture_workspace_screenshot(
     })
 }
 
+struct WindowScreenshotResult {
+    window: WorkspaceWindow,
+    screenshot: WorkspaceScreenshot,
+}
+
+fn screenshot_workspace_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    output_path: Option<PathBuf>,
+) -> Result<Option<WindowScreenshotResult>> {
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    let screenshot = capture_workspace_window_screenshot(&state.status, &window, output_path)?;
+    Ok(Some(WindowScreenshotResult { window, screenshot }))
+}
+
+fn capture_workspace_window_screenshot(
+    status: &WorkspaceStatus,
+    window: &WorkspaceWindow,
+    output_path: Option<PathBuf>,
+) -> Result<WorkspaceScreenshot> {
+    let path = resolve_window_screenshot_path(status, &window.id, output_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    if command_path_check("import").ok {
+        let output = workspace_command(status, "import")
+            .args(["-window", &window.id])
+            .arg(&path)
+            .output()
+            .context("failed to run import for workspace window screenshot")?;
+        output_text(output, "import -window")?;
+    } else if command_path_check("scrot").ok {
+        focus_workspace_window(status, &window.id)?;
+        let output = workspace_command(status, "scrot")
+            .args(["-u"])
+            .arg(&path)
+            .output()
+            .context("failed to run scrot for workspace window screenshot")?;
+        output_text(output, "scrot -u")?;
+    } else {
+        bail!("missing screenshot command: install ImageMagick import or scrot");
+    }
+
+    Ok(WorkspaceScreenshot {
+        path,
+        width: window.geometry.width,
+        height: window.geometry.height,
+        format: "png".to_string(),
+    })
+}
+
 fn resolve_screenshot_path(status: &WorkspaceStatus, output_path: Option<PathBuf>) -> PathBuf {
     match output_path {
         Some(path) if path.is_absolute() => path,
@@ -2341,6 +2497,20 @@ fn resolve_screenshot_path(status: &WorkspaceStatus, output_path: Option<PathBuf
         None => status
             .runtime_dir
             .join(format!("screenshot-{}.png", unix_now())),
+    }
+}
+
+fn resolve_window_screenshot_path(
+    status: &WorkspaceStatus,
+    window_id: &str,
+    output_path: Option<PathBuf>,
+) -> PathBuf {
+    match output_path {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => status.runtime_dir.join(path),
+        None => status
+            .runtime_dir
+            .join(format!("screenshot-window-{window_id}-{}.png", unix_now())),
     }
 }
 
