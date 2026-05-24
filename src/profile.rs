@@ -759,11 +759,7 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
 }
 
 fn validate_network_policy(network: &NetworkPolicy) -> Result<()> {
-    if matches!(
-        network.mode,
-        NetworkMode::Allowlist | NetworkMode::LocalOnly
-    ) && network.allow_hosts.is_empty()
-    {
+    if matches!(network.mode, NetworkMode::Allowlist) && network.allow_hosts.is_empty() {
         bail!(
             "{} network profiles require at least one host",
             network_mode_name(&network.mode)
@@ -1541,6 +1537,16 @@ mod tests {
             setup_commands: Vec::new(),
             startup_apps: Vec::new(),
         }
+    }
+
+    #[test]
+    fn local_only_network_accepts_empty_allow_hosts() {
+        let profile = profile_with_network(NetworkPolicy {
+            mode: NetworkMode::LocalOnly,
+            allow_hosts: Vec::new(),
+        });
+
+        validate_profile(&profile).expect("local_only should not require host labels");
     }
 
     #[test]

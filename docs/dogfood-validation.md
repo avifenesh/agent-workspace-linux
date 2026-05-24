@@ -67,6 +67,16 @@ Environment:
   `workspace_run_app` with the local-only profile successfully round-tripped
   through an in-sandbox `127.0.0.1` listener and blocked `1.1.1.1:80` with
   `Network is unreachable`.
+- Follow-up dogfood found that `profile put` still rejected
+  `network.mode=local_only` when `allow_hosts` was empty, even though the
+  product model is closed/local/open and local means sandbox loopback. Fixed:
+  `allow_hosts` is now optional for `local_only`, still validated as loopback
+  labels when present, and still required for legacy `allowlist` profiles. The
+  installed release binary accepted a dry-run and real
+  `dogfood-local-only-empty` save, `profile check` reported
+  `backend=bubblewrap_loopback_only`, and a live `workspace run` printed
+  `loopback=ok` from an in-sandbox `127.0.0.1` server while
+  `https://index.crates.io/config.json` failed DNS inside the sandbox.
 - The Codex for Linux Agent Workspaces page now has a first browser-session
   preparation flow instead of jumping from folder picker to raw profile JSON. It
   opens a browser-data folder picker, shows the selected path plus an

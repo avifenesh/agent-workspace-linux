@@ -55,6 +55,14 @@ impl Default for NetworkMode {
     }
 }
 
+fn local_only_network_label(network: &NetworkPolicy) -> String {
+    if network.allow_hosts.is_empty() {
+        "sandbox loopback".to_string()
+    } else {
+        format!("sandbox loopback ({})", network.allow_hosts.join(", "))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyCapabilityState {
@@ -144,14 +152,14 @@ impl AppliedWorkspacePolicy {
             }
             NetworkMode::LocalOnly if network_enforced => {
                 format!(
-                    "local-only network is enforced with bubblewrap --unshare-net; sandbox loopback is available for {}",
-                    network.allow_hosts.join(", ")
+                    "local-only network is enforced with bubblewrap --unshare-net; {} is available",
+                    local_only_network_label(&network)
                 )
             }
             NetworkMode::LocalOnly => {
                 format!(
                     "local-only network is declared for {} but bubblewrap is not available",
-                    network.allow_hosts.join(", ")
+                    local_only_network_label(&network)
                 )
             }
             NetworkMode::Allowlist => {
@@ -584,6 +592,32 @@ mod tests {
             .limitations
             .iter()
             .any(|limitation| limitation.contains("host loopback services")));
+    }
+
+    #[test]
+    fn local_only_network_without_hosts_reports_sandbox_loopback() {
+        let policy = AppliedWorkspacePolicy::new_with_capabilities(
+            "qa-local".to_string(),
+            Vec::new(),
+            NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: Vec::new(),
+            },
+            false,
+            0,
+            capabilities(true, false, false, false),
+        );
+
+        assert_eq!(
+            policy.enforcement.network.backend.as_deref(),
+            Some("bubblewrap_loopback_only")
+        );
+        assert!(policy
+            .enforcement
+            .network
+            .detail
+            .contains("sandbox loopback is available"));
+        assert!(!policy.enforcement.network.detail.ends_with("for "));
     }
 
     #[test]
