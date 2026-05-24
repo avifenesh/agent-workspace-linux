@@ -2661,10 +2661,22 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "focus_window",
                         serde_json::json!({ "window_id": &window_id }),
                     )?;
-                    (
-                        response_with_status(true, "workspace window focused", &state.status),
-                        false,
-                    )
+                    match window_info(&state.status, &window_id) {
+                        Ok(window) => {
+                            let mut response = response_with_status(
+                                true,
+                                "workspace window focused",
+                                &state.status,
+                            );
+                            response.windows = Some(vec![window]);
+                            attach_active_window_best_effort(&mut response, &state.status);
+                            (response, false)
+                        }
+                        Err(error) => (
+                            response_with_status(false, error.to_string(), &state.status),
+                            false,
+                        ),
+                    }
                 }
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),
@@ -2717,6 +2729,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             &state.status,
                         );
                         response.windows = Some(vec![window]);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Ok(None) => {

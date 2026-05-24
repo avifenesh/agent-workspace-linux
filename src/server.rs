@@ -659,7 +659,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_focus_window",
-        description = "Focus a visible window inside an isolated agent workspace by X11 window id.",
+        description = "Focus a visible window inside an isolated agent workspace by X11 window id. Response includes the focused window and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -682,7 +682,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_focus_matching_window",
-        description = "Wait for and focus a visible window inside an isolated agent workspace, filtered by title substring, class substring, pid, or launched app id/pid.",
+        description = "Wait for and focus a visible window inside an isolated agent workspace, filtered by title substring, class substring, pid, or launched app id/pid. Response includes the matched window and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
