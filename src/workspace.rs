@@ -3356,10 +3356,18 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "button": button,
                     }),
                 )?;
-                (
-                    response_with_status(true, "workspace drag sent", &state.status),
-                    false,
-                )
+                match workspace_pointer(&state.status) {
+                    Ok(pointer) => {
+                        let mut response =
+                            response_with_status(true, "workspace drag sent", &state.status);
+                        response.pointer = Some(pointer);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
@@ -3418,7 +3426,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &dragged.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
-                                    "class_contains": criteria.class_contains.as_deref(),
+                                "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "from_x": dragged.from_x,
@@ -3435,8 +3443,17 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         )?;
                         let mut response =
                             response_with_status(true, "workspace window drag sent", &state.status);
-                        response.windows = Some(vec![dragged.window]);
-                        (response, false)
+                        match workspace_pointer(&state.status) {
+                            Ok(pointer) => {
+                                response.pointer = Some(pointer);
+                                response.windows = Some(vec![dragged.window]);
+                                (response, false)
+                            }
+                            Err(error) => (
+                                response_with_status(false, error.to_string(), &state.status),
+                                false,
+                            ),
+                        }
                     }
                     Ok(None) => {
                         let mut response = response_with_status(
@@ -3471,10 +3488,18 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "amount": amount,
                     }),
                 )?;
-                (
-                    response_with_status(true, "workspace scroll sent", &state.status),
-                    false,
-                )
+                match workspace_pointer(&state.status) {
+                    Ok(pointer) => {
+                        let mut response =
+                            response_with_status(true, "workspace scroll sent", &state.status);
+                        response.pointer = Some(pointer);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
@@ -3530,7 +3555,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &scrolled.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
-                                    "class_contains": criteria.class_contains.as_deref(),
+                                "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "relative_x": x,
@@ -3547,8 +3572,17 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             "workspace window scroll sent",
                             &state.status,
                         );
-                        response.windows = Some(vec![scrolled.window]);
-                        (response, false)
+                        match workspace_pointer(&state.status) {
+                            Ok(pointer) => {
+                                response.pointer = Some(pointer);
+                                response.windows = Some(vec![scrolled.window]);
+                                (response, false)
+                            }
+                            Err(error) => (
+                                response_with_status(false, error.to_string(), &state.status),
+                                false,
+                            ),
+                        }
                     }
                     Ok(None) => {
                         let mut response = response_with_status(

@@ -226,9 +226,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   button/count for right-clicks and double-clicks, and also return the resulting
   pointer coordinates.
   `drag` and `drag-window` can set the mouse button for press/move/release
-  gestures. `scroll` and `scroll-window` send wheel ticks in the requested
-  direction. Window-targeted pointer tools resolve the same targets and use
-  window-relative coordinates.
+  gestures and return the resulting pointer coordinates. `scroll` and
+  `scroll-window` send wheel ticks in the requested direction and also return
+  pointer coordinates. Window-targeted pointer tools resolve the same targets
+  and use window-relative coordinates.
 - `workspace clipboard-set` and `workspace clipboard-get` read/write the X11
   clipboard selection inside the workspace using `xclip` or `xsel`. Clipboard
   set events record only size metadata, not the raw clipboard text.
