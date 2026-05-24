@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
 
 fn handle_profile(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
-        bail!("missing profile command. Expected: path, list, get, check, template, put, import, export, delete");
+        bail!("missing profile command. Expected: path, list, get, check, validate, template, put, import, export, delete");
     };
     match command {
         "path" => {
@@ -65,6 +65,10 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
         "check" => {
             let id = parse_required_id_arg(&args[1..], "profile check requires an id")?;
             print_json(&profile::check_profile(&id)?)
+        }
+        "validate" => {
+            let json_path = parse_profile_validate_options(&args[1..])?;
+            print_json(&profile::validate_profile_json_file(json_path)?)
         }
         "template" => {
             let (kind, id, host_path) = parse_profile_template_options(&args[1..])?;
@@ -87,7 +91,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             print_json(&profile::delete_profile(&id, dry_run)?)
         }
         unknown => {
-            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, import, export, delete")
+            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, validate, template, put, import, export, delete")
         }
     }
 }
@@ -1032,6 +1036,23 @@ fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool,
 
 fn parse_profile_import_options(args: &[String]) -> Result<(PathBuf, bool, bool)> {
     parse_profile_json_file_options(args, "profile import")
+}
+
+fn parse_profile_validate_options(args: &[String]) -> Result<PathBuf> {
+    let mut json_path = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                json_path = Some(PathBuf::from(value_after(args, index, "--json")?));
+                index += 2;
+            }
+            flag => {
+                bail!("unknown profile validate option '{flag}'. Expected: --json PATH")
+            }
+        }
+    }
+    json_path.context("profile validate requires --json PATH")
 }
 
 fn parse_profile_json_file_options(
@@ -3423,7 +3444,8 @@ Usage:
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
   agent-workspace-linux mcp
-  agent-workspace-linux profile path|list|get|check|template|put|import|export|delete
+  agent-workspace-linux profile path|list|get|check|validate|template|put|import|export|delete
+  agent-workspace-linux profile validate --json PATH
   agent-workspace-linux profile put --json PATH [--replace] [--dry-run]
   agent-workspace-linux profile import --json PATH [--replace] [--dry-run]
   agent-workspace-linux profile export ID [--output PATH] [--replace]

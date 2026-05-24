@@ -58,6 +58,7 @@ cargo run -- guardrails
 cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
+cargo run -- profile validate --json ./profile.json
 cargo run -- profile put --json ./profile.json --dry-run
 cargo run -- profile put --json ./profile.json
 cargo run -- profile import --json ./profile.json --dry-run
@@ -253,6 +254,9 @@ exiting.
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
   profile width/height are applied unless explicit flags override them, and the
   profile's mounts/network/setup intent is snapshotted into status.
+- `profile validate --json PATH` parses and validates a shared profile file
+  without saving it, and returns the same policy, warning, and acknowledgement
+  preflight shape used by `profile check`.
 - `profile put --json --dry-run` previews whether the profile would be created,
   replaced, or rejected without writing. Its response includes the requested
   profile and, when the id already exists, the existing saved profile.
@@ -470,8 +474,9 @@ exiting.
   `--shell` prints shell-safe `export` lines for manual attachment.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
-`workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`, `profile_check`,
-`profile_template`, `profile_put`, `profile_import`, `profile_export`, `profile_delete`, `workspace_start`,
+`workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`,
+`profile_check`, `profile_validate`, `profile_template`, `profile_put`,
+`profile_import`, `profile_export`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_manifest`, `workspace_artifacts`,
 `workspace_ipc_info`, `workspace_env`, `workspace_launch_app`, `workspace_run_app`,

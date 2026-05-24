@@ -60,6 +60,15 @@ jq -n '{
   env: [{name:"ONE", value:"1"}],
   startup_apps: [{name:"noop", command:["/bin/true"], cwd:"/tmp"}]
 }' > "$IMPORT_PROFILE"
+run_awl profile validate --json "$IMPORT_PROFILE" > "$SMOKE_DIR/import-validate.json"
+assert_json '.ok == true and .profile.id == "import-smoke" and .check.requires_hidden_workspace_ack == true' "$SMOKE_DIR/import-validate.json"
+INVALID_PROFILE="$SMOKE_DIR/invalid-profile.json"
+jq -n '{id:"invalid-profile", cwd:"relative"}' > "$INVALID_PROFILE"
+if run_awl profile validate --json "$INVALID_PROFILE" > "$SMOKE_DIR/invalid-validate.json" 2> "$SMOKE_DIR/invalid-validate.err"; then
+  echo "invalid profile validate unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -q "must be absolute" "$SMOKE_DIR/invalid-validate.err"
 run_awl profile import --json "$IMPORT_PROFILE" --dry-run > "$SMOKE_DIR/import-dry.json"
 assert_json '.dry_run == true and .would_create == true and .saved == false' "$SMOKE_DIR/import-dry.json"
 run_awl profile import --json "$IMPORT_PROFILE" > "$SMOKE_DIR/import.json"

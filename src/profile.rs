@@ -117,6 +117,15 @@ pub struct ProfileExportResult {
     pub profile: WorkspaceProfile,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileValidateResult {
+    pub ok: bool,
+    pub message: String,
+    pub json_path: PathBuf,
+    pub profile: WorkspaceProfile,
+    pub check: ProfileCheck,
+}
+
 impl ProfilePutResult {
     pub fn error(profile: WorkspaceProfile, replace: bool, dry_run: bool, message: String) -> Self {
         Self {
@@ -437,12 +446,16 @@ pub fn template_profile(
 
 pub fn check_profile(id: &str) -> Result<ProfileCheck> {
     let profile = get_profile(id)?;
+    Ok(check_workspace_profile(profile))
+}
+
+fn check_workspace_profile(profile: WorkspaceProfile) -> ProfileCheck {
     let applied_policy = applied_policy(&profile);
     let can_acknowledge_unenforced_policy = applied_policy.can_acknowledge_unenforced_policy();
     let blocks_unenforced_policy = applied_policy.blocks_requested_unenforced_policy();
     let requires_unenforced_policy_ack = can_acknowledge_unenforced_policy;
     let warnings = policy_warnings(&applied_policy);
-    Ok(ProfileCheck {
+    ProfileCheck {
         profile,
         applied_policy,
         requires_hidden_workspace_ack: true,
@@ -450,6 +463,19 @@ pub fn check_profile(id: &str) -> Result<ProfileCheck> {
         can_acknowledge_unenforced_policy,
         blocks_unenforced_policy,
         warnings,
+    }
+}
+
+pub fn validate_profile_json_file(path: PathBuf) -> Result<ProfileValidateResult> {
+    let profile = read_profile_json_file(&path)?;
+    validate_profile(&profile)?;
+    let check = check_workspace_profile(profile.clone());
+    Ok(ProfileValidateResult {
+        ok: true,
+        message: "profile JSON is valid".to_string(),
+        json_path: path,
+        profile,
+        check,
     })
 }
 
@@ -1429,5 +1455,36 @@ mod tests {
         assert!(error
             .to_string()
             .contains("command program cannot be empty"));
+    }
+
+    #[test]
+    fn profile_validate_file_returns_policy_preflight_without_saving() {
+        let path = env::temp_dir().join(format!(
+            "agent-workspace-profile-validate-{}.json",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            r#"{
+  "id": "validate-smoke",
+  "network": {"mode": "disabled"},
+  "require_enforced_policy": true,
+  "startup_apps": [{"name": "noop", "command": ["/bin/true"]}]
+}"#,
+        )
+        .expect("profile json");
+
+        let validation = validate_profile_json_file(path.clone()).expect("valid profile");
+
+        assert!(validation.ok);
+        assert_eq!(validation.json_path, path);
+        assert_eq!(validation.profile.id, "validate-smoke");
+        assert_eq!(validation.check.profile.id, "validate-smoke");
+        assert!(validation.check.requires_hidden_workspace_ack);
+        assert!(matches!(
+            validation.check.applied_policy.network.mode,
+            NetworkMode::Disabled
+        ));
+        let _ = fs::remove_file(validation.json_path);
     }
 }

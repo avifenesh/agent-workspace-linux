@@ -37,6 +37,10 @@ Verified:
   with `Read-only file system`.
 - `workspace_stop`, `workspace_cleanup_stale`, and profile deletion cleaned up
   all temporary workspaces and dogfood profiles after the pass.
+- Profile JSON preflight now has an explicit no-write path. `profile validate
+  --json PATH` returns the parsed profile plus the same policy, warning, and
+  acknowledgement preflight as `profile check`, and rejects invalid shared
+  profiles before saving.
 
 Findings:
 
@@ -66,8 +70,9 @@ Post-patch verification:
   workspace process group. Even though that stop client was terminated before it
   could receive the response, the daemon still marked the workspace stopped and
   wrote `ready=false` plus `stopped_at_unix` to the manifest.
-- `scripts/integration_smoke.sh` now covers that self-stop lost-client case in
-  addition to doctor, profile import/export, open-profile dry-run,
+- `scripts/integration_smoke.sh` now covers profile validation, invalid-profile
+  rejection, and that self-stop lost-client case in addition to doctor,
+  profile import/export, open-profile dry-run,
   `network.mode=local_only`, `network.mode=disabled`, read-write/read-only mount
   enforcement, session tracking, a real X11 window with screenshot, window
   listing, clipboard, keyboard input, app wait, artifact inspection, event
