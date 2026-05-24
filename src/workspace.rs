@@ -371,6 +371,19 @@ pub enum IpcRequest {
         count: u8,
         timeout_ms: u64,
     },
+    MovePointer {
+        x: i32,
+        y: i32,
+    },
+    MovePointerWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        x: i32,
+        y: i32,
+        timeout_ms: u64,
+    },
     Drag {
         from_x: i32,
         from_y: i32,
@@ -904,6 +917,41 @@ pub fn click_window(
             y,
             button,
             count,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn move_pointer(id: &str, x: i32, y: i32) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::MovePointer { x, y },
+    )
+}
+
+pub fn move_pointer_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    x: i32,
+    y: i32,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_relative_click_coordinates(x, y)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::MovePointerWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            x,
+            y,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
@@ -1976,6 +2024,93 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 }
             }
         }
+        IpcRequest::MovePointer { x, y } => match move_workspace_pointer(&state.status, x, y) {
+            Ok(()) => {
+                record_event(state, "move_pointer", serde_json::json!({ "x": x, "y": y }))?;
+                (
+                    response_with_status(true, "workspace pointer moved", &state.status),
+                    false,
+                )
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::MovePointerWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            x,
+            y,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| validate_relative_click_coordinates(x, y))
+            {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match move_workspace_pointer_window(
+                    state,
+                    window_id.as_deref(),
+                    &criteria,
+                    x,
+                    y,
+                ) {
+                    Ok(Some(moved)) => {
+                        record_event(
+                            state,
+                            "move_pointer_window",
+                            serde_json::json!({
+                                "window_id": &moved.window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "relative_x": x,
+                                "relative_y": y,
+                                "x": moved.x,
+                                "y": moved.y,
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response = response_with_status(
+                            true,
+                            "workspace window pointer moved",
+                            &state.status,
+                        );
+                        response.windows = Some(vec![moved.window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
         IpcRequest::Drag {
             from_x,
             from_y,
@@ -2913,6 +3048,12 @@ struct WindowClickResult {
     y: i32,
 }
 
+struct WindowPointerMoveResult {
+    window: WorkspaceWindow,
+    x: i32,
+    y: i32,
+}
+
 struct WindowDragResult {
     window: WorkspaceWindow,
     from_x: i32,
@@ -2961,6 +3102,43 @@ fn click_workspace_window(
     focus_workspace_window(&state.status, &window.id)?;
     click_workspace(&state.status, absolute_x, absolute_y, button, count)?;
     Ok(Some(WindowClickResult {
+        window,
+        x: absolute_x,
+        y: absolute_y,
+    }))
+}
+
+fn move_workspace_pointer_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    x: i32,
+    y: i32,
+) -> Result<Option<WindowPointerMoveResult>> {
+    validate_relative_click_coordinates(x, y)?;
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    if x as u32 >= window.geometry.width || y as u32 >= window.geometry.height {
+        bail!(
+            "window pointer coordinates {x},{y} are outside window bounds {}x{}",
+            window.geometry.width,
+            window.geometry.height
+        );
+    }
+    let absolute_x = window
+        .geometry
+        .x
+        .checked_add(x)
+        .context("window pointer X coordinate overflow")?;
+    let absolute_y = window
+        .geometry
+        .y
+        .checked_add(y)
+        .context("window pointer Y coordinate overflow")?;
+    focus_workspace_window(&state.status, &window.id)?;
+    move_workspace_pointer(&state.status, absolute_x, absolute_y)?;
+    Ok(Some(WindowPointerMoveResult {
         window,
         x: absolute_x,
         y: absolute_y,
@@ -3329,6 +3507,16 @@ fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32, button: u8, count: 
         .output()
         .context("failed to run xdotool click")?;
     output_text(output, "xdotool click")?;
+    Ok(())
+}
+
+fn move_workspace_pointer(status: &WorkspaceStatus, x: i32, y: i32) -> Result<()> {
+    validate_workspace_coordinates(status, x, y, "pointer")?;
+    let output = workspace_command(status, "xdotool")
+        .args(["mousemove", "--sync", &x.to_string(), &y.to_string()])
+        .output()
+        .context("failed to run xdotool mousemove")?;
+    output_text(output, "xdotool mousemove")?;
     Ok(())
 }
 

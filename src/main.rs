@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -234,6 +234,24 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 timeout_ms,
             )?)
         }
+        "move-pointer" => {
+            let (id, x, y) = parse_move_pointer_options(&args[1..])?;
+            print_json(&workspace::move_pointer(&id, x, y)?)
+        }
+        "move-pointer-window" => {
+            let (id, window_id, title_contains, pid, app_id, x, y, timeout_ms) =
+                parse_move_pointer_window_options(&args[1..])?;
+            print_json(&workspace::move_pointer_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                x,
+                y,
+                timeout_ms,
+            )?)
+        }
         "drag" => {
             let (id, from_x, from_y, to_x, to_y, button) = parse_drag_options(&args[1..])?;
             print_json(&workspace::drag(&id, from_x, from_y, to_x, to_y, button)?)
@@ -348,7 +366,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1283,6 +1301,120 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
     ))
 }
 
+fn parse_move_pointer_options(args: &[String]) -> Result<(String, i32, i32)> {
+    let mut id = workspace::default_workspace_id();
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace move-pointer option '{value}'")
+            }
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    if values.len() != 2 {
+        bail!("workspace move-pointer requires X and Y coordinates");
+    }
+    let x = values[0]
+        .parse()
+        .context("move-pointer X must be an integer")?;
+    let y = values[1]
+        .parse()
+        .context("move-pointer Y must be an integer")?;
+    Ok((id, x, y))
+}
+
+type MovePointerWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    i32,
+    i32,
+    Option<u64>,
+);
+
+fn parse_move_pointer_window_options(args: &[String]) -> Result<MovePointerWindowOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
+    let mut timeout_ms = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace move-pointer-window option '{value}'")
+            }
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, x_value, y_value) = if has_match_filter {
+        if values.len() != 2 {
+            bail!("workspace move-pointer-window with match filters requires X and Y coordinates");
+        }
+        (None, &values[0], &values[1])
+    } else {
+        if values.len() != 3 {
+            bail!("workspace move-pointer-window requires WINDOW_ID X Y or match filters with X Y");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace move-pointer-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), &values[1], &values[2])
+    };
+    let x = x_value
+        .parse()
+        .context("move-pointer-window X must be an integer")?;
+    let y = y_value
+        .parse()
+        .context("move-pointer-window Y must be an integer")?;
+    Ok((id, window_id, title_contains, pid, app_id, x, y, timeout_ms))
+}
+
 fn parse_drag_options(args: &[String]) -> Result<(String, i32, i32, i32, i32, Option<u8>)> {
     let mut id = workspace::default_workspace_id();
     let mut button = None;
@@ -2057,6 +2189,9 @@ Usage:
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--count N] [--timeout-ms N] X Y
+  agent-workspace-linux workspace move-pointer [--id ID] X Y
+  agent-workspace-linux workspace move-pointer-window [--id ID] WINDOW_ID X Y
+  agent-workspace-linux workspace move-pointer-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
   agent-workspace-linux workspace drag [--id ID] [--button N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace drag-window [--id ID] [--button N] WINDOW_ID FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
