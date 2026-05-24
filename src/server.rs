@@ -287,7 +287,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_app",
-        description = "Launch an app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY.",
+        description = "Launch an app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -692,6 +692,8 @@ struct WorkspaceLaunchParams {
     id: Option<String>,
     #[serde(default)]
     profile: Option<String>,
+    #[serde(default)]
+    acknowledge_unenforced_policy: bool,
     command: Vec<String>,
     #[serde(default)]
     cwd: Option<PathBuf>,
@@ -705,6 +707,8 @@ impl WorkspaceLaunchParams {
         let mut spec = LaunchSpec {
             command: self.command,
             profile_id: None,
+            applied_policy: None,
+            user_acknowledged_unenforced_policy: self.acknowledge_unenforced_policy,
             cwd: self.cwd,
             env: self.env,
         };

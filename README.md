@@ -98,10 +98,12 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
   environment overrides. With `--profile`, profile cwd/env are applied unless
-  explicit flags override them. Each launched app gets workspace-local
-  stdout/stderr log files reported in `workspace status`. Profile-backed
-  launches also report the profile id and effective mount/network isolation on
-  the app entry.
+  explicit flags override them, and profile mounts/network policy apply to that
+  launched app. If a launch profile requests policy that remains unenforced, the
+  launch requires `--ack-unenforced-policy`. Each launched app gets
+  workspace-local stdout/stderr log files reported in `workspace status`.
+  Profile-backed launches also report the profile id and effective
+  mount/network isolation on the app entry.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   `workspace logs`, `workspace events`, `workspace setup`, and

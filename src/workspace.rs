@@ -173,6 +173,10 @@ pub struct LaunchSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
+    #[serde(default)]
+    pub user_acknowledged_unenforced_policy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<EnvVar>,
@@ -230,6 +234,10 @@ pub enum IpcRequest {
         command: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        applied_policy: Option<AppliedWorkspacePolicy>,
+        #[serde(default)]
+        user_acknowledged_unenforced_policy: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<PathBuf>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -483,11 +491,14 @@ pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> 
 pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     validate_launch_spec(&spec)?;
+    validate_launch_policy_ack(&spec)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::LaunchApp {
             command: spec.command,
             profile_id: spec.profile_id,
+            applied_policy: spec.applied_policy,
+            user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
             cwd: spec.cwd,
             env: spec.env,
         },
@@ -505,6 +516,20 @@ fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
     }
     for env_var in &spec.env {
         validate_env_var(env_var)?;
+    }
+    Ok(())
+}
+
+fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
+    if spec
+        .applied_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::has_requested_unenforced_policy)
+        && !spec.user_acknowledged_unenforced_policy
+    {
+        bail!(
+            "launch profile requests mount or network policy that is not enforced by this runtime; pass --ack-unenforced-policy or set acknowledge_unenforced_policy=true"
+        );
     }
     Ok(())
 }
@@ -891,6 +916,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::LaunchApp {
             command,
             profile_id,
+            applied_policy,
+            user_acknowledged_unenforced_policy,
             cwd,
             env,
         } => match spawn_app(
@@ -898,6 +925,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             LaunchSpec {
                 command,
                 profile_id,
+                applied_policy,
+                user_acknowledged_unenforced_policy,
                 cwd,
                 env,
             },
@@ -1122,8 +1151,14 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
 
 fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> {
     validate_launch_spec(&spec)?;
+    validate_launch_policy_ack(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
-    let sandbox = bubblewrap_sandbox_for_launch(&state.status, spec.cwd.as_deref())?;
+    let effective_policy = spec
+        .applied_policy
+        .as_ref()
+        .or(state.status.applied_policy.as_ref());
+    let sandbox =
+        bubblewrap_sandbox_for_launch(&state.status, effective_policy, spec.cwd.as_deref())?;
     let mount_isolation = sandbox
         .as_ref()
         .map(|sandbox| sandbox.mount_isolation.clone())
@@ -1202,17 +1237,18 @@ struct BubblewrapSandbox {
 
 fn bubblewrap_sandbox_for_launch(
     status: &WorkspaceStatus,
+    policy: Option<&AppliedWorkspacePolicy>,
     cwd: Option<&Path>,
 ) -> Result<Option<BubblewrapSandbox>> {
-    let network = uses_bubblewrap_network_isolation(status);
-    let mounts = uses_bubblewrap_mount_isolation(status);
+    let network = uses_bubblewrap_network_isolation(policy);
+    let mounts = uses_bubblewrap_mount_isolation(policy);
     if !network && !mounts {
         return Ok(None);
     }
 
     if mounts {
         Ok(Some(BubblewrapSandbox {
-            args: restricted_mount_namespace_args(status, cwd, network)?,
+            args: restricted_mount_namespace_args(status, policy, cwd, network)?,
             mount_isolation: "bubblewrap_mount_namespace".to_string(),
             network_isolation: if network {
                 "bubblewrap_unshare_net".to_string()
@@ -1241,16 +1277,16 @@ fn bubblewrap_sandbox_for_launch(
     }
 }
 
-fn uses_bubblewrap_network_isolation(status: &WorkspaceStatus) -> bool {
-    status.applied_policy.as_ref().is_some_and(|policy| {
+fn uses_bubblewrap_network_isolation(policy: Option<&AppliedWorkspacePolicy>) -> bool {
+    policy.is_some_and(|policy| {
         matches!(policy.network.mode, NetworkMode::Disabled)
             && policy.enforcement.network.enforced
             && policy.runtime_capabilities.bubblewrap.ok
     })
 }
 
-fn uses_bubblewrap_mount_isolation(status: &WorkspaceStatus) -> bool {
-    status.applied_policy.as_ref().is_some_and(|policy| {
+fn uses_bubblewrap_mount_isolation(policy: Option<&AppliedWorkspacePolicy>) -> bool {
+    policy.is_some_and(|policy| {
         !policy.mounts.is_empty()
             && policy.enforcement.mounts.enforced
             && policy.runtime_capabilities.bubblewrap.ok
@@ -1259,13 +1295,11 @@ fn uses_bubblewrap_mount_isolation(status: &WorkspaceStatus) -> bool {
 
 fn restricted_mount_namespace_args(
     status: &WorkspaceStatus,
+    policy: Option<&AppliedWorkspacePolicy>,
     cwd: Option<&Path>,
     network: bool,
 ) -> Result<Vec<String>> {
-    let policy = status
-        .applied_policy
-        .as_ref()
-        .context("mount namespace requested without an applied policy")?;
+    let policy = policy.context("mount namespace requested without an applied policy")?;
     let mut args = Vec::new();
     let mut dirs = BTreeSet::new();
     let mut add_dir = |path: &Path| {
