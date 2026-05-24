@@ -154,7 +154,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_start",
-        description = "Start an isolated X11 agent workspace with its own display and control IPC socket.",
+        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -555,7 +555,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles. workspace_status reports the applied profile policy snapshot and enforcement state; mount and restricted-network policies are currently declared but not enforced by the X11 runtime. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. workspace_status reports the applied profile policy snapshot and enforcement state; mount and restricted-network policies are currently declared but not enforced by the X11 runtime. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -601,6 +601,8 @@ struct WorkspaceStartParams {
     #[serde(default)]
     profile: Option<String>,
     #[serde(default)]
+    acknowledge_hidden_workspace: bool,
+    #[serde(default)]
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
@@ -628,6 +630,7 @@ impl WorkspaceStartParams {
         if let Some(height) = self.height {
             options.height = height;
         }
+        options.user_acknowledged_hidden_workspace = self.acknowledge_hidden_workspace;
         Ok(options)
     }
 }

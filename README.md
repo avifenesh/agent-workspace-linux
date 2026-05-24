@@ -35,8 +35,8 @@ cargo run -- profile list
 cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
 cargo run -- profile delete project-dev
-cargo run -- workspace start --profile project-dev
-cargo run -- workspace start --foreground
+cargo run -- workspace start --ack-hidden-workspace --profile project-dev
+cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
@@ -68,8 +68,10 @@ sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick
 the workspace runtime grows. The workspace commands use a small local Unix
 socket daemon:
 
-- `workspace start` chooses a free X11 display, creates an `xauth` file, starts
-  `Xvfb`, starts a lightweight window manager, and binds a control socket under
+- `workspace start` requires `--ack-hidden-workspace` so the user explicitly
+  acknowledges that a separate agent-controlled environment is being created.
+  It then chooses a free X11 display, creates an `xauth` file, starts `Xvfb`,
+  starts a lightweight window manager, and binds a control socket under
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
   profile width/height are applied unless explicit flags override them, and the
   profile's mounts/network/setup intent is snapshotted into status.
@@ -98,8 +100,9 @@ socket daemon:
   status/log tools.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
-  applied policy snapshot and which parts are currently enforced. `workspace
-  status` and `workspace stop` talk to the same socket.
+  hidden-workspace acknowledgement, applied policy snapshot, and which parts are
+  currently enforced. `workspace status` and `workspace stop` talk to the same
+  socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,

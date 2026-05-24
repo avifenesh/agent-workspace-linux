@@ -49,6 +49,7 @@ pub struct WorkspaceStartOptions {
     pub id: String,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub user_acknowledged_hidden_workspace: bool,
     pub width: u32,
     pub height: u32,
 }
@@ -59,6 +60,7 @@ impl Default for WorkspaceStartOptions {
             id: DEFAULT_WORKSPACE_ID.to_string(),
             profile_id: None,
             applied_policy: None,
+            user_acknowledged_hidden_workspace: false,
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
         }
@@ -70,6 +72,7 @@ pub struct DaemonOptions {
     pub id: String,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub user_acknowledged_hidden_workspace: bool,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -85,6 +88,7 @@ pub struct WorkspaceStatus {
     pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub user_acknowledged_hidden_workspace: bool,
     pub ready: bool,
     pub display: String,
     pub width: u32,
@@ -594,6 +598,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
             id,
             profile_id: options.profile_id,
             applied_policy: options.applied_policy,
+            user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
             ready: true,
             display: options.display,
             width: options.width,
@@ -614,6 +619,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
         "width": state.status.width,
         "height": state.status.height,
         "profile_id": state.status.profile_id.as_deref(),
+        "user_acknowledged_hidden_workspace": state.status.user_acknowledged_hidden_workspace,
     });
     record_event(&mut state, "workspace_start", start_detail)?;
 
@@ -667,6 +673,11 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     if let Ok(status) = status_workspace(&id) {
         return Ok(WorkspaceStartPlan::AlreadyRunning(status));
     }
+    if !options.user_acknowledged_hidden_workspace {
+        bail!(
+            "starting a hidden agent workspace requires explicit acknowledgement; pass --ack-hidden-workspace or set acknowledge_hidden_workspace=true"
+        );
+    }
 
     let runtime = doctor_report();
     if !runtime.ready_for_x11_workspace {
@@ -689,6 +700,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         id,
         profile_id: options.profile_id,
         applied_policy: options.applied_policy,
+        user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
         display,
         width: options.width,
         height: options.height,
@@ -710,6 +722,9 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     if let Some(policy) = &options.applied_policy {
         let policy_path = write_applied_policy_file(&options.runtime_dir, policy)?;
         daemon.arg("--policy").arg(policy_path);
+    }
+    if options.user_acknowledged_hidden_workspace {
+        daemon.arg("--ack-hidden-workspace");
     }
     daemon
         .arg("--display")
