@@ -25,7 +25,7 @@ Environment:
   the same current behavior as the repo build for permission ceilings, network
   isolation, mount enforcement, browser QA, screenshots/input/clipboard, events,
   cleanup, daemon-crash recovery, and self-stop.
-- `cargo test` passed 40 tests, including permission-ceiling checks,
+- `cargo test` passed 46 tests, including permission-ceiling checks,
   local-only/disabled network policy planning, launch-preview daemon
   requirements, workspace socket-path validation, stop behavior, browser-session
   template behavior, and profile validation.
@@ -46,7 +46,7 @@ Environment:
   Chrome DevTools Protocol DOM checks and hidden-workspace screenshots.
 - The Agent Workspaces settings page in the dev app showed the MCP permissions
   card, one active-workspace card, saved-workspaces section, and a working
-  Status/Hide status toggle. The corresponding feature tests now pass 12 tests.
+  Status/Hide status toggle. The corresponding feature tests now pass 14 tests.
 - A C-gate browser-session probe added a starter profile for explicitly
   user-approved browser data directories. The first probe mounted a temporary
   user-data dir read-write and launched Chrome without `--no-sandbox`; Chrome
@@ -81,14 +81,20 @@ Remaining gaps from this pass:
 - Hard permission enforcement in Codex for Linux should still wait until the UI
   approval boundary is wired so agents cannot call the same workspace tools
   outside the user-approved path.
-- Direct MCP `workspace_stop` from the temporary stdio smoke harness caused the
-  harness process to receive `SIGTERM` before the stop response was read. The
-  same workspace cleanup succeeded through the CLI in the same temp runtime, so
-  stop/revoke needs one more MCP-specific dogfood pass before hard permission
-  enforcement.
 
 Addressed in this pass:
 
+- The stdio MCP smoke now covers the stop/revoke path directly. It starts a
+  real workspace through MCP, runs a command inside it, verifies compact action
+  responses, calls MCP `workspace_stop`, verifies the stopped status, previews
+  `workspace_cleanup_stale` for that workspace, and then removes the stopped
+  runtime through MCP. The old CLI cleanup remains only as an opt-out fallback
+  for harness debugging.
+- Agent Workspace approval prompts in Codex for Linux no longer show the raw
+  `Params` JSON object when the app supplies a generic display payload. The
+  renderer now unwraps the bridge `params` object, recognizes workspace/profile
+  actions, and shows readable rows such as Action, Profile, Run setup, startup
+  window waits, and acknowledgement flags.
 - MCP and CLI app-action responses no longer embed long stopped-app history in
   nested `status.apps`. They keep the directly affected app in top-level
   `apps`, while explicit `workspace_status`, `workspace_observe`, and

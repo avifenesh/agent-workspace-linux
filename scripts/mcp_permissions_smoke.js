@@ -269,8 +269,34 @@ async function main() {
         stopped.ok === true && stopped.status?.ready === false,
         `workspace_stop did not stop the smoke workspace: ${JSON.stringify(stopped)}`,
       );
+      const cleanupPreview = await callTool(
+        "workspace_cleanup_stale",
+        { id: workspaceId, dry_run: true },
+        15000,
+      );
+      assert(
+        Array.isArray(cleanupPreview.candidates) &&
+          cleanupPreview.candidates.some((candidate) => candidate.id === workspaceId),
+        `workspace_cleanup_stale dry run did not find stopped smoke workspace: ${JSON.stringify(cleanupPreview)}`,
+      );
+      const cleanup = await callTool(
+        "workspace_cleanup_stale",
+        { id: workspaceId, dry_run: false },
+        15000,
+      );
+      assert(
+        Array.isArray(cleanup.removed) &&
+          cleanup.removed.some((removed) => removed.id === workspaceId),
+        `workspace_cleanup_stale did not remove stopped smoke workspace: ${JSON.stringify(cleanup)}`,
+      );
     } else {
       childProcess.spawnSync(bin, ["workspace", "stop", "--id", workspaceId], {
+        cwd: repoRoot,
+        env: childEnv,
+        stdio: "ignore",
+        timeout: 15000,
+      });
+      childProcess.spawnSync(bin, ["workspace", "cleanup", "--id", workspaceId], {
         cwd: repoRoot,
         env: childEnv,
         stdio: "ignore",
