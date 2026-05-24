@@ -199,3 +199,17 @@ Post-patch verification:
   screenshot plus root screenshot/events, stopped the app/workspace cleanly, and
   removed the stopped runtime through `workspace_cleanup_stale` dry-run plus
   actual cleanup.
+- The installed CLI was rebuilt with the socket guard. A too-long workspace id
+  now exits with the explicit socket-path error before start, and the process
+  count check showed no new workspace X11/window-manager process was spawned.
+- A second real-project QA pass used the freshly installed CLI against
+  `/home/avifenesh/projects/agent-chrome-bridge`. The temporary profile mounted
+  the project read-only at `/workspace/project`, set that as the profile cwd,
+  requested `network.mode=disabled`, and required enforcement. The workspace
+  reported `bubblewrap_mount_namespace` plus `bubblewrap_unshare_net`, and
+  `npm test` passed from the mounted cwd with 32 MCP tools exposed by the
+  project smoke. Stop, stale cleanup, and profile deletion completed afterward.
+- The same pass also re-confirmed why Codex/MCP reload matters after install:
+  the already-running MCP server process still used older profile-cwd behavior
+  until the installed CLI was invoked directly. This is an upgrade/reload
+  lifecycle issue, not a current-runtime failure.
