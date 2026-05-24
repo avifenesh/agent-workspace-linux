@@ -3115,10 +3115,18 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     "click",
                     serde_json::json!({ "x": x, "y": y, "button": button, "count": count }),
                 )?;
-                (
-                    response_with_status(true, "workspace click sent", &state.status),
-                    false,
-                )
+                match workspace_pointer(&state.status) {
+                    Ok(pointer) => {
+                        let mut response =
+                            response_with_status(true, "workspace click sent", &state.status);
+                        response.pointer = Some(pointer);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
@@ -3192,8 +3200,17 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 "workspace window click sent",
                                 &state.status,
                             );
-                            response.windows = Some(vec![clicked.window]);
-                            (response, false)
+                            match workspace_pointer(&state.status) {
+                                Ok(pointer) => {
+                                    response.pointer = Some(pointer);
+                                    response.windows = Some(vec![clicked.window]);
+                                    (response, false)
+                                }
+                                Err(error) => (
+                                    response_with_status(false, error.to_string(), &state.status),
+                                    false,
+                                ),
+                            }
                         }
                         Ok(None) => {
                             let mut response = response_with_status(
