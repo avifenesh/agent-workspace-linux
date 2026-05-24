@@ -9,6 +9,7 @@ BINDIR="${BINDIR:-$PREFIX/bin}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CODEX_CONFIG="${CODEX_CONFIG:-$CODEX_HOME/config.toml}"
 CODEX_MCP_SERVER_NAME="${CODEX_MCP_SERVER_NAME:-agent-workspace-linux}"
+MCP_PERMISSIONS="${MCP_PERMISSIONS:-}"
 
 DRY_RUN=0
 SKIP_BUILD=0
@@ -30,6 +31,7 @@ Options:
   --bindir PATH          Install binary into PATH (default: PREFIX/bin).
   --codex-home PATH      Use this Codex home (default: ~/.codex).
   --codex-config PATH    Use this Codex config file.
+  --permissions PATH     Register the MCP server with a spawn-time permission ceiling.
   -h, --help             Show this help.
 USAGE
 }
@@ -66,6 +68,10 @@ while [ "$#" -gt 0 ]; do
       CODEX_CONFIG="${2:?missing value for --codex-config}"
       shift
       ;;
+    --permissions)
+      MCP_PERMISSIONS="${2:?missing value for --permissions}"
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -87,11 +93,16 @@ toml_escape() {
 }
 
 desired_mcp_block() {
-  local escaped_command
+  local escaped_command escaped_permissions
   escaped_command="$(toml_escape "$DEST_BIN")"
   printf '[mcp_servers.%s]\n' "$CODEX_MCP_SERVER_NAME"
   printf 'command = "%s"\n' "$escaped_command"
-  printf 'args = ["mcp"]\n'
+  if [ -n "$MCP_PERMISSIONS" ]; then
+    escaped_permissions="$(toml_escape "$MCP_PERMISSIONS")"
+    printf 'args = ["mcp", "--permissions", "%s"]\n' "$escaped_permissions"
+  else
+    printf 'args = ["mcp"]\n'
+  fi
 }
 
 write_codex_config() {

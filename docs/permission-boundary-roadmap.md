@@ -73,6 +73,10 @@ Possible MCP config shape:
 }
 ```
 
+`./install.sh --permissions PATH` writes this locked MCP registration for Codex
+without hand-editing `config.toml`; running `./install.sh` without that flag
+keeps the default UI-owned open registration.
+
 Rules:
 
 - Missing or empty permission fields mean no MCP-level ceiling for that
@@ -134,16 +138,18 @@ Current gate status on 2026-05-25:
   app configuration, PID-less arbitrary app window targeting, and
   recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
-  slice. The Codex for Linux app picker now accepts both executable files and
-  `.desktop` launchers, parsing launcher `Name`/`Exec` fields into startup app
-  commands without a shell. Authenticated browser-profile sharing now has a
-  `browser-session` starter template and a first Codex for Linux picker/copy/
-  lock-warning flow for explicitly user-approved browser data directories. The
-  installed MCP path has also proven that template end to end with a synthetic
-  Chrome profile: approval preview, real startup, visible Chrome window,
-  mounted browser-data read/write, screenshots/observe/artifacts, stop, profile
-  deletion, and stale cleanup. Live real-account dogfood is still needed before
-  making that path the default recommendation for shopping-style tasks.
+  slice, and `./install.sh --permissions PATH` now gives locked MCP hosts a
+  repeatable setup path without hand-editing Codex config. The Codex for Linux
+  app picker now accepts both executable files and `.desktop` launchers, parsing
+  launcher `Name`/`Exec` fields into startup app commands without a shell.
+  Authenticated browser-profile sharing now has a `browser-session` starter
+  template and a first Codex for Linux picker/copy/lock-warning flow for
+  explicitly user-approved browser data directories. The installed MCP path has
+  also proven that template end to end with a synthetic Chrome profile: approval
+  preview, real startup, visible Chrome window, mounted browser-data read/write,
+  screenshots/observe/artifacts, stop, profile deletion, and stale cleanup. Live
+  real-account dogfood is still needed before making that path the default
+  recommendation for shopping-style tasks.
 
 ### A. Prove Runtime Claims With Real Workloads
 

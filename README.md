@@ -191,7 +191,13 @@ args = ["mcp"]
 
 That default registration is intentionally open at the MCP layer so Codex for
 Linux can own the approval UI. For MCP hosts or auto-loop agents that need fixed
-permissions at server spawn, pass a ceiling file:
+permissions at server spawn, pass a ceiling file during install:
+
+```bash
+./install.sh --permissions /home/YOU/.config/agent-workspace-linux/permissions.json
+```
+
+That writes:
 
 ```toml
 [mcp_servers.agent-workspace-linux]

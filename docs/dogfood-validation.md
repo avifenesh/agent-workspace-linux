@@ -528,3 +528,10 @@ Previous post-patch verification:
   the embedded Stop button stopped the workspace from inside the app; saved
   events recorded the click, the installed app exiting by SIGTERM, and
   `workspace_stop`, then stale cleanup removed the stopped runtime.
+- 2026-05-25 C-gate locked-host setup polish added installer support for
+  `./install.sh --permissions PATH`, which writes the Codex MCP registration as
+  `args = ["mcp", "--permissions", "PATH"]` instead of requiring hand edits to
+  `config.toml`. Dry-run validation showed both the default open registration
+  and the locked registration shape. `bash -n install.sh`,
+  `node scripts/mcp_permissions_smoke.js`, and `cargo test --locked` all passed
+  afterward.
