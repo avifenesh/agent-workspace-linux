@@ -135,8 +135,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "windows" => {
-            let id = parse_id_option(&args[1..])?;
-            print_json(&workspace::list_windows(&id)?)
+            let (id, include_hidden) = parse_windows_options(&args[1..])?;
+            print_json(&workspace::list_windows(&id, include_hidden)?)
         }
         "active-window" => {
             let id = parse_id_option(&args[1..])?;
@@ -614,6 +614,26 @@ fn parse_id_option(args: &[String]) -> Result<String> {
         }
     }
     Ok(id)
+}
+
+fn parse_windows_options(args: &[String]) -> Result<(String, bool)> {
+    let mut id = workspace::default_workspace_id();
+    let mut include_hidden = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--all" | "--include-hidden" => {
+                include_hidden = true;
+                index += 1;
+            }
+            flag => bail!("unknown workspace windows option '{flag}'"),
+        }
+    }
+    Ok((id, include_hidden))
 }
 
 fn parse_no_options(args: &[String], command: &str) -> Result<()> {
@@ -2504,6 +2524,7 @@ Usage:
   agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
   agent-workspace-linux workspace windows [--id ID]
+  agent-workspace-linux workspace windows [--id ID] --all
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--screenshot] [--output PATH]
   agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]

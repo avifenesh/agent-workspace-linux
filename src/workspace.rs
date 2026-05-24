@@ -244,6 +244,7 @@ pub struct WorkspaceWindow {
     pub id: String,
     pub title: String,
     pub pid: Option<u32>,
+    pub visible: bool,
     pub geometry: WindowGeometry,
 }
 
@@ -323,7 +324,10 @@ pub enum IpcRequest {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         env: Vec<EnvVar>,
     },
-    ListWindows,
+    ListWindows {
+        #[serde(default)]
+        include_hidden: bool,
+    },
     ActiveWindow,
     Observe {
         screenshot: bool,
@@ -801,9 +805,12 @@ fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
     Ok(())
 }
 
-pub fn list_windows(id: &str) -> Result<IpcResponse> {
+pub fn list_windows(id: &str, include_hidden: bool) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    request(&workspace_socket_path(&id), IpcRequest::ListWindows)
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ListWindows { include_hidden },
+    )
 }
 
 pub fn active_window(id: &str) -> Result<IpcResponse> {
@@ -1785,23 +1792,28 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
-        IpcRequest::ListWindows => match list_workspace_windows(&state.status) {
-            Ok(windows) => {
-                record_event(
-                    state,
-                    "list_windows",
-                    serde_json::json!({ "count": windows.len() }),
-                )?;
-                let mut response =
-                    response_with_status(true, "workspace windows listed", &state.status);
-                response.windows = Some(windows);
-                (response, false)
+        IpcRequest::ListWindows { include_hidden } => {
+            match list_workspace_windows(&state.status, include_hidden) {
+                Ok(windows) => {
+                    record_event(
+                        state,
+                        "list_windows",
+                        serde_json::json!({
+                            "count": windows.len(),
+                            "include_hidden": include_hidden,
+                        }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace windows listed", &state.status);
+                    response.windows = Some(windows);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
             }
-            Err(error) => (
-                response_with_status(false, error.to_string(), &state.status),
-                false,
-            ),
-        },
+        }
         IpcRequest::ActiveWindow => match active_workspace_window(&state.status) {
             Ok(Some(window)) => {
                 record_event(
@@ -3533,9 +3545,38 @@ fn rename_app_log(path: &Path, pid: u32, stream: &str) -> Result<PathBuf> {
     Ok(target)
 }
 
-fn list_workspace_windows(status: &WorkspaceStatus) -> Result<Vec<WorkspaceWindow>> {
-    let output = workspace_command(status, "xdotool")
-        .args(["search", "--onlyvisible", "--name", "."])
+fn list_workspace_windows(
+    status: &WorkspaceStatus,
+    include_hidden: bool,
+) -> Result<Vec<WorkspaceWindow>> {
+    let ids = search_workspace_window_ids(status, !include_hidden)?;
+    let visible_ids: BTreeSet<String> = if include_hidden {
+        search_workspace_window_ids(status, true)?
+            .into_iter()
+            .collect()
+    } else {
+        ids.iter().cloned().collect()
+    };
+
+    ids.into_iter()
+        .map(|id| {
+            let visible = visible_ids.contains(&id);
+            window_info_with_visibility(status, &id, visible)
+        })
+        .collect()
+}
+
+fn search_workspace_window_ids(
+    status: &WorkspaceStatus,
+    only_visible: bool,
+) -> Result<Vec<String>> {
+    let mut command = workspace_command(status, "xdotool");
+    command.arg("search");
+    if only_visible {
+        command.arg("--onlyvisible");
+    }
+    let output = command
+        .args(["--name", "."])
         .output()
         .context("failed to run xdotool window search")?;
     if !output.status.success() {
@@ -3543,13 +3584,13 @@ fn list_workspace_windows(status: &WorkspaceStatus) -> Result<Vec<WorkspaceWindo
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
+    Ok(stdout
         .lines()
         .filter_map(|line| {
             let id = line.trim();
-            (!id.is_empty()).then(|| window_info(status, id))
+            (!id.is_empty()).then(|| id.to_string())
         })
-        .collect()
+        .collect())
 }
 
 fn active_workspace_window(status: &WorkspaceStatus) -> Result<Option<WorkspaceWindow>> {
@@ -3573,7 +3614,7 @@ fn observe_workspace(
     screenshot: bool,
     output_path: Option<PathBuf>,
 ) -> Result<IpcResponse> {
-    let windows = list_workspace_windows(&state.status)?;
+    let windows = list_workspace_windows(&state.status, false)?;
     let active_window = active_workspace_window(&state.status)?;
     let screenshot = if screenshot {
         Some(capture_workspace_screenshot(&state.status, output_path)?)
@@ -3632,7 +3673,7 @@ fn matching_workspace_windows(
             .find(|app| matches_app_id(app, app_id))
             .map(|app| app.pid)
     });
-    Ok(list_workspace_windows(&state.status)?
+    Ok(list_workspace_windows(&state.status, false)?
         .into_iter()
         .filter(|window| {
             criteria
@@ -4040,6 +4081,17 @@ fn resolve_workspace_window(
 }
 
 fn window_info(status: &WorkspaceStatus, id: &str) -> Result<WorkspaceWindow> {
+    let visible = search_workspace_window_ids(status, true)?
+        .iter()
+        .any(|visible_id| visible_id == id);
+    window_info_with_visibility(status, id, visible)
+}
+
+fn window_info_with_visibility(
+    status: &WorkspaceStatus,
+    id: &str,
+    visible: bool,
+) -> Result<WorkspaceWindow> {
     let title = workspace_command(status, "xdotool")
         .args(["getwindowname", id])
         .output()
@@ -4065,6 +4117,7 @@ fn window_info(status: &WorkspaceStatus, id: &str) -> Result<WorkspaceWindow> {
         id: id.to_string(),
         title,
         pid,
+        visible,
         geometry: parse_window_geometry(&geometry_text)?,
     })
 }

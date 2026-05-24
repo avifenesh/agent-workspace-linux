@@ -53,6 +53,7 @@ cargo run -- workspace run --timeout-ms 30000 --tail-bytes 65536 -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
+cargo run -- workspace windows --all
 cargo run -- workspace active-window
 cargo run -- workspace observe --screenshot --output /tmp/agent-observe.png
 cargo run -- workspace wait-window --title xterm --timeout-ms 10000
@@ -155,7 +156,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `workspace paste-window`, `workspace logs`, `workspace wait-app`,
   `workspace events`, `workspace setup`, and
   `workspace kill-app` inspect or act through the same daemon, scoped to the
-  workspace display. `active-window` reports the current workspace-local focus,
+  workspace display. `windows` lists visible windows by default; `--all`
+  includes minimized/hidden windows with a `visible` flag so they can be shown
+  again by id. `active-window` reports the current workspace-local focus,
   and `observe` returns status, visible windows, active window, and optionally a
   root screenshot in one IPC call. `focus-window`, `screenshot-window`,
   `close-window`, `move-window`, `resize-window`, `raise-window`,
@@ -216,4 +219,6 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_type_window`, `workspace_set_clipboard`, `workspace_get_clipboard`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`.
+`workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` accepts
+`include_hidden=true` to return minimized/hidden windows as well as visible
+windows.
