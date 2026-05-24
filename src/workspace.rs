@@ -510,7 +510,8 @@ fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
         bail!("launch command cannot be empty");
     }
     if let Some(cwd) = &spec.cwd {
-        if !cwd.is_dir() {
+        if !cwd_is_provided_by_bubblewrap_mount(cwd, spec.applied_policy.as_ref()) && !cwd.is_dir()
+        {
             bail!("launch cwd {} is not a directory", cwd.display());
         }
     }
@@ -518,6 +519,20 @@ fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
         validate_env_var(env_var)?;
     }
     Ok(())
+}
+
+fn cwd_is_provided_by_bubblewrap_mount(
+    cwd: &Path,
+    policy: Option<&AppliedWorkspacePolicy>,
+) -> bool {
+    let Some(policy) = policy else {
+        return false;
+    };
+    uses_bubblewrap_mount_isolation(Some(policy))
+        && policy
+            .mounts
+            .iter()
+            .any(|mount| cwd == mount.workspace_path || cwd.starts_with(&mount.workspace_path))
 }
 
 fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {

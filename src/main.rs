@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
 
 fn handle_profile(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
-        bail!("missing profile command. Expected: path, list, get, check, put, delete");
+        bail!("missing profile command. Expected: path, list, get, check, template, put, delete");
     };
     match command {
         "path" => {
@@ -63,6 +63,10 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             let id = parse_required_id_arg(&args[1..], "profile check requires an id")?;
             print_json(&profile::check_profile(&id)?)
         }
+        "template" => {
+            let (kind, id, host_path) = parse_profile_template_options(&args[1..])?;
+            print_json(&profile::template_profile(&kind, id, host_path)?)
+        }
         "put" => {
             let profile = parse_profile_put_options(&args[1..])?;
             print_json(&profile::put_profile(profile)?)
@@ -72,7 +76,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             print_json(&profile::delete_profile(&id)?)
         }
         unknown => {
-            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, put, delete")
+            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, delete")
         }
     }
 }
@@ -278,6 +282,32 @@ fn parse_profile_put_options(args: &[String]) -> Result<WorkspaceProfile> {
         .with_context(|| format!("failed to read {}", json_path.display()))?;
     serde_json::from_str(&content)
         .with_context(|| format!("failed to parse profile JSON from {}", json_path.display()))
+}
+
+fn parse_profile_template_options(
+    args: &[String],
+) -> Result<(String, Option<String>, Option<PathBuf>)> {
+    let kind = args
+        .first()
+        .context("profile template requires a kind, for example project-dev")?
+        .to_string();
+    let mut id = None;
+    let mut host_path = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = Some(value_after(args, index, "--id")?.to_string());
+                index += 2;
+            }
+            "--host-path" => {
+                host_path = Some(PathBuf::from(value_after(args, index, "--host-path")?));
+                index += 2;
+            }
+            flag => bail!("unknown profile template option '{flag}'"),
+        }
+    }
+    Ok((kind, id, host_path))
 }
 
 fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {
@@ -639,6 +669,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|put|delete\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

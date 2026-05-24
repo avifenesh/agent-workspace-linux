@@ -37,6 +37,7 @@ paths, and mount destinations must be non-overlapping absolute paths under
 cargo run -- doctor
 cargo run -- profile path
 cargo run -- profile list
+cargo run -- profile template project-dev --host-path "$PWD"
 cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
 cargo run -- profile check project-dev
@@ -122,10 +123,11 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
-`profile_path`, `profile_list`, `profile_get`, `profile_check`, `profile_put`,
-`profile_delete`, `workspace_start`, `workspace_list`, `workspace_cleanup_stale`,
-`workspace_status`, `workspace_launch_app`, `workspace_list_windows`,
-`workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
-`workspace_click`, `workspace_key`, `workspace_type_text`,
-`workspace_read_app_log`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`.
+`profile_path`, `profile_list`, `profile_get`, `profile_check`,
+`profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
+`workspace_list`, `workspace_cleanup_stale`, `workspace_status`,
+`workspace_launch_app`, `workspace_list_windows`, `workspace_screenshot`,
+`workspace_focus_window`, `workspace_close_window`, `workspace_click`,
+`workspace_key`, `workspace_type_text`, `workspace_read_app_log`,
+`workspace_events`, `workspace_run_profile_setup`, `workspace_kill_app`, and
+`workspace_stop`.

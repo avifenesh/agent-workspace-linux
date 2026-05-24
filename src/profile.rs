@@ -1,5 +1,5 @@
 use crate::policy::{AppliedWorkspacePolicy, NetworkMode};
-pub use crate::policy::{NetworkPolicy, ProfileMount};
+pub use crate::policy::{MountMode, NetworkPolicy, ProfileMount};
 use crate::workspace::{self, EnvVar, IpcResponse, LaunchSpec, WorkspaceStartOptions};
 use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
@@ -108,6 +108,43 @@ pub fn get_profile(id: &str) -> Result<WorkspaceProfile> {
         .into_iter()
         .find(|profile| profile.id == id)
         .ok_or_else(|| anyhow::anyhow!("profile {id:?} was not found"))
+}
+
+pub fn template_profile(
+    kind: &str,
+    id: Option<String>,
+    host_path: Option<PathBuf>,
+) -> Result<WorkspaceProfile> {
+    let kind = kind.trim();
+    let profile = match kind {
+        "project-dev" | "project_dev" => {
+            let id = id.unwrap_or_else(|| "project-dev".to_string());
+            let host_path = match host_path {
+                Some(path) => path,
+                None => env::current_dir().context("failed to resolve template host path")?,
+            };
+            WorkspaceProfile {
+                id,
+                description: Some(
+                    "Project QA profile with the selected project mounted read-write.".to_string(),
+                ),
+                width: None,
+                height: None,
+                cwd: Some(PathBuf::from("/workspace/project")),
+                env: Vec::new(),
+                mounts: vec![ProfileMount {
+                    host_path,
+                    workspace_path: PathBuf::from("/workspace/project"),
+                    mode: MountMode::ReadWrite,
+                }],
+                network: NetworkPolicy::default(),
+                setup_commands: Vec::new(),
+            }
+        }
+        _ => bail!("unknown profile template {kind:?}. Expected: project-dev"),
+    };
+    validate_profile(&profile)?;
+    Ok(profile)
 }
 
 pub fn check_profile(id: &str) -> Result<ProfileCheck> {
