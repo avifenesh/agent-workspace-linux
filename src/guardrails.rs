@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 4,
+        version: 5,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -161,7 +161,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 ],
                 "Local-only profiles declare that launched apps should reach selected localhost or loopback targets but not the internet.",
                 "--ack-unenforced-policy or acknowledge_unenforced_policy=true until a local-network backend is active",
-                "profile_check reports network.state=unenforced with required_acknowledgement=ack_unenforced_policy; allow_hosts is validated to localhost or loopback targets.",
+                "profile_check reports network.state=unenforced with planned_backend=network_namespace_loopback_proxy and required_acknowledgement=ack_unenforced_policy; allow_hosts is validated to localhost or loopback targets.",
             ),
             rule(
                 "profile-network-allowlist",

@@ -121,7 +121,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "profile_check",
-        description = "Preflight a saved profile against the current machine. Returns the applied policy, per-capability state/backend/limitations, warnings, and acknowledgement requirements before starting a workspace.",
+        description = "Preflight a saved profile against the current machine. Returns the applied policy, per-capability state/backend/planned_backend/backend_requirements/limitations, warnings, and acknowledgement requirements before starting a workspace.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,

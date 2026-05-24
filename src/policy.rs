@@ -111,6 +111,10 @@ impl AppliedWorkspacePolicy {
         if mounts_enforced {
             mount_status.backend = Some("bubblewrap_mount_namespace".to_string());
         } else if mount_policy_requested {
+            mount_status.planned_backend = Some("bubblewrap_mount_namespace".to_string());
+            mount_status
+                .backend_requirements
+                .push("bubblewrap".to_string());
             mount_status.limitations.push(
                 "mount requests are recorded in the profile but launched apps keep the host filesystem view"
                     .to_string(),
@@ -167,12 +171,21 @@ impl AppliedWorkspacePolicy {
                 network_status.backend = Some("bubblewrap_unshare_net".to_string());
             }
             NetworkMode::Disabled => {
+                network_status.planned_backend = Some("bubblewrap_unshare_net".to_string());
+                network_status
+                    .backend_requirements
+                    .push("bubblewrap".to_string());
                 network_status.limitations.push(
                     "network disabled is recorded in the profile but launched apps keep host network access"
                         .to_string(),
                 );
             }
             NetworkMode::LocalOnly => {
+                network_status.planned_backend =
+                    Some("network_namespace_loopback_proxy".to_string());
+                network_status
+                    .backend_requirements
+                    .extend(["bubblewrap", "slirp4netns", "loopback_proxy"].map(str::to_string));
                 network_status.limitations.push(
                     "allow_hosts is recorded for local service intent, but traffic is not restricted to those local targets"
                         .to_string(),
@@ -183,6 +196,10 @@ impl AppliedWorkspacePolicy {
                 );
             }
             NetworkMode::Allowlist => {
+                network_status.planned_backend = Some("egress_proxy_allowlist".to_string());
+                network_status.backend_requirements.extend(
+                    ["network_namespace", "egress_proxy", "domain_filter"].map(str::to_string),
+                );
                 network_status.limitations.push(
                     "allow_hosts is recorded for UI intent, but traffic is not filtered to those hosts"
                         .to_string(),
@@ -210,6 +227,8 @@ impl AppliedWorkspacePolicy {
                     enforced: true,
                     state: Some(PolicyCapabilityState::Enforced),
                     backend: Some("xvfb_xauth_display".to_string()),
+                    planned_backend: None,
+                    backend_requirements: Vec::new(),
                     requires_acknowledgement: Some(false),
                     required_acknowledgement: None,
                     limitations: Vec::new(),
@@ -221,6 +240,8 @@ impl AppliedWorkspacePolicy {
                     enforced: true,
                     state: Some(PolicyCapabilityState::Enforced),
                     backend: Some("workspace_ipc".to_string()),
+                    planned_backend: None,
+                    backend_requirements: Vec::new(),
                     requires_acknowledgement: Some(false),
                     required_acknowledgement: None,
                     limitations: Vec::new(),
@@ -360,6 +381,10 @@ pub struct PolicyCapabilityStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backend_requirements: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_acknowledgement: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_acknowledgement: Option<String>,
@@ -385,6 +410,8 @@ impl PolicyCapabilityStatus {
             enforced,
             state: Some(state),
             backend: None,
+            planned_backend: None,
+            backend_requirements: Vec::new(),
             requires_acknowledgement: Some(requires_acknowledgement),
             required_acknowledgement: requires_acknowledgement
                 .then(|| "ack_unenforced_policy".to_string()),
@@ -546,6 +573,16 @@ mod tests {
         );
         assert!(policy.has_requested_unenforced_policy());
         assert!(policy.runtime_capabilities.can_candidate_local_network);
+        assert_eq!(
+            policy.enforcement.network.planned_backend.as_deref(),
+            Some("network_namespace_loopback_proxy")
+        );
+        assert!(policy
+            .enforcement
+            .network
+            .backend_requirements
+            .iter()
+            .any(|requirement| requirement == "loopback_proxy"));
         assert!(policy
             .enforcement
             .network
@@ -596,6 +633,8 @@ mod tests {
         assert!(status.requested);
         assert!(!status.enforced);
         assert_eq!(status.state, None);
+        assert_eq!(status.planned_backend, None);
+        assert!(status.backend_requirements.is_empty());
         assert_eq!(status.requires_acknowledgement, None);
         assert_eq!(status.required_acknowledgement, None);
         assert!(status.limitations.is_empty());
