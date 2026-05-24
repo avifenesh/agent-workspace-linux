@@ -5304,6 +5304,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         },
         IpcRequest::Stop => {
             let stopped_apps = terminate_running_workspace_apps(state)?;
+            state.status.ready = false;
             record_event(
                 state,
                 "workspace_stop",
@@ -8203,6 +8204,36 @@ mod tests {
 
         assert!(should_stop);
         let _ = fs::remove_dir_all(&state.status.runtime_dir);
+    }
+
+    #[test]
+    fn stop_response_reports_workspace_not_ready() {
+        let name = "stop-ready-response";
+        let mut state = daemon_state_for_test(name);
+        fs::create_dir_all(&state.status.runtime_dir).expect("runtime dir");
+        let runtime_dir = state.status.runtime_dir.clone();
+        let (server, mut client) = UnixStream::pair().expect("unix stream pair");
+
+        let handler = thread::spawn(move || {
+            let should_stop = handle_stream(server, &mut state).expect("stop response");
+            (should_stop, state.status.ready)
+        });
+
+        serde_json::to_writer(&mut client, &IpcRequest::Stop).expect("stop request");
+        client.write_all(b"\n").expect("stop newline");
+
+        let mut response_line = String::new();
+        BufReader::new(client)
+            .read_line(&mut response_line)
+            .expect("stop response line");
+        let response: IpcResponse =
+            serde_json::from_str(&response_line).expect("stop response json");
+        let (should_stop, state_ready) = handler.join().expect("stop handler");
+
+        assert!(should_stop);
+        assert!(!state_ready);
+        assert!(!response.status.expect("response status").ready);
+        let _ = fs::remove_dir_all(&runtime_dir);
     }
 
     #[test]

@@ -143,7 +143,8 @@ run_awl workspace env --id "$LOCAL_ID" > "$SMOKE_DIR/local-env.json"
 assert_json '.environment.session_id == $sid and (.environment.variables[] | select(.name == "AGENT_WORKSPACE_SESSION_ID" and .value == $sid))' "$SMOKE_DIR/local-env.json" --arg sid "$SESSION_ID"
 run_awl workspace events --id "$LOCAL_ID" --tail 20 > "$SMOKE_DIR/local-events.json"
 assert_json '.events[] | select(.kind == "workspace_start" and .detail.session_id == $sid)' "$SMOKE_DIR/local-events.json" --arg sid "$SESSION_ID"
-run_awl workspace stop --id "$LOCAL_ID" > /dev/null
+run_awl workspace stop --id "$LOCAL_ID" > "$SMOKE_DIR/local-stop.json"
+assert_json '.ok == true and .status.ready == false' "$SMOKE_DIR/local-stop.json"
 WORKSPACE_IDS=()
 run_awl workspace manifest --id "$LOCAL_ID" > "$SMOKE_DIR/local-stopped-manifest.json"
 assert_json '.manifest.session_id == $sid and .manifest.ready == false and .manifest.stopped_at_unix != null' "$SMOKE_DIR/local-stopped-manifest.json" --arg sid "$SESSION_ID"
