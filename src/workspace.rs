@@ -23,6 +23,7 @@ const DEFAULT_CLICK_BUTTON: u8 = 1;
 const DEFAULT_CLICK_COUNT: u8 = 1;
 const DEFAULT_SCROLL_AMOUNT: u8 = 1;
 const MAX_SCROLL_AMOUNT: u8 = 100;
+const DEFAULT_PASTE_KEY: &str = "ctrl+v";
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
@@ -455,6 +456,19 @@ pub enum IpcRequest {
         text: String,
     },
     GetClipboard,
+    PasteText {
+        text: String,
+        key: String,
+    },
+    PasteWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        text: String,
+        key: String,
+        timeout_ms: u64,
+    },
     ReadAppLog {
         app_id: String,
         stream: String,
@@ -1169,6 +1183,44 @@ pub fn set_clipboard(id: &str, text: String) -> Result<IpcResponse> {
 pub fn get_clipboard(id: &str) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::GetClipboard)
+}
+
+pub fn paste_text(id: &str, text: String, key: Option<String>) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_clipboard_text(&text)?;
+    let key = normalize_paste_key(key)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::PasteText { text, key },
+    )
+}
+
+pub fn paste_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    text: String,
+    key: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_clipboard_text(&text)?;
+    let key = normalize_paste_key(key)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::PasteWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            text,
+            key,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
 }
 
 pub fn read_app_log(
@@ -2583,6 +2635,111 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
+        IpcRequest::PasteText { text, key } => {
+            let char_count = text.chars().count();
+            match validate_clipboard_text(&text)
+                .and_then(|()| validate_key_text(&key))
+                .and_then(|()| paste_workspace_text(&state.status, &text, &key))
+            {
+                Ok(clipboard) => {
+                    record_event(
+                        state,
+                        "paste_text",
+                        serde_json::json!({
+                            "selection": &clipboard.selection,
+                            "char_count": char_count,
+                            "bytes": clipboard.bytes,
+                            "key": key.trim(),
+                        }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace text pasted", &state.status);
+                    response.clipboard = Some(clipboard);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
+        IpcRequest::PasteWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            text,
+            key,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            let char_count = text.chars().count();
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| validate_clipboard_text(&text))
+            .and_then(|()| validate_key_text(&key))
+            {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match paste_workspace_window(
+                    state,
+                    window_id.as_deref(),
+                    &criteria,
+                    &text,
+                    &key,
+                ) {
+                    Ok(Some(pasted)) => {
+                        record_event(
+                            state,
+                            "paste_window",
+                            serde_json::json!({
+                                "window_id": &pasted.window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "selection": &pasted.clipboard.selection,
+                                "char_count": char_count,
+                                "bytes": pasted.clipboard.bytes,
+                                "key": key.trim(),
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response = response_with_status(
+                            true,
+                            "workspace window text pasted",
+                            &state.status,
+                        );
+                        response.windows = Some(vec![pasted.window]);
+                        response.clipboard = Some(pasted.clipboard);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
         IpcRequest::ReadAppLog {
             app_id,
             stream,
@@ -3147,6 +3304,11 @@ struct WindowScrollResult {
     y: i32,
 }
 
+struct WindowPasteResult {
+    window: WorkspaceWindow,
+    clipboard: WorkspaceClipboard,
+}
+
 fn click_workspace_window(
     state: &mut DaemonState,
     window_id: Option<&str>,
@@ -3356,6 +3518,22 @@ fn type_workspace_window(
     };
     type_workspace_text(&state.status, text)?;
     Ok(Some(window))
+}
+
+fn paste_workspace_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    text: &str,
+    key: &str,
+) -> Result<Option<WindowPasteResult>> {
+    validate_clipboard_text(text)?;
+    validate_key_text(key)?;
+    let Some(window) = focus_workspace_window_target(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    let clipboard = paste_workspace_text(&state.status, text, key)?;
+    Ok(Some(WindowPasteResult { window, clipboard }))
 }
 
 fn focus_workspace_window_target(
@@ -3668,6 +3846,18 @@ fn type_workspace_text(status: &WorkspaceStatus, text: String) -> Result<()> {
         .context("failed to run xdotool type")?;
     output_text(output, "xdotool type")?;
     Ok(())
+}
+
+fn paste_workspace_text(
+    status: &WorkspaceStatus,
+    text: &str,
+    key: &str,
+) -> Result<WorkspaceClipboard> {
+    validate_clipboard_text(text)?;
+    validate_key_text(key)?;
+    let clipboard = set_workspace_clipboard(status, text)?;
+    key_workspace(status, key.trim().to_string())?;
+    Ok(clipboard)
 }
 
 fn set_workspace_clipboard(status: &WorkspaceStatus, text: &str) -> Result<WorkspaceClipboard> {
@@ -4238,6 +4428,19 @@ fn validate_clipboard_text(text: &str) -> Result<()> {
     }
     if text.contains('\0') {
         bail!("clipboard text cannot contain NUL bytes");
+    }
+    Ok(())
+}
+
+fn normalize_paste_key(key: Option<String>) -> Result<String> {
+    let key = key.unwrap_or_else(|| DEFAULT_PASTE_KEY.to_string());
+    validate_key_text(&key)?;
+    Ok(key.trim().to_string())
+}
+
+fn validate_key_text(key: &str) -> Result<()> {
+    if key.trim().is_empty() {
+        bail!("key cannot be empty");
     }
     Ok(())
 }

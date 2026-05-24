@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -346,6 +346,24 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             let id = parse_id_option(&args[1..])?;
             print_json(&workspace::get_clipboard(&id)?)
         }
+        "paste" => {
+            let (id, text, key) = parse_paste_options(&args[1..])?;
+            print_json(&workspace::paste_text(&id, text, key)?)
+        }
+        "paste-window" => {
+            let (id, window_id, title_contains, pid, app_id, text, key, timeout_ms) =
+                parse_paste_window_options(&args[1..])?;
+            print_json(&workspace::paste_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                text,
+                key,
+                timeout_ms,
+            )?)
+        }
         "logs" => {
             let (id, app_id, stream, tail_bytes) = parse_logs_options(&args[1..])?;
             print_json(&workspace::read_app_log(&id, app_id, stream, tail_bytes)?)
@@ -374,7 +392,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1876,6 +1894,125 @@ fn parse_clipboard_set_options(args: &[String]) -> Result<(String, String)> {
     Ok((id, values.join(" ")))
 }
 
+fn parse_paste_options(args: &[String]) -> Result<(String, String, Option<String>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut key = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--key" => {
+                key = Some(value_after(args, index, "--key")?.to_string());
+                index += 2;
+            }
+            value if value.starts_with("--") => bail!("unknown workspace paste option '{value}'"),
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    if values.is_empty() {
+        bail!("workspace paste requires text");
+    }
+    Ok((id, values.join(" "), key))
+}
+
+type PasteWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<u64>,
+);
+
+fn parse_paste_window_options(args: &[String]) -> Result<PasteWindowOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
+    let mut timeout_ms = None;
+    let mut key = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--key" => {
+                key = Some(value_after(args, index, "--key")?.to_string());
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace paste-window option '{value}'")
+            }
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, text_values) = if has_match_filter {
+        if values.is_empty() {
+            bail!("workspace paste-window with match filters requires text");
+        }
+        (None, values)
+    } else {
+        if values.len() < 2 {
+            bail!("workspace paste-window requires WINDOW_ID TEXT or match filters with TEXT");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace paste-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), values[1..].to_vec())
+    };
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        pid,
+        app_id,
+        text_values.join(" "),
+        key,
+        timeout_ms,
+    ))
+}
+
 fn parse_logs_options(args: &[String]) -> Result<(String, String, String, Option<u64>)> {
     let mut id = workspace::default_workspace_id();
     let mut stream = "stdout".to_string();
@@ -2222,6 +2359,9 @@ Usage:
   agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] TEXT
   agent-workspace-linux workspace clipboard-set [--id ID] TEXT
   agent-workspace-linux workspace clipboard-get [--id ID]
+  agent-workspace-linux workspace paste [--id ID] [--key KEY] TEXT
+  agent-workspace-linux workspace paste-window [--id ID] [--key KEY] WINDOW_ID TEXT
+  agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--key KEY] [--timeout-ms N] TEXT
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID
   agent-workspace-linux workspace events [--id ID] [--tail N]
