@@ -43,7 +43,7 @@ cargo run -- profile get project-dev
 cargo run -- profile check project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --ack-unenforced-policy --profile project-dev
-cargo run -- workspace open-profile --ack-hidden-workspace --profile project-dev
+cargo run -- workspace open-profile --ack-hidden-workspace --profile project-dev --setup --setup-timeout-ms 30000
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
@@ -96,9 +96,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace start --foreground` runs the same workspace daemon in the current
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
-- `workspace open-profile --profile` starts a profile-backed workspace and then
-  launches its declared startup apps, returning both the workspace start result
-  and startup launch result in one response.
+- `workspace open-profile --profile` starts a profile-backed workspace,
+  optionally runs setup first with `--setup`, and then launches declared startup
+  apps, returning the workspace start, setup, and startup results in one
+  response.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable.
 - `workspace cleanup` removes stale workspace runtime directories while skipping

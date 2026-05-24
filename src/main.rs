@@ -97,17 +97,11 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             }
         }
         "open-profile" => {
-            let start = parse_start_options(&args[1..])?;
-            if start.foreground {
-                bail!("workspace open-profile does not support --foreground");
-            }
-            let profile_id = start
-                .profile_id
-                .clone()
-                .context("workspace open-profile requires --profile PROFILE")?;
+            let (start, profile_id, open_options) = parse_open_profile_options(&args[1..])?;
             print_json(&profile::open_profile_workspace(
                 start.options,
                 &profile_id,
+                open_options,
             )?)
         }
         "status" => {
@@ -207,7 +201,6 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
 struct ParsedStartOptions {
     options: WorkspaceStartOptions,
     foreground: bool,
-    profile_id: Option<String>,
 }
 
 fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
@@ -267,8 +260,88 @@ fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
     Ok(ParsedStartOptions {
         options,
         foreground,
-        profile_id,
     })
+}
+
+fn parse_open_profile_options(
+    args: &[String],
+) -> Result<(
+    ParsedStartOptions,
+    String,
+    profile::ProfileWorkspaceOpenOptions,
+)> {
+    let mut options = WorkspaceStartOptions::default();
+    let mut profile_id = None;
+    let mut width_explicit = false;
+    let mut height_explicit = false;
+    let mut open_options = profile::ProfileWorkspaceOpenOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--ack-hidden-workspace" => {
+                options.user_acknowledged_hidden_workspace = true;
+                index += 1;
+            }
+            "--ack-unenforced-policy" => {
+                options.user_acknowledged_unenforced_policy = true;
+                open_options.setup.acknowledge_unenforced_policy = true;
+                open_options.startup.acknowledge_unenforced_policy = true;
+                index += 1;
+            }
+            "--profile" => {
+                profile_id = Some(value_after(args, index, "--profile")?.to_string());
+                index += 2;
+            }
+            "--id" => {
+                options.id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--width" => {
+                options.width = value_after(args, index, "--width")?
+                    .parse()
+                    .context("--width must be a positive integer")?;
+                width_explicit = true;
+                index += 2;
+            }
+            "--height" => {
+                options.height = value_after(args, index, "--height")?
+                    .parse()
+                    .context("--height must be a positive integer")?;
+                height_explicit = true;
+                index += 2;
+            }
+            "--setup" => {
+                open_options.run_setup = true;
+                index += 1;
+            }
+            "--setup-timeout-ms" => {
+                open_options.run_setup = true;
+                open_options.setup.wait = true;
+                open_options.setup.timeout_ms = Some(
+                    value_after(args, index, "--setup-timeout-ms")?
+                        .parse()
+                        .context("--setup-timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            flag => bail!("unknown workspace open-profile option '{flag}'"),
+        }
+    }
+    let profile_id = profile_id.context("workspace open-profile requires --profile PROFILE")?;
+    profile::apply_profile_to_start_options(
+        &profile_id,
+        &mut options,
+        width_explicit,
+        height_explicit,
+    )?;
+    Ok((
+        ParsedStartOptions {
+            options,
+            foreground: false,
+        },
+        profile_id,
+        open_options,
+    ))
 }
 
 fn parse_id_option(args: &[String]) -> Result<String> {
@@ -880,6 +953,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

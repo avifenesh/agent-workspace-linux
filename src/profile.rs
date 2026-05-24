@@ -115,7 +115,16 @@ pub struct ProfileWorkspaceOpen {
     pub profile_id: String,
     pub start: IpcResponse,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<ProfileSetupRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup: Option<ProfileStartupRun>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfileWorkspaceOpenOptions {
+    pub run_setup: bool,
+    pub setup: ProfileSetupOptions,
+    pub startup: ProfileStartupOptions,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -505,25 +514,34 @@ pub fn launch_profile_startup_apps(
 pub fn open_profile_workspace(
     options: WorkspaceStartOptions,
     profile_id: &str,
+    open_options: ProfileWorkspaceOpenOptions,
 ) -> Result<ProfileWorkspaceOpen> {
     let workspace_id = options.id.clone();
-    let acknowledge_unenforced_policy = options.user_acknowledged_unenforced_policy;
     let start = workspace::start_workspace(options)?;
-    let startup = if start.ok {
-        Some(launch_profile_startup_apps(
+    let (setup, startup) = if start.ok {
+        let setup = if open_options.run_setup {
+            Some(launch_profile_setup(
+                &workspace_id,
+                profile_id,
+                open_options.setup,
+            )?)
+        } else {
+            None
+        };
+        let startup = Some(launch_profile_startup_apps(
             &workspace_id,
             profile_id,
-            ProfileStartupOptions {
-                acknowledge_unenforced_policy,
-            },
-        )?)
+            open_options.startup,
+        )?);
+        (setup, startup)
     } else {
-        None
+        (None, None)
     };
     Ok(ProfileWorkspaceOpen {
         workspace_id,
         profile_id: profile_id.to_string(),
         start,
+        setup,
         startup,
     })
 }

@@ -232,7 +232,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_open_profile",
-        description = "Start a profile-backed isolated workspace and launch that profile's startup apps in one operation.",
+        description = "Start a profile-backed isolated workspace, optionally run profile setup, and launch that profile's startup apps in one operation.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -246,7 +246,7 @@ impl AgentWorkspaceLinux {
     ) -> Json<ProfileWorkspaceOpenResult> {
         Json(
             match params.into_options().and_then(|(options, profile_id)| {
-                profile::open_profile_workspace(options, &profile_id)
+                profile::open_profile_workspace(options, &profile_id, params.into_open_options())
             }) {
                 Ok(open) => ProfileWorkspaceOpenResult {
                     ok: true,
@@ -766,7 +766,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_template/profile_put/profile_delete to manage saved environment profiles. profile_template can generate starter JSON such as project-dev before saving with profile_put. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when bubblewrap is available; network allowlists are still declared but not enforced by the X11 runtime. workspace_status reports the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_open_profile to start a profile-backed workspace and open its startup apps in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_run_profile_setup with wait=true when setup command completion matters. Use workspace_screenshot, workspace_list_windows, workspace_wait_app, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_template/profile_put/profile_delete to manage saved environment profiles. profile_template can generate starter JSON such as project-dev before saving with profile_put. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when bubblewrap is available; network allowlists are still declared but not enforced by the X11 runtime. workspace_status reports the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_open_profile to start a profile-backed workspace, optionally run setup, and open startup apps in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_run_profile_setup with wait=true when setup command completion matters. Use workspace_screenshot, workspace_list_windows, workspace_wait_app, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -903,13 +903,17 @@ struct WorkspaceOpenProfileParams {
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
+    #[serde(default)]
+    run_setup: bool,
+    #[serde(default)]
+    setup_timeout_ms: Option<u64>,
 }
 
 impl WorkspaceOpenProfileParams {
-    fn into_options(self) -> Result<(WorkspaceStartOptions, String)> {
+    fn into_options(&self) -> Result<(WorkspaceStartOptions, String)> {
         let width_explicit = self.width.is_some();
         let height_explicit = self.height.is_some();
-        let profile_id = self.profile;
+        let profile_id = self.profile.clone();
         let mut options = WorkspaceStartOptions::default();
         profile::apply_profile_to_start_options(
             &profile_id,
@@ -917,7 +921,7 @@ impl WorkspaceOpenProfileParams {
             width_explicit,
             height_explicit,
         )?;
-        if let Some(id) = self.id {
+        if let Some(id) = self.id.clone() {
             options.id = id;
         }
         if let Some(width) = self.width {
@@ -929,6 +933,20 @@ impl WorkspaceOpenProfileParams {
         options.user_acknowledged_hidden_workspace = self.acknowledge_hidden_workspace;
         options.user_acknowledged_unenforced_policy = self.acknowledge_unenforced_policy;
         Ok((options, profile_id))
+    }
+
+    fn into_open_options(&self) -> profile::ProfileWorkspaceOpenOptions {
+        profile::ProfileWorkspaceOpenOptions {
+            run_setup: self.run_setup || self.setup_timeout_ms.is_some(),
+            setup: profile::ProfileSetupOptions {
+                wait: self.setup_timeout_ms.is_some(),
+                timeout_ms: self.setup_timeout_ms,
+                acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
+            },
+            startup: profile::ProfileStartupOptions {
+                acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
+            },
+        }
     }
 }
 
