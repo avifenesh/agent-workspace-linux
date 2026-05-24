@@ -35,7 +35,7 @@ cargo run -- profile list
 cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
 cargo run -- profile delete project-dev
-cargo run -- workspace start --ack-hidden-workspace --profile project-dev
+cargo run -- workspace start --ack-hidden-workspace --ack-unenforced-policy --profile project-dev
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
@@ -70,6 +70,9 @@ socket daemon:
 
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.
+  If the profile asks for mounts or restricted networking, the current X11
+  runtime also requires `--ack-unenforced-policy` because those policies are
+  visible but not enforced yet.
   It then chooses a free X11 display, creates an `xauth` file, starts `Xvfb`,
   starts a lightweight window manager, and binds a control socket under
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
@@ -100,9 +103,9 @@ socket daemon:
   status/log tools.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
-  hidden-workspace acknowledgement, applied policy snapshot, and which parts are
-  currently enforced. `workspace status` and `workspace stop` talk to the same
-  socket.
+  hidden-workspace acknowledgement, unenforced-policy acknowledgement, applied
+  policy snapshot, and which parts are currently enforced. `workspace status`
+  and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,

@@ -113,6 +113,11 @@ impl AppliedWorkspacePolicy {
             },
         }
     }
+
+    pub fn has_requested_unenforced_policy(&self) -> bool {
+        requested_but_unenforced(&self.enforcement.mounts)
+            || requested_but_unenforced(&self.enforcement.network)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -128,4 +133,8 @@ pub struct PolicyCapabilityStatus {
     pub requested: bool,
     pub enforced: bool,
     pub detail: String,
+}
+
+fn requested_but_unenforced(status: &PolicyCapabilityStatus) -> bool {
+    status.requested && !status.enforced
 }

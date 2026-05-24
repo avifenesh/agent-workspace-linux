@@ -50,6 +50,7 @@ pub struct WorkspaceStartOptions {
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub user_acknowledged_hidden_workspace: bool,
+    pub user_acknowledged_unenforced_policy: bool,
     pub width: u32,
     pub height: u32,
 }
@@ -61,6 +62,7 @@ impl Default for WorkspaceStartOptions {
             profile_id: None,
             applied_policy: None,
             user_acknowledged_hidden_workspace: false,
+            user_acknowledged_unenforced_policy: false,
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
         }
@@ -73,6 +75,7 @@ pub struct DaemonOptions {
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub user_acknowledged_hidden_workspace: bool,
+    pub user_acknowledged_unenforced_policy: bool,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -89,6 +92,7 @@ pub struct WorkspaceStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub user_acknowledged_hidden_workspace: bool,
+    pub user_acknowledged_unenforced_policy: bool,
     pub ready: bool,
     pub display: String,
     pub width: u32,
@@ -599,6 +603,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
             profile_id: options.profile_id,
             applied_policy: options.applied_policy,
             user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
+            user_acknowledged_unenforced_policy: options.user_acknowledged_unenforced_policy,
             ready: true,
             display: options.display,
             width: options.width,
@@ -620,6 +625,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
         "height": state.status.height,
         "profile_id": state.status.profile_id.as_deref(),
         "user_acknowledged_hidden_workspace": state.status.user_acknowledged_hidden_workspace,
+        "user_acknowledged_unenforced_policy": state.status.user_acknowledged_unenforced_policy,
     });
     record_event(&mut state, "workspace_start", start_detail)?;
 
@@ -678,6 +684,16 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
             "starting a hidden agent workspace requires explicit acknowledgement; pass --ack-hidden-workspace or set acknowledge_hidden_workspace=true"
         );
     }
+    if options
+        .applied_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::has_requested_unenforced_policy)
+        && !options.user_acknowledged_unenforced_policy
+    {
+        bail!(
+            "profile requests mount or network policy that is not enforced by this X11 runtime; pass --ack-unenforced-policy or set acknowledge_unenforced_policy=true"
+        );
+    }
 
     let runtime = doctor_report();
     if !runtime.ready_for_x11_workspace {
@@ -701,6 +717,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         profile_id: options.profile_id,
         applied_policy: options.applied_policy,
         user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
+        user_acknowledged_unenforced_policy: options.user_acknowledged_unenforced_policy,
         display,
         width: options.width,
         height: options.height,
@@ -725,6 +742,9 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     }
     if options.user_acknowledged_hidden_workspace {
         daemon.arg("--ack-hidden-workspace");
+    }
+    if options.user_acknowledged_unenforced_policy {
+        daemon.arg("--ack-unenforced-policy");
     }
     daemon
         .arg("--display")
