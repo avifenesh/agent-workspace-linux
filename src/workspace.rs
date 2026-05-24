@@ -294,6 +294,8 @@ pub struct WorkspaceScreenshot {
     pub width: u32,
     pub height: u32,
     pub format: String,
+    pub bytes: u64,
+    pub captured_at_unix: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -4830,12 +4832,7 @@ fn capture_workspace_screenshot(
         bail!("missing screenshot command: install ImageMagick import or scrot");
     }
 
-    Ok(WorkspaceScreenshot {
-        path,
-        width: status.width,
-        height: status.height,
-        format: "png".to_string(),
-    })
+    workspace_screenshot_result(path, status.width, status.height)
 }
 
 struct WindowScreenshotResult {
@@ -4886,11 +4883,24 @@ fn capture_workspace_window_screenshot(
         bail!("missing screenshot command: install ImageMagick import or scrot");
     }
 
+    workspace_screenshot_result(path, window.geometry.width, window.geometry.height)
+}
+
+fn workspace_screenshot_result(
+    path: PathBuf,
+    width: u32,
+    height: u32,
+) -> Result<WorkspaceScreenshot> {
+    let bytes = fs::metadata(&path)
+        .with_context(|| format!("failed to read screenshot metadata for {}", path.display()))?
+        .len();
     Ok(WorkspaceScreenshot {
         path,
-        width: window.geometry.width,
-        height: window.geometry.height,
+        width,
+        height,
         format: "png".to_string(),
+        bytes,
+        captured_at_unix: unix_now(),
     })
 }
 

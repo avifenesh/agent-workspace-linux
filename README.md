@@ -193,7 +193,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `windows` can also filter the current list with `--title`, `--class`,
   `--pid`, or `--app`. `active-window` reports the current workspace-local focus,
   and `observe` returns status, apps, windows, active window, and optionally a
-  root screenshot in one IPC call. `observe --all-windows` uses the same
+  root screenshot in one IPC call. Screenshot records include path, dimensions,
+  PNG byte size, and capture timestamp. `observe --all-windows` uses the same
   hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
   `close-window`, `move-window`, `resize-window`, `raise-window`,
   `minimize-window`, `key-window`, and `type-window` can use either a raw X11
