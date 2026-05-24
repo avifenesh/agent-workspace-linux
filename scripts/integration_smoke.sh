@@ -147,4 +147,13 @@ WORKSPACE_IDS=()
 run_awl workspace manifest --id "$LOCAL_ID" > "$SMOKE_DIR/local-stopped-manifest.json"
 assert_json '.manifest.session_id == $sid and .manifest.ready == false and .manifest.stopped_at_unix != null' "$SMOKE_DIR/local-stopped-manifest.json" --arg sid "$SESSION_ID"
 
+echo "== self-stop from workspace app =="
+SELF_STOP_ID="self-stop-smoke-$$"
+WORKSPACE_IDS+=("$SELF_STOP_ID")
+run_awl workspace start --ack-hidden-workspace --id "$SELF_STOP_ID" --purpose "Self-stop smoke" > "$SMOKE_DIR/self-stop-start.json"
+run_awl workspace launch --id "$SELF_STOP_ID" --name self-stop-client -- bash -lc '"$1" workspace stop --id "$2" >/tmp/agent-workspace-self-stop-smoke.out 2>/tmp/agent-workspace-self-stop-smoke.err; sleep 10' _ "$BIN" "$SELF_STOP_ID" > "$SMOKE_DIR/self-stop-launch.json"
+sleep 2
+run_awl workspace list > "$SMOKE_DIR/self-stop-list.json"
+assert_json '.workspaces[] | select(.id == $id and .running == false and .manifest.ready == false and .manifest.stopped_at_unix != null)' "$SMOKE_DIR/self-stop-list.json" --arg id "$SELF_STOP_ID"
+
 echo "integration smoke passed"

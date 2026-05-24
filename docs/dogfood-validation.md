@@ -66,3 +66,6 @@ Post-patch verification:
   workspace process group. Even though that stop client was terminated before it
   could receive the response, the daemon still marked the workspace stopped and
   wrote `ready=false` plus `stopped_at_unix` to the manifest.
+- `scripts/integration_smoke.sh` now covers that self-stop lost-client case in
+  addition to doctor, profile import/export, open-profile dry-run, local-only
+  network enforcement, session tracking, event history, and stopped manifests.
