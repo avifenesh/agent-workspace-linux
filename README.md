@@ -20,12 +20,12 @@ The key invariant is that workspace input must only target the agent workspace,
 not the host desktop.
 
 Profiles are persisted in a local JSON file under the user's config directory.
-Profile mounts, network policy, and setup commands are stored as declared intent
-for the future Codex app/profile UI. The runtime snapshots that intent into
-`workspace status` with an enforcement report; this X11 runtime enforces
-display/input scoping, profile mounts and disabled-network profiles through
-bubblewrap when available, display size, launch cwd, and environment overrides
-today.
+Profile mounts, network policy, setup commands, and startup apps are stored as
+declared intent for the future Codex app/profile UI. The runtime snapshots that
+intent into `workspace status` with an enforcement report; this X11 runtime
+enforces display/input scoping, profile mounts and disabled-network profiles
+through bubblewrap when available, display size, launch cwd, and environment
+overrides today.
 
 For the current bubblewrap runtime, profile mount sources must use absolute host
 paths, and mount destinations must be non-overlapping absolute paths under
@@ -49,6 +49,7 @@ cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace launch --profile project-dev -- xterm
 cargo run -- workspace run --timeout-ms 30000 --tail-bytes 65536 -- cargo test
+cargo run -- workspace launch-profile-apps --profile project-dev
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
@@ -123,6 +124,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace apps; with `--wait`, commands are supervised in sequence and the
   result reports whether they completed and exited successfully. Their status
   and logs are available through the same app status/log tools.
+- `workspace launch-profile-apps --profile` launches the profile's declared
+  startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
   hidden-workspace acknowledgement, unenforced-policy acknowledgement, applied
@@ -134,8 +137,9 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_list`, `workspace_cleanup_stale`, `workspace_status`,
-`workspace_launch_app`, `workspace_run_app`, `workspace_list_windows`,
-`workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
-`workspace_click`, `workspace_key`, `workspace_type_text`,
-`workspace_read_app_log`, `workspace_wait_app`, `workspace_events`,
-`workspace_run_profile_setup`, `workspace_kill_app`, and `workspace_stop`.
+`workspace_launch_app`, `workspace_run_app`, `workspace_launch_profile_apps`,
+`workspace_list_windows`, `workspace_screenshot`, `workspace_focus_window`,
+`workspace_close_window`, `workspace_click`, `workspace_key`,
+`workspace_type_text`, `workspace_read_app_log`, `workspace_wait_app`,
+`workspace_events`, `workspace_run_profile_setup`, `workspace_kill_app`, and
+`workspace_stop`.

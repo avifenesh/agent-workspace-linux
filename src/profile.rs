@@ -31,10 +31,21 @@ pub struct WorkspaceProfile {
     pub network: NetworkPolicy,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setup_commands: Vec<ProfileSetupCommand>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub startup_apps: Vec<ProfileStartupApp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileSetupCommand {
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<EnvVar>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ProfileStartupApp {
     pub command: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
@@ -89,6 +100,13 @@ pub struct ProfileSetupRun {
     pub completed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub succeeded: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileStartupRun {
+    pub workspace_id: String,
+    pub profile_id: String,
+    pub launched: Vec<IpcResponse>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -154,6 +172,7 @@ pub fn template_profile(
                 }],
                 network: NetworkPolicy::default(),
                 setup_commands: Vec::new(),
+                startup_apps: Vec::new(),
             }
         }
         _ => bail!("unknown profile template {kind:?}. Expected: project-dev"),
@@ -229,6 +248,14 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
             bail!("profile setup command cannot be empty");
         }
         for env_var in &setup.env {
+            validate_env_var(env_var)?;
+        }
+    }
+    for app in &profile.startup_apps {
+        if app.command.is_empty() {
+            bail!("profile startup app command cannot be empty");
+        }
+        for env_var in &app.env {
             validate_env_var(env_var)?;
         }
     }
@@ -368,6 +395,27 @@ pub fn setup_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
         .collect()
 }
 
+pub fn startup_app_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
+    let profile = get_profile(profile_id)?;
+    profile
+        .startup_apps
+        .iter()
+        .map(|app| {
+            if app.command.is_empty() {
+                bail!("profile startup app command cannot be empty");
+            }
+            Ok(LaunchSpec {
+                command: app.command.clone(),
+                profile_id: Some(profile.id.clone()),
+                applied_policy: Some(applied_policy(&profile)),
+                user_acknowledged_unenforced_policy: false,
+                cwd: app.cwd.clone().or_else(|| profile.cwd.clone()),
+                env: merged_env(profile.env.clone(), app.env.clone()),
+            })
+        })
+        .collect()
+}
+
 pub fn launch_profile_setup(
     workspace_id: &str,
     profile_id: &str,
@@ -407,6 +455,22 @@ pub fn launch_profile_setup(
         waited,
         completed,
         succeeded,
+    })
+}
+
+pub fn launch_profile_startup_apps(
+    workspace_id: &str,
+    profile_id: &str,
+) -> Result<ProfileStartupRun> {
+    let specs = startup_app_launch_specs(profile_id)?;
+    let mut launched = Vec::new();
+    for spec in specs {
+        launched.push(workspace::launch_app_with_spec(workspace_id, spec)?);
+    }
+    Ok(ProfileStartupRun {
+        workspace_id: workspace_id.to_string(),
+        profile_id: profile_id.to_string(),
+        launched,
     })
 }
 
