@@ -8,6 +8,52 @@ here, while policy design stays in `permission-boundary-roadmap.md`.
 
 Environment:
 
+- Auto-loop A/B/C gate pass ran from
+  `/home/avifenesh/projects/agent-workspace-linux` with the current local tree.
+- `scripts/integration_smoke.sh` passed end to end. This revalidated MCP
+  permission ceilings, profile import/export/delete/validate, `workspace
+  open-profile --dry-run`, real setup/startup, local-only networking,
+  disabled networking, read-only/read-write mounts, X11 window launch,
+  screenshots, window targeting, keyboard input, clipboard, app wait/logs,
+  artifacts, event history, browser local-dev QA through Chrome/Chromium when
+  installed, disabled-network browser launch coverage when Chrome/Chromium is
+  installed, crashed-daemon stale cleanup, and self-stop from inside a workspace
+  app.
+- `cargo test` passed 38 tests, including permission-ceiling checks,
+  local-only/disabled network policy planning, launch-preview daemon
+  requirements, workspace socket-path validation, stop behavior, and profile
+  validation.
+- The Codex for Linux side-by-side dev app was rebuilt from
+  `/home/avifenesh/projects/codex-desktop-linux` with `make build-dev-app` and
+  launched inside the hidden `mcp-visible` workspace. A launcher bug was found
+  and fixed: inherited `ELECTRON_RENDERER_URL` from the host Codex app could
+  make the dev app render the wrong webview. The launcher now uses the managed
+  local webview URL unless `CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE=1` is set.
+  Chrome DevTools Protocol confirmed the hidden app loaded
+  `http://127.0.0.1:5176/?mcpAppSandboxDevtools=1`.
+- The Codex app embedded workspace preview was dogfooded against the real
+  hidden app. It appears in the conversation view with live screenshot,
+  workspace metadata, Refresh, Stop, and Revoke. It now hides on Settings pages,
+  where the dedicated Agent Workspaces page already shows the active workspace
+  and controls.
+- The Agent Workspaces settings page in the dev app showed the MCP permissions
+  card, one active-workspace card, saved-workspaces section, and a working
+  Status/Hide status toggle. The corresponding feature tests passed 11 tests.
+
+Remaining gaps from this pass:
+
+- `local_only` remains sandbox-local loopback. Host-localhost bridging is still
+  a product/runtime gap.
+- Network allowlists remain declared intent until an egress-filter backend is
+  implemented and tested.
+- Browser tasks that need logged-in sessions still need an explicit
+  user-approved browser profile or mounted browser-data story.
+- Hard permission enforcement in Codex for Linux should still wait until the UI
+  approval boundary is wired so agents cannot call the same workspace tools
+  outside the user-approved path.
+
+Previous environment:
+
 - Codex used the installed `agent-workspace-linux` MCP tools.
 - `workspace_doctor` reported Xvfb, openbox, xauth, xdotool, screenshot tools,
   xclip, and bubblewrap ready.
@@ -69,7 +115,7 @@ Findings:
   Workspace launches now scrub inherited Wayland hints and set common toolkit
   defaults toward X11.
 
-Post-patch verification:
+Previous post-patch verification:
 
 - Local `cargo test` passes 27 tests, including coverage for active profile
   cwd/env inheritance and explicit per-launch profile override.

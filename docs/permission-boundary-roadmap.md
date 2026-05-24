@@ -102,18 +102,22 @@ Rules:
 
 Current gate status on 2026-05-24:
 
-- A is mostly validated for the current X11/bubblewrap runtime. Real MCP dogfood
-  has covered Chrome, local-dev browser QA, Codex desktop feature tests, disabled
+- A is validated for the current X11/bubblewrap runtime surface covered by the
+  integration smoke. Real MCP dogfood and `scripts/integration_smoke.sh` have
+  covered Chrome, local-dev browser QA, Codex desktop feature tests, disabled
   networking, local-only networking, read-only/read-write mounts, setup/startup
   commands, screenshots, window targeting, input, clipboard, app logs, events,
-  manifests, stop, stale cleanup, and daemon-crash recovery.
+  manifests, stop, stale cleanup, daemon-crash recovery, and self-stop from
+  inside a workspace app. `cargo test` currently passes 38 tests.
 - A still has known product gaps: host-localhost bridging for `local_only`,
   network allowlist enforcement, and more varied real-project coverage.
 - B has a first Codex for Linux slice: the conversation surface can show a live
   active-workspace panel with screenshot, profile/policy/app metadata, Stop, and
-  Revoke. The side-by-side dev app has been dogfooded inside a hidden workspace,
-  including a live panel Stop action. It still needs main-app install QA and more
-  repeated live app runs before it should become a hard trust boundary.
+  Revoke. The side-by-side dev app has been dogfooded inside a hidden workspace.
+  The launcher now avoids inherited renderer URLs, the live panel appears in the
+  conversation view, and it hides on Settings pages where the dedicated Agent
+  Workspaces controls are shown. It still needs main-app install QA and the
+  final UI approval boundary before it should become a hard trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, and recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
