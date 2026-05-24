@@ -63,7 +63,9 @@ cargo run -- workspace focus-window --title xterm --timeout-ms 10000
 cargo run -- workspace close-window 4194316
 cargo run -- workspace close-window --title xterm --timeout-ms 10000
 cargo run -- workspace click 100 120
+cargo run -- workspace click --button 3 100 120
 cargo run -- workspace click-window --title xterm 24 32
+cargo run -- workspace click-window --title xterm --count 2 24 32
 cargo run -- workspace key Return
 cargo run -- workspace key-window --title xterm Return
 cargo run -- workspace type "hello from the agent workspace"
@@ -138,8 +140,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   root screenshot in one IPC call. `focus-window`, `screenshot-window`,
   `close-window`, `key-window`, and `type-window` can use either a raw X11
   window id or the same title/pid/app filters as `wait-window`; app filters
-  match the launched process and its child processes. `click-window` resolves
-  the same targets and clicks window-relative coordinates.
+  match the launched process and its child processes. `click` and
+  `click-window` can set button/count for right-clicks and double-clicks;
+  `click-window` resolves the same targets and clicks window-relative
+  coordinates.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   App launches and exits are recorded with structured metadata. Typed text is
   logged as metadata such as character count, not raw text.

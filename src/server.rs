@@ -660,7 +660,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_click",
-        description = "Click workspace-local coordinates inside an isolated agent workspace.",
+        description = "Click workspace-local coordinates inside an isolated agent workspace, optionally setting button and repeat count.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -675,12 +675,18 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::click(&id, params.x, params.y)))
+        Json(result_response(workspace::click(
+            &id,
+            params.x,
+            params.y,
+            params.button,
+            params.count,
+        )))
     }
 
     #[tool(
         name = "workspace_click_window",
-        description = "Click a coordinate relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters.",
+        description = "Click a coordinate relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters, optionally setting button and repeat count.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -703,6 +709,8 @@ impl AgentWorkspaceLinux {
             params.app_id,
             params.x,
             params.y,
+            params.button,
+            params.count,
             params.timeout_ms,
         )))
     }
@@ -1331,6 +1339,10 @@ struct WorkspaceClickParams {
     id: Option<String>,
     x: i32,
     y: i32,
+    #[serde(default)]
+    button: Option<u8>,
+    #[serde(default)]
+    count: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -1347,6 +1359,10 @@ struct WorkspaceClickWindowParams {
     app_id: Option<String>,
     x: i32,
     y: i32,
+    #[serde(default)]
+    button: Option<u8>,
+    #[serde(default)]
+    count: Option<u8>,
     #[serde(default)]
     timeout_ms: Option<u64>,
 }

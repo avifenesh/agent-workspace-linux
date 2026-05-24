@@ -215,11 +215,11 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             }
         }
         "click" => {
-            let (id, x, y) = parse_click_options(&args[1..])?;
-            print_json(&workspace::click(&id, x, y)?)
+            let (id, x, y, button, count) = parse_click_options(&args[1..])?;
+            print_json(&workspace::click(&id, x, y, button, count)?)
         }
         "click-window" => {
-            let (id, window_id, title_contains, pid, app_id, x, y, timeout_ms) =
+            let (id, window_id, title_contains, pid, app_id, x, y, button, count, timeout_ms) =
                 parse_click_window_options(&args[1..])?;
             print_json(&workspace::click_window(
                 &id,
@@ -229,6 +229,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 app_id,
                 x,
                 y,
+                button,
+                count,
                 timeout_ms,
             )?)
         }
@@ -1072,14 +1074,47 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
     ))
 }
 
-fn parse_click_options(args: &[String]) -> Result<(String, i32, i32)> {
-    let (id, values) = parse_id_and_args(args)?;
+fn parse_click_options(args: &[String]) -> Result<(String, i32, i32, Option<u8>, Option<u8>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut button = None;
+    let mut count = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--button" => {
+                button = Some(
+                    value_after(args, index, "--button")?
+                        .parse()
+                        .context("--button must be an integer between 1 and 5")?,
+                );
+                index += 2;
+            }
+            "--count" => {
+                count = Some(
+                    value_after(args, index, "--count")?
+                        .parse()
+                        .context("--count must be an integer between 1 and 20")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => bail!("unknown workspace click option '{value}'"),
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
     if values.len() != 2 {
         bail!("workspace click requires X and Y coordinates");
     }
     let x = values[0].parse().context("click X must be an integer")?;
     let y = values[1].parse().context("click Y must be an integer")?;
-    Ok((id, x, y))
+    Ok((id, x, y, button, count))
 }
 
 type ClickWindowOptions = (
@@ -1090,6 +1125,8 @@ type ClickWindowOptions = (
     Option<String>,
     i32,
     i32,
+    Option<u8>,
+    Option<u8>,
     Option<u64>,
 );
 
@@ -1099,6 +1136,8 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
+    let mut button = None;
+    let mut count = None;
     let mut values = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -1128,6 +1167,22 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
                     value_after(args, index, "--timeout-ms")?
                         .parse()
                         .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--button" => {
+                button = Some(
+                    value_after(args, index, "--button")?
+                        .parse()
+                        .context("--button must be an integer between 1 and 5")?,
+                );
+                index += 2;
+            }
+            "--count" => {
+                count = Some(
+                    value_after(args, index, "--count")?
+                        .parse()
+                        .context("--count must be an integer between 1 and 20")?,
                 );
                 index += 2;
             }
@@ -1162,7 +1217,18 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
     let y = y_value
         .parse()
         .context("click-window Y must be an integer")?;
-    Ok((id, window_id, title_contains, pid, app_id, x, y, timeout_ms))
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        pid,
+        app_id,
+        x,
+        y,
+        button,
+        count,
+        timeout_ms,
+    ))
 }
 
 type WindowTargetValues = (
@@ -1633,9 +1699,10 @@ Usage:
   agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace close-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
-  agent-workspace-linux workspace click [--id ID] X Y
+  agent-workspace-linux workspace click [--id ID] [--button N] [--count N] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
-  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
+  agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y
+  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--count N] [--timeout-ms N] X Y
   agent-workspace-linux workspace key [--id ID] KEY
   agent-workspace-linux workspace key-window [--id ID] WINDOW_ID KEY
   agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY

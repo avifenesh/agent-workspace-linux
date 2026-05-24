@@ -18,6 +18,8 @@ use std::{
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
 const DEFAULT_APP_WAIT_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_CLICK_BUTTON: u8 = 1;
+const DEFAULT_CLICK_COUNT: u8 = 1;
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
@@ -309,6 +311,8 @@ pub enum IpcRequest {
     Click {
         x: i32,
         y: i32,
+        button: u8,
+        count: u8,
     },
     ClickWindow {
         window_id: Option<String>,
@@ -317,6 +321,8 @@ pub enum IpcRequest {
         app_id: Option<String>,
         x: i32,
         y: i32,
+        button: u8,
+        count: u8,
         timeout_ms: u64,
     },
     Key {
@@ -765,9 +771,26 @@ pub fn close_matching_window(
     )
 }
 
-pub fn click(id: &str, x: i32, y: i32) -> Result<IpcResponse> {
+pub fn click(
+    id: &str,
+    x: i32,
+    y: i32,
+    button: Option<u8>,
+    count: Option<u8>,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    request(&workspace_socket_path(&id), IpcRequest::Click { x, y })
+    let button = button.unwrap_or(DEFAULT_CLICK_BUTTON);
+    let count = count.unwrap_or(DEFAULT_CLICK_COUNT);
+    validate_click_options(button, count)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::Click {
+            x,
+            y,
+            button,
+            count,
+        },
+    )
 }
 
 pub fn click_window(
@@ -778,11 +801,16 @@ pub fn click_window(
     app_id: Option<String>,
     x: i32,
     y: i32,
+    button: Option<u8>,
+    count: Option<u8>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
+    let button = button.unwrap_or(DEFAULT_CLICK_BUTTON);
+    let count = count.unwrap_or(DEFAULT_CLICK_COUNT);
     validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
     validate_relative_click_coordinates(x, y)?;
+    validate_click_options(button, count)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::ClickWindow {
@@ -792,6 +820,8 @@ pub fn click_window(
             app_id,
             x,
             y,
+            button,
+            count,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
@@ -1646,9 +1676,18 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 },
             }
         }
-        IpcRequest::Click { x, y } => match click_workspace(&state.status, x, y) {
+        IpcRequest::Click {
+            x,
+            y,
+            button,
+            count,
+        } => match click_workspace(&state.status, x, y, button, count) {
             Ok(()) => {
-                record_event(state, "click", serde_json::json!({ "x": x, "y": y }))?;
+                record_event(
+                    state,
+                    "click",
+                    serde_json::json!({ "x": x, "y": y, "button": button, "count": count }),
+                )?;
                 (
                     response_with_status(true, "workspace click sent", &state.status),
                     false,
@@ -1666,6 +1705,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             app_id,
             x,
             y,
+            button,
+            count,
             timeout_ms,
         } => {
             let criteria = WindowWaitCriteria {
@@ -1681,13 +1722,22 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 &criteria.app_id,
             )
             .and_then(|()| validate_relative_click_coordinates(x, y))
+            .and_then(|()| validate_click_options(button, count))
             {
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
                 Ok(()) => {
-                    match click_workspace_window(state, window_id.as_deref(), &criteria, x, y) {
+                    match click_workspace_window(
+                        state,
+                        window_id.as_deref(),
+                        &criteria,
+                        x,
+                        y,
+                        button,
+                        count,
+                    ) {
                         Ok(Some(clicked)) => {
                             record_event(
                                 state,
@@ -1701,6 +1751,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                     "relative_y": y,
                                     "x": clicked.x,
                                     "y": clicked.y,
+                                    "button": button,
+                                    "count": count,
                                     "timeout_ms": criteria.timeout_ms,
                                 }),
                             )?;
@@ -2451,8 +2503,11 @@ fn click_workspace_window(
     criteria: &WindowWaitCriteria,
     x: i32,
     y: i32,
+    button: u8,
+    count: u8,
 ) -> Result<Option<WindowClickResult>> {
     validate_relative_click_coordinates(x, y)?;
+    validate_click_options(button, count)?;
     let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
         return Ok(None);
     };
@@ -2474,7 +2529,7 @@ fn click_workspace_window(
         .checked_add(y)
         .context("window click Y coordinate overflow")?;
     focus_workspace_window(&state.status, &window.id)?;
-    click_workspace(&state.status, absolute_x, absolute_y)?;
+    click_workspace(&state.status, absolute_x, absolute_y, button, count)?;
     Ok(Some(WindowClickResult {
         window,
         x: absolute_x,
@@ -2727,7 +2782,7 @@ fn close_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<(
     Ok(())
 }
 
-fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32) -> Result<()> {
+fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32, button: u8, count: u8) -> Result<()> {
     if x < 0 || y < 0 || x as u32 >= status.width || y as u32 >= status.height {
         bail!(
             "click coordinates {x},{y} are outside workspace bounds {}x{}",
@@ -2735,9 +2790,10 @@ fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32) -> Result<()> {
             status.height
         );
     }
+    validate_click_options(button, count)?;
     let output = workspace_command(status, "xdotool")
         .args(["mousemove", "--sync", &x.to_string(), &y.to_string()])
-        .args(["click", "1"])
+        .args(["click", "--repeat", &count.to_string(), &button.to_string()])
         .output()
         .context("failed to run xdotool click")?;
     output_text(output, "xdotool click")?;
@@ -3210,6 +3266,16 @@ fn validate_window_target_options(
 fn validate_relative_click_coordinates(x: i32, y: i32) -> Result<()> {
     if x < 0 || y < 0 {
         bail!("window click coordinates must be non-negative");
+    }
+    Ok(())
+}
+
+fn validate_click_options(button: u8, count: u8) -> Result<()> {
+    if !(1..=5).contains(&button) {
+        bail!("click button must be between 1 and 5");
+    }
+    if count == 0 || count > 20 {
+        bail!("click count must be between 1 and 20");
     }
     Ok(())
 }
