@@ -903,7 +903,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_click",
-        description = "Click workspace-local coordinates inside an isolated agent workspace, optionally setting button and repeat count.",
+        description = "Click workspace-local coordinates inside an isolated agent workspace, optionally setting button and repeat count. Response includes pointer and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -929,7 +929,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_click_window",
-        description = "Click a coordinate relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, optionally setting button and repeat count.",
+        description = "Click a coordinate relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, optionally setting button and repeat count. Response includes pointer, target window, and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -983,7 +983,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_move_pointer_window",
-        description = "Move the pointer to coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, without clicking.",
+        description = "Move the pointer to coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, without clicking. Response includes pointer, target window, and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1013,7 +1013,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_drag",
-        description = "Drag from one workspace-local coordinate to another inside an isolated agent workspace, optionally setting the mouse button.",
+        description = "Drag from one workspace-local coordinate to another inside an isolated agent workspace, optionally setting the mouse button. Response includes pointer and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1040,7 +1040,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_drag_window",
-        description = "Drag between coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, optionally setting the mouse button.",
+        description = "Drag between coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, optionally setting the mouse button. Response includes pointer, target window, and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1073,7 +1073,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_scroll",
-        description = "Scroll at workspace-local coordinates inside an isolated agent workspace. Direction is up, down, left, or right; amount is wheel ticks.",
+        description = "Scroll at workspace-local coordinates inside an isolated agent workspace. Direction is up, down, left, or right; amount is wheel ticks. Response includes pointer and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1099,7 +1099,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_scroll_window",
-        description = "Scroll at coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Direction is up, down, left, or right; amount is wheel ticks.",
+        description = "Scroll at coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Direction is up, down, left, or right; amount is wheel ticks. Response includes pointer, target window, and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

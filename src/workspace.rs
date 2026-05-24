@@ -3191,6 +3191,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         let mut response =
                             response_with_status(true, "workspace click sent", &state.status);
                         response.pointer = Some(pointer);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Err(error) => (
@@ -3275,6 +3276,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 Ok(pointer) => {
                                     response.pointer = Some(pointer);
                                     response.windows = Some(vec![clicked.window]);
+                                    attach_active_window_best_effort(&mut response, &state.status);
                                     (response, false)
                                 }
                                 Err(error) => (
@@ -3384,6 +3386,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             Ok(pointer) => {
                                 response.pointer = Some(pointer);
                                 response.windows = Some(vec![moved.window]);
+                                attach_active_window_best_effort(&mut response, &state.status);
                                 (response, false)
                             }
                             Err(error) => (
@@ -3432,6 +3435,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         let mut response =
                             response_with_status(true, "workspace drag sent", &state.status);
                         response.pointer = Some(pointer);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Err(error) => (
@@ -3518,6 +3522,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             Ok(pointer) => {
                                 response.pointer = Some(pointer);
                                 response.windows = Some(vec![dragged.window]);
+                                attach_active_window_best_effort(&mut response, &state.status);
                                 (response, false)
                             }
                             Err(error) => (
@@ -3564,6 +3569,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         let mut response =
                             response_with_status(true, "workspace scroll sent", &state.status);
                         response.pointer = Some(pointer);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Err(error) => (
@@ -3647,6 +3653,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             Ok(pointer) => {
                                 response.pointer = Some(pointer);
                                 response.windows = Some(vec![scrolled.window]);
+                                attach_active_window_best_effort(&mut response, &state.status);
                                 (response, false)
                             }
                             Err(error) => (
