@@ -242,6 +242,10 @@ pub struct WorkspaceManifest {
     #[serde(default)]
     pub event_log_path: PathBuf,
     #[serde(default)]
+    pub daemon_stdout_path: PathBuf,
+    #[serde(default)]
+    pub daemon_stderr_path: PathBuf,
+    #[serde(default)]
     pub last_event_sequence: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<WorkspaceApp>,
@@ -2131,6 +2135,8 @@ fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) ->
         socket_path: status.socket_path.clone(),
         xauthority_path: status.xauthority_path.clone(),
         event_log_path: status.runtime_dir.join(EVENT_LOG_FILE),
+        daemon_stdout_path: status.runtime_dir.join("daemon.out.log"),
+        daemon_stderr_path: status.runtime_dir.join("daemon.err.log"),
         last_event_sequence: status.last_event_sequence,
         apps: status.apps.clone(),
     }
