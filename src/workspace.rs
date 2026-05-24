@@ -267,6 +267,10 @@ pub enum IpcRequest {
     },
     ListWindows,
     ActiveWindow,
+    Observe {
+        screenshot: bool,
+        output_path: Option<PathBuf>,
+    },
     WaitWindow {
         title_contains: Option<String>,
         pid: Option<u32>,
@@ -357,6 +361,8 @@ pub struct IpcResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<Vec<WorkspaceWindow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_window: Option<WorkspaceWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<WorkspaceScreenshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_log: Option<WorkspaceAppLog>,
@@ -439,6 +445,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             message: format!("workspace {:?} is already running", status.id),
             status: Some(status),
             windows: None,
+            active_window: None,
             screenshot: None,
             app_log: None,
             events: None,
@@ -629,6 +636,17 @@ pub fn list_windows(id: &str) -> Result<IpcResponse> {
 pub fn active_window(id: &str) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::ActiveWindow)
+}
+
+pub fn observe(id: &str, screenshot: bool, output_path: Option<PathBuf>) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::Observe {
+            screenshot,
+            output_path,
+        },
+    )
 }
 
 pub fn wait_window(
@@ -1167,6 +1185,7 @@ fn response_with_status(
         message: message.into(),
         status: Some(status.clone()),
         windows: None,
+        active_window: None,
         screenshot: None,
         app_log: None,
         events: None,
@@ -1268,6 +1287,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 )?;
                 let mut response =
                     response_with_status(true, "workspace active window reported", &state.status);
+                response.active_window = Some(window.clone());
                 response.windows = Some(vec![window]);
                 (response, false)
             }
@@ -1280,6 +1300,28 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 let mut response =
                     response_with_status(false, "workspace active window not found", &state.status);
                 response.windows = Some(Vec::new());
+                (response, false)
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::Observe {
+            screenshot,
+            output_path,
+        } => match observe_workspace(state, screenshot, output_path) {
+            Ok(mut response) => {
+                record_event(
+                    state,
+                    "observe",
+                    serde_json::json!({
+                        "windows": response.windows.as_ref().map(Vec::len).unwrap_or_default(),
+                        "active_window_id": response.active_window.as_ref().map(|window| window.id.as_str()),
+                        "screenshot": response.screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
+                    }),
+                )?;
+                response.status = Some(state.status.clone());
                 (response, false)
             }
             Err(error) => (
@@ -2181,6 +2223,30 @@ fn active_workspace_window(status: &WorkspaceStatus) -> Result<Option<WorkspaceW
         return Ok(None);
     }
     Ok(Some(window_info(status, window_id)?))
+}
+
+fn observe_workspace(
+    state: &DaemonState,
+    screenshot: bool,
+    output_path: Option<PathBuf>,
+) -> Result<IpcResponse> {
+    let windows = list_workspace_windows(&state.status)?;
+    let active_window = active_workspace_window(&state.status)?;
+    let screenshot = if screenshot {
+        Some(capture_workspace_screenshot(&state.status, output_path)?)
+    } else {
+        None
+    };
+    Ok(IpcResponse {
+        ok: true,
+        message: "workspace observed".to_string(),
+        status: Some(state.status.clone()),
+        windows: Some(windows),
+        active_window,
+        screenshot,
+        app_log: None,
+        events: None,
+    })
 }
 
 struct WindowWaitCriteria {
