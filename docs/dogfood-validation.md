@@ -513,3 +513,18 @@ Previous post-patch verification:
   Chrome page titled `example.com - Google Chrome` showing
   `ERR_INTERNET_DISCONNECTED`. The Chrome workspace was stopped and stale
   cleanup removed the runtime afterward.
+- 2026-05-25 installed-app B-gate v12 dogfood verified the polished embedded
+  viewer in the patched installed Codex app bundle. A hidden workspace
+  `codex-v12` launched
+  `/home/avifenesh/.local/opt/codex-desktop-linux/codex-app/start.sh
+  --new-instance -- --remote-debugging-port=9340` with
+  `CODEX_AGENT_WORKSPACE_BIN=/home/avifenesh/.local/bin/agent-workspace-linux`.
+  After Electron painted, `workspace_observe --screenshot` showed the installed
+  app conversation surface with the embedded Agent Workspace panel, live
+  recursive screenshot, and Refresh/Details/Stop/Revoke controls. A
+  workspace-local click opened the new Details tray, which displayed the active
+  window as `Codex`, the running app as `installed-codex-v12-viewer`, and the
+  hidden display as `:90` without raw JSON. A second workspace-local click on
+  the embedded Stop button stopped the workspace from inside the app; saved
+  events recorded the click, the installed app exiting by SIGTERM, and
+  `workspace_stop`, then stale cleanup removed the stopped runtime.
