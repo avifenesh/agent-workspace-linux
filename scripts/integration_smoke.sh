@@ -284,6 +284,15 @@ else:
 PY
 run_awl workspace run --id "$DISABLED_ID" --timeout-ms 8000 --tail-bytes 4000 -- python3 "$DISABLED_PROBE" > "$SMOKE_DIR/disabled-run.json"
 assert_json '.succeeded == true and (.stdout.content | contains("direct-blocked")) and (.stdout.content | contains("dns-blocked")) and .launch.apps[0].network_isolation == "bubblewrap_unshare_net"' "$SMOKE_DIR/disabled-run.json"
+if [[ -n "$BROWSER_BIN" ]]; then
+  run_awl workspace launch --id "$DISABLED_ID" --name disabled-network-browser --wait-window --screenshot-window --window-timeout-ms 20000 -- "$BROWSER_BIN" "--user-data-dir=$SMOKE_DIR/disabled-browser-profile" --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check --new-window https://example.com > "$SMOKE_DIR/disabled-browser-launch.json"
+  assert_json '.ok == true and (.screenshot.bytes > 0) and .apps[0].network_isolation == "bubblewrap_unshare_net" and .windows[0].wm_class == "Google-chrome"' "$SMOKE_DIR/disabled-browser-launch.json"
+  DISABLED_BROWSER_APP_ID="$(jq -r '.apps[0].id' "$SMOKE_DIR/disabled-browser-launch.json")"
+  run_awl workspace wait-window --id "$DISABLED_ID" --app "$DISABLED_BROWSER_APP_ID" --title example.com --timeout-ms 10000 > "$SMOKE_DIR/disabled-browser-wait.json"
+  assert_json '.ok == true and (.windows[0].title | contains("example.com"))' "$SMOKE_DIR/disabled-browser-wait.json"
+else
+  echo "== disabled-network browser smoke skipped: Chrome/Chromium not found =="
+fi
 run_awl workspace stop --id "$DISABLED_ID" > /dev/null
 
 echo "== mount enforcement workspace =="
