@@ -5828,6 +5828,7 @@ fn restricted_mount_namespace_args(
     let policy = policy.context("mount namespace requested without an applied policy")?;
     let mut args = Vec::new();
     let mut dirs = BTreeSet::new();
+    let mut extra_read_only_binds = BTreeSet::new();
     let mut add_dir = |path: &Path| {
         if path != Path::new("/") {
             dirs.insert(path.to_path_buf());
@@ -5853,6 +5854,12 @@ fn restricted_mount_namespace_args(
         }
         add_parent_dirs(&mut dirs, &mount.workspace_path);
     }
+    if let Some(parent) =
+        external_symlink_target_parent(Path::new("/etc/resolv.conf"), Path::new("/etc"))
+    {
+        add_parent_dirs(&mut dirs, &parent);
+        extra_read_only_binds.insert(parent);
+    }
 
     for path in ["/usr", "/bin", "/lib", "/lib64", "/etc", "/opt"] {
         if Path::new(path).exists() {
@@ -5870,6 +5877,11 @@ fn restricted_mount_namespace_args(
     for dir in dirs {
         args.push("--dir".to_string());
         args.push(dir.display().to_string());
+    }
+    for path in extra_read_only_binds {
+        args.push("--ro-bind".to_string());
+        args.push(path.display().to_string());
+        args.push(path.display().to_string());
     }
     if Path::new("/tmp/.X11-unix").exists() {
         args.push("--ro-bind".to_string());
@@ -5898,6 +5910,17 @@ fn restricted_mount_namespace_args(
             .to_string(),
     );
     Ok(args)
+}
+
+fn external_symlink_target_parent(path: &Path, covered_root: &Path) -> Option<PathBuf> {
+    let _link_target = fs::read_link(path).ok()?;
+    let target = fs::canonicalize(path).ok()?;
+    let covered_root =
+        fs::canonicalize(covered_root).unwrap_or_else(|_| covered_root.to_path_buf());
+    if target.starts_with(covered_root) {
+        return None;
+    }
+    target.parent().map(Path::to_path_buf)
 }
 
 fn add_parent_dirs(dirs: &mut BTreeSet<PathBuf>, path: &Path) {
@@ -8525,6 +8548,51 @@ mod tests {
         let policy = policy(NetworkPolicy::default(), true, true);
 
         assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+    }
+
+    #[test]
+    fn external_symlink_target_parent_returns_target_directory_outside_covered_root() {
+        let root = env::temp_dir().join(format!(
+            "agent-workspace-resolv-test-{}",
+            std::process::id()
+        ));
+        let etc = root.join("etc");
+        let resolver = root.join("run/systemd/resolve");
+        fs::create_dir_all(&etc).expect("etc dir");
+        fs::create_dir_all(&resolver).expect("resolver dir");
+        fs::write(resolver.join("stub-resolv.conf"), "nameserver 127.0.0.53\n")
+            .expect("resolver file");
+        std::os::unix::fs::symlink(
+            "../run/systemd/resolve/stub-resolv.conf",
+            etc.join("resolv.conf"),
+        )
+        .expect("resolv symlink");
+
+        assert_eq!(
+            external_symlink_target_parent(&etc.join("resolv.conf"), &etc),
+            Some(resolver)
+        );
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn external_symlink_target_parent_ignores_target_inside_covered_root() {
+        let root = env::temp_dir().join(format!(
+            "agent-workspace-etc-symlink-test-{}",
+            std::process::id()
+        ));
+        let etc = root.join("etc");
+        fs::create_dir_all(&etc).expect("etc dir");
+        fs::write(etc.join("real.conf"), "ok\n").expect("real file");
+        std::os::unix::fs::symlink("real.conf", etc.join("alias.conf")).expect("etc symlink");
+
+        assert_eq!(
+            external_symlink_target_parent(&etc.join("alias.conf"), &etc),
+            None
+        );
+
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

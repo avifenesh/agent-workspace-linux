@@ -76,6 +76,24 @@ Environment:
   copy path and generated UI source, and the installed app bundle was patched in
   both `content/webview` and `resources/app.asar` so the webview and main bridge
   load together after restart.
+- A project-dev dogfood pass found a real A-gate bug after Codex/MCP restart:
+  the `project-dev` template produced correct Rust mounts, but `cargo test`
+  failed inside `mount_isolation=bubblewrap_mount_namespace` with
+  `network_isolation=host` because `/etc/resolv.conf` was a symlink to
+  `/run/systemd/resolve/stub-resolv.conf` and the restricted mount namespace did
+  not expose that target. The runtime now adds a narrow read-only bind for the
+  external resolver target directory when `/etc/resolv.conf` needs it. After
+  reinstalling and restarting the `mcp-visible` workspace daemon,
+  `workspace_run_app` resolved `index.crates.io`, `curl -I
+  https://index.crates.io/config.json` returned HTTP 200, and `cargo test`
+  passed 49 tests from `/workspace/project` through the live MCP path with
+  `mount_isolation=bubblewrap_mount_namespace`.
+- The same fresh `mcp-visible` workspace initially appeared as a black embedded
+  desktop because it had no visible windows. Launching an `xterm` probe with
+  `wait_window` and `screenshot_window` found `Agent Workspace Visible Probe`,
+  captured a window screenshot, and `workspace_observe --screenshot` reported
+  one visible `XTerm` window. The current black-screen state is therefore an
+  empty-workspace UX issue rather than a dead stream.
 
 Remaining gaps from this pass:
 
