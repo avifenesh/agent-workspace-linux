@@ -95,11 +95,14 @@ pub struct ProfileSetupRun {
     pub workspace_id: String,
     pub profile_id: String,
     pub wait: bool,
+    pub kill_on_timeout: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
     pub launched: Vec<IpcResponse>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waited: Vec<IpcResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub killed: Vec<IpcResponse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,6 +142,7 @@ pub struct ProfileWorkspaceOpenOptions {
 pub struct ProfileSetupOptions {
     pub wait: bool,
     pub timeout_ms: Option<u64>,
+    pub kill_on_timeout: bool,
     pub acknowledge_unenforced_policy: bool,
 }
 
@@ -460,6 +464,7 @@ pub fn launch_profile_setup(
     let mut specs = setup_launch_specs(profile_id)?;
     let mut launched = Vec::new();
     let mut waited = Vec::new();
+    let mut killed = Vec::new();
     let mut app_ids = Vec::new();
     for spec in &mut specs {
         spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
@@ -474,6 +479,11 @@ pub fn launch_profile_setup(
             let app_id = launched_app_id(&launch)
                 .context("profile setup launch did not return an app id")?;
             let wait = workspace::wait_app(workspace_id, app_id.clone(), options.timeout_ms)?;
+            let should_kill =
+                options.kill_on_timeout && !wait.ok && response_app_running(&wait, &app_id);
+            if should_kill {
+                killed.push(workspace::kill_app(workspace_id, app_id.clone())?);
+            }
             app_ids.push(app_id);
             waited.push(wait);
         }
@@ -495,9 +505,11 @@ pub fn launch_profile_setup(
         workspace_id: workspace_id.to_string(),
         profile_id: profile_id.to_string(),
         wait: options.wait,
+        kill_on_timeout: options.kill_on_timeout,
         timeout_ms: options.timeout_ms,
         launched,
         waited,
+        killed,
         completed,
         succeeded,
     })
@@ -575,6 +587,9 @@ pub fn open_profile_workspace(
 }
 
 fn launched_app_id(response: &IpcResponse) -> Option<String> {
+    if let Some(app) = response.apps.as_ref().and_then(|apps| apps.last()) {
+        return Some(app.id.clone());
+    }
     response
         .status
         .as_ref()?
@@ -583,7 +598,30 @@ fn launched_app_id(response: &IpcResponse) -> Option<String> {
         .map(|app| app.id.clone())
 }
 
+fn response_app_running(response: &IpcResponse, app_id: &str) -> bool {
+    response
+        .apps
+        .as_ref()
+        .and_then(|apps| apps.iter().find(|app| app.id == app_id))
+        .or_else(|| {
+            response
+                .status
+                .as_ref()?
+                .apps
+                .iter()
+                .find(|app| app.id == app_id || app.pid.to_string() == app_id)
+        })
+        .is_some_and(|app| app.running)
+}
+
 fn response_app_exit_code(response: &IpcResponse, app_id: &str) -> Option<i32> {
+    if let Some(app) = response
+        .apps
+        .as_ref()
+        .and_then(|apps| apps.iter().find(|app| app.id == app_id))
+    {
+        return app.exit_code;
+    }
     response
         .status
         .as_ref()?

@@ -43,7 +43,7 @@ cargo run -- profile get project-dev
 cargo run -- profile check project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --ack-unenforced-policy --profile project-dev
-cargo run -- workspace open-profile --ack-hidden-workspace --profile project-dev --setup --setup-timeout-ms 30000
+cargo run -- workspace open-profile --ack-hidden-workspace --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
@@ -98,7 +98,7 @@ cargo run -- workspace logs --stream stdout terminal
 cargo run -- workspace wait-app --timeout-ms 30000 app-12345
 cargo run -- workspace wait-app --timeout-ms 30000 terminal
 cargo run -- workspace events --tail 20
-cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000
+cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
 cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop --timeout-ms 30000
 cargo run -- mcp
@@ -137,6 +137,7 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   startup apps only when setup succeeds, returning the workspace start, setup,
   and startup results plus a top-level `ready` flag in one response.
   `--setup-timeout-ms` overrides the default setup wait timeout.
+  `--setup-kill-on-timeout` terminates a timed-out setup command process group.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
@@ -217,7 +218,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   result reports whether they completed and exited successfully. Their status
   and logs are available through the same app status/log tools. If setup uses a
   profile with policy that remains unenforced, it requires
-  `--ack-unenforced-policy`.
+  `--ack-unenforced-policy`. `--kill-on-timeout` terminates a timed-out setup
+  command process group and records the kill response in the setup result.
 - `workspace launch-profile-apps --profile` launches the profile's declared
   startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
   Profile setup commands and startup apps may include `name` fields, and those
@@ -256,6 +258,9 @@ app id/pid/name, app name substring, profile id, or running/stopped state.
 daemon IPC socket to close after requesting shutdown.
 `workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app
 process group when its timeout elapses.
+`workspace_run_profile_setup` accepts `kill_on_timeout=true`, and
+`workspace_open_profile` accepts `setup_kill_on_timeout=true`, for the same
+setup-command cleanup behavior.
 `workspace_list_windows` and window-targeted tools can filter by title, class,
 pid, app id, or app name, with class matching `wm_class` and `wm_instance`.
 `workspace_list_windows` accepts `include_hidden=true` to return

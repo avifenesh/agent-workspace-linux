@@ -675,6 +675,12 @@ fn parse_open_profile_options(
                 );
                 index += 2;
             }
+            "--setup-kill-on-timeout" => {
+                open_options.run_setup = true;
+                open_options.setup.wait = true;
+                open_options.setup.kill_on_timeout = true;
+                index += 1;
+            }
             flag => bail!("unknown workspace open-profile option '{flag}'"),
         }
     }
@@ -2710,6 +2716,11 @@ fn parse_workspace_setup_options(
                 );
                 index += 2;
             }
+            "--kill-on-timeout" => {
+                options.wait = true;
+                options.kill_on_timeout = true;
+                index += 1;
+            }
             flag => bail!("unknown workspace setup option '{flag}'"),
         }
     }
@@ -2887,7 +2898,7 @@ Usage:
   agent-workspace-linux profile path|list|get|check|template|put|delete
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]
-  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--id ID] [--width PX] [--height PX]
+  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--id ID] [--width PX] [--height PX]
   agent-workspace-linux workspace list
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
@@ -2942,7 +2953,7 @@ Usage:
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace events [--id ID] [--tail N]
-  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]
+  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace stop [--id ID] [--timeout-ms N]"#
     );
