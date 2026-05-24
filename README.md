@@ -258,7 +258,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace ipc-info` reports daemon IPC protocol metadata for the workspace,
   including protocol version, Unix socket path, framing, and encoding. Each
   workspace runtime directory is created with user-only permissions before the
-  daemon socket and Xauthority file are placed inside it.
+  daemon socket and Xauthority file are placed inside it, and the control socket
+  itself is marked user-only.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,

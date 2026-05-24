@@ -38,6 +38,7 @@ const SIGTERM: i32 = 15;
 const SIGKILL: i32 = 9;
 const ESRCH: i32 = 3;
 const PRIVATE_RUNTIME_DIR_MODE: u32 = 0o700;
+const PRIVATE_SOCKET_MODE: u32 = 0o600;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
 
@@ -1731,6 +1732,16 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
 
     let listener = UnixListener::bind(&options.socket_path)
         .with_context(|| format!("failed to bind {}", options.socket_path.display()))?;
+    fs::set_permissions(
+        &options.socket_path,
+        fs::Permissions::from_mode(PRIVATE_SOCKET_MODE),
+    )
+    .with_context(|| {
+        format!(
+            "failed to set private permissions on {}",
+            options.socket_path.display()
+        )
+    })?;
     let event_path = options.runtime_dir.join(EVENT_LOG_FILE);
     let started_at_unix = unix_now();
     let mut state = DaemonState {
