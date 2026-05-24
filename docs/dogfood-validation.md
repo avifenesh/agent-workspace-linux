@@ -56,6 +56,17 @@ Environment:
   host networking for authenticated web tasks. A live template probe then opened
   `about:blank - Google Chrome` with
   `mount_isolation=bubblewrap_mount_namespace` and `network_isolation=host`.
+- The installed Codex MCP path then revalidated network enforcement against the
+  already-running `mcp-visible` workspace. Two saved profiles were created
+  through `profile_put` with explicit no-overwrite dry runs:
+  `dogfood-network-disabled` and `dogfood-network-local-only`. `profile_check`
+  reported `state=enforced` with `backend=bubblewrap_unshare_net` for disabled
+  networking and `backend=bubblewrap_loopback_only` for local-only networking.
+  `workspace_run_app` with the disabled profile blocked `1.1.1.1:80` with
+  `Network is unreachable` and DNS with temporary name-resolution failure.
+  `workspace_run_app` with the local-only profile successfully round-tripped
+  through an in-sandbox `127.0.0.1` listener and blocked `1.1.1.1:80` with
+  `Network is unreachable`.
 
 Remaining gaps from this pass:
 
@@ -70,6 +81,9 @@ Remaining gaps from this pass:
 - Hard permission enforcement in Codex for Linux should still wait until the UI
   approval boundary is wired so agents cannot call the same workspace tools
   outside the user-approved path.
+- MCP app-action responses still include large full-status payloads with long
+  stopped-app history. They are correct but too noisy for agent context and for
+  any UI that wants concise action feedback.
 
 Previous environment:
 
