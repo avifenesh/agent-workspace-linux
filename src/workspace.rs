@@ -266,6 +266,12 @@ pub enum IpcRequest {
         env: Vec<EnvVar>,
     },
     ListWindows,
+    WaitWindow {
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: u64,
+    },
     Screenshot {
         output_path: Option<PathBuf>,
     },
@@ -578,6 +584,37 @@ fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
 pub fn list_windows(id: &str) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::ListWindows)
+}
+
+pub fn wait_window(
+    id: &str,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    if title_contains
+        .as_ref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        bail!("window title filter cannot be empty");
+    }
+    if app_id
+        .as_ref()
+        .is_some_and(|app_id| app_id.trim().is_empty())
+    {
+        bail!("app id cannot be empty");
+    }
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::WaitWindow {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
 }
 
 pub fn screenshot(id: &str, output_path: Option<PathBuf>) -> Result<IpcResponse> {
@@ -1063,6 +1100,50 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
+        IpcRequest::WaitWindow {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match wait_workspace_window(state, &criteria) {
+                Ok(windows) => {
+                    let found = !windows.is_empty();
+                    record_event(
+                        state,
+                        "wait_window",
+                        serde_json::json!({
+                            "title_contains": criteria.title_contains.as_deref(),
+                            "pid": criteria.pid,
+                            "app_id": criteria.app_id.as_deref(),
+                            "timeout_ms": criteria.timeout_ms,
+                            "count": windows.len(),
+                        }),
+                    )?;
+                    let mut response = response_with_status(
+                        found,
+                        if found {
+                            "workspace window found"
+                        } else {
+                            "workspace window not found before timeout"
+                        },
+                        &state.status,
+                    );
+                    response.windows = Some(windows);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
         IpcRequest::Screenshot { output_path } => {
             match capture_workspace_screenshot(&state.status, output_path) {
                 Ok(screenshot) => {
@@ -1563,6 +1644,58 @@ fn list_workspace_windows(status: &WorkspaceStatus) -> Result<Vec<WorkspaceWindo
             (!id.is_empty()).then(|| window_info(status, id))
         })
         .collect()
+}
+
+struct WindowWaitCriteria {
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: u64,
+}
+
+fn wait_workspace_window(
+    state: &mut DaemonState,
+    criteria: &WindowWaitCriteria,
+) -> Result<Vec<WorkspaceWindow>> {
+    let timeout = Duration::from_millis(criteria.timeout_ms);
+    let started = Instant::now();
+    loop {
+        refresh_apps(state)?;
+        let windows = matching_workspace_windows(state, criteria)?;
+        if !windows.is_empty() {
+            return Ok(windows);
+        }
+        if started.elapsed() >= timeout {
+            return Ok(Vec::new());
+        }
+        let remaining = timeout.saturating_sub(started.elapsed());
+        thread::sleep(remaining.min(Duration::from_millis(100)));
+    }
+}
+
+fn matching_workspace_windows(
+    state: &DaemonState,
+    criteria: &WindowWaitCriteria,
+) -> Result<Vec<WorkspaceWindow>> {
+    let app_pid = criteria.app_id.as_ref().and_then(|app_id| {
+        state
+            .status
+            .apps
+            .iter()
+            .find(|app| matches_app_id(app, app_id))
+            .map(|app| app.pid)
+    });
+    let pid = criteria.pid.or(app_pid);
+    Ok(list_workspace_windows(&state.status)?
+        .into_iter()
+        .filter(|window| {
+            criteria
+                .title_contains
+                .as_ref()
+                .is_none_or(|title| window.title.contains(title))
+        })
+        .filter(|window| pid.is_none_or(|pid| window.pid == Some(pid)))
+        .collect())
 }
 
 fn window_info(status: &WorkspaceStatus, id: &str) -> Result<WorkspaceWindow> {
