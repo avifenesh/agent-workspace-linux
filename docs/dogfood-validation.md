@@ -81,7 +81,8 @@ Post-patch verification:
   rejection, and that self-stop lost-client case in addition to doctor,
   profile import/export, open-profile dry-run, real `workspace open-profile`
   execution with setup success, setup artifact creation, startup window wait,
-  startup screenshot, startup app targeting, and workspace stop,
+  startup screenshot, startup app targeting, workspace stop, and stopped
+  manifest log reads,
   `network.mode=local_only`, `network.mode=disabled`, read-write/read-only mount
   enforcement, session tracking, a real X11 window with screenshot, window
   listing, clipboard, keyboard input, app wait, artifact inspection, browser

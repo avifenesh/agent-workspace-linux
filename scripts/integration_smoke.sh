@@ -159,7 +159,7 @@ jq -n '{
   setup_commands: [
     {
       name: "setup-marker",
-      command: ["bash", "-lc", "printf setup-ok > \"$AGENT_WORKSPACE_RUNTIME_DIR/setup-marker.txt\""]
+      command: ["bash", "-lc", "echo setup-log-smoke; printf setup-ok > \"$AGENT_WORKSPACE_RUNTIME_DIR/setup-marker.txt\""]
     }
   ],
   startup_apps: [
@@ -175,6 +175,7 @@ WORKSPACE_IDS+=("$OPEN_REAL_ID")
 run_awl workspace open-profile --ack-hidden-workspace --profile open-real --id "$OPEN_REAL_ID" --purpose "Open profile smoke" --setup --setup-timeout-ms 10000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window --startup-window-timeout-ms 10000 > "$SMOKE_DIR/open-real.json"
 assert_json '.ready == true and .setup_succeeded == true and .startup_launched == true and .setup.succeeded == true and .startup.launched[0].ok == true and (.startup.launched[0].screenshot.bytes > 0)' "$SMOKE_DIR/open-real.json"
 test "$(cat "$RUNTIME_DIR/agent-workspace-linux/$OPEN_REAL_ID/setup-marker.txt")" = "setup-ok"
+OPEN_REAL_SETUP_APP_ID="$(jq -r '.setup.launched[0].apps[0].id' "$SMOKE_DIR/open-real.json")"
 OPEN_REAL_APP_ID="$(jq -r '.startup.launched[0].apps[0].id' "$SMOKE_DIR/open-real.json")"
 OPEN_REAL_WINDOW_ID="$(jq -r '.startup.launched[0].windows[0].id' "$SMOKE_DIR/open-real.json")"
 run_awl workspace apps --id "$OPEN_REAL_ID" --app "$OPEN_REAL_APP_ID" > "$SMOKE_DIR/open-real-apps.json"
@@ -184,6 +185,8 @@ run_awl workspace wait-app --id "$OPEN_REAL_ID" --timeout-ms 5000 "$OPEN_REAL_AP
 assert_json '.ok == true and .apps[0].running == false and .apps[0].exit_code == 0' "$SMOKE_DIR/open-real-wait.json"
 run_awl workspace stop --id "$OPEN_REAL_ID" > "$SMOKE_DIR/open-real-stop.json"
 assert_json '.ok == true and .status.ready == false' "$SMOKE_DIR/open-real-stop.json"
+run_awl workspace logs --id "$OPEN_REAL_ID" --stream stdout --tail-bytes 2000 "$OPEN_REAL_SETUP_APP_ID" > "$SMOKE_DIR/open-real-setup-log.json"
+assert_json '.ok == true and .message == "workspace app log read from saved manifest" and (.app_log.content | contains("setup-log-smoke"))' "$SMOKE_DIR/open-real-setup-log.json"
 
 echo "== local-only workspace =="
 LOCAL_PROFILE="$SMOKE_DIR/local-profile.json"
