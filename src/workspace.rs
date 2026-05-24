@@ -47,6 +47,7 @@ const PRIVATE_SOCKET_MODE: u32 = 0o600;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
 const WORKSPACE_MANIFEST_FILE: &str = "workspace.json";
+const LINUX_DELETED_EXE_SUFFIX: &str = " (deleted)";
 
 unsafe extern "C" {
     fn kill(pid: i32, sig: i32) -> i32;
@@ -2688,7 +2689,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
 fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     let stdout_path = options.runtime_dir.join("daemon.out.log");
     let stderr_path = options.runtime_dir.join("daemon.err.log");
-    let exe = env::current_exe().context("failed to resolve current executable")?;
+    let exe = daemon_executable_path()?;
     let mut daemon = Command::new("setsid");
     daemon.arg(exe).arg("daemon").arg("--id").arg(&options.id);
     daemon.arg("--session-id").arg(&options.session_id);
@@ -2733,6 +2734,25 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
         .spawn()
         .context("failed to spawn agent workspace daemon")?;
     Ok(())
+}
+
+fn daemon_executable_path() -> Result<PathBuf> {
+    let exe = env::current_exe().context("failed to resolve current executable")?;
+    if exe.exists() {
+        return Ok(exe);
+    }
+    if let Some(stable_path) = strip_linux_deleted_exe_suffix(&exe) {
+        if stable_path.exists() {
+            return Ok(stable_path);
+        }
+    }
+    Ok(exe)
+}
+
+fn strip_linux_deleted_exe_suffix(path: &Path) -> Option<PathBuf> {
+    let path = path.as_os_str().to_string_lossy();
+    path.strip_suffix(LINUX_DELETED_EXE_SUFFIX)
+        .map(PathBuf::from)
 }
 
 fn write_applied_policy_file(
@@ -3207,141 +3227,156 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             wait_window,
             window_timeout_ms,
             screenshot_window,
-        } => match spawn_app(
-            state,
-            LaunchSpec {
-                command,
-                name,
-                profile_id,
-                applied_policy,
-                user_acknowledged_unenforced_policy,
-                cwd,
-                env,
-            },
-        ) {
-            Ok(app) => {
-                let app_id = app.id.clone();
-                record_event(
-                    state,
-                    "app_launch",
-                    serde_json::json!({
-                        "app_id": &app.id,
-                        "name": app.name.as_deref(),
-                        "pid": app.pid,
-                        "process_group_id": app.process_group_id,
-                        "command": &app.command,
-                        "profile_id": app.profile_id.as_deref(),
-                        "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
-                        "env_count": app.env.len(),
-                        "network_isolation": &app.network_isolation,
-                        "mount_isolation": &app.mount_isolation,
-                        "stdout_path": app.stdout_path.as_ref().map(|path| path.display().to_string()),
-                        "stderr_path": app.stderr_path.as_ref().map(|path| path.display().to_string()),
-                        "started_at_unix": app.started_at_unix,
-                        "wait_window": wait_window,
-                        "window_timeout_ms": window_timeout_ms,
-                        "screenshot_window": screenshot_window,
-                    }),
-                )?;
-                if wait_window || screenshot_window {
-                    let timeout_ms = window_timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS);
-                    let criteria = WindowWaitCriteria {
-                        title_contains: None,
-                        class_contains: None,
-                        pid: None,
-                        app_id: Some(app_id.clone()),
-                        timeout_ms,
-                    };
-                    match wait_workspace_window(state, &criteria) {
-                        Ok(windows) => {
-                            let found = !windows.is_empty();
-                            let response_app = state
-                                .status
-                                .apps
-                                .iter()
-                                .find(|candidate| candidate.id == app_id)
-                                .cloned()
-                                .unwrap_or_else(|| app.clone());
-                            let screenshot_result = if screenshot_window {
-                                windows
-                                    .first()
-                                    .map(|window| {
-                                        capture_workspace_window_screenshot(
+        } => {
+            let pre_launch_visible_window_ids = if wait_window || screenshot_window {
+                Some(
+                    search_workspace_window_ids(&state.status, true)?
+                        .into_iter()
+                        .collect::<BTreeSet<_>>(),
+                )
+            } else {
+                None
+            };
+            match spawn_app(
+                state,
+                LaunchSpec {
+                    command,
+                    name,
+                    profile_id,
+                    applied_policy,
+                    user_acknowledged_unenforced_policy,
+                    cwd,
+                    env,
+                },
+            ) {
+                Ok(app) => {
+                    let app_id = app.id.clone();
+                    record_event(
+                        state,
+                        "app_launch",
+                        serde_json::json!({
+                            "app_id": &app.id,
+                            "name": app.name.as_deref(),
+                            "pid": app.pid,
+                            "process_group_id": app.process_group_id,
+                            "command": &app.command,
+                            "profile_id": app.profile_id.as_deref(),
+                            "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
+                            "env_count": app.env.len(),
+                            "network_isolation": &app.network_isolation,
+                            "mount_isolation": &app.mount_isolation,
+                            "stdout_path": app.stdout_path.as_ref().map(|path| path.display().to_string()),
+                            "stderr_path": app.stderr_path.as_ref().map(|path| path.display().to_string()),
+                            "started_at_unix": app.started_at_unix,
+                            "wait_window": wait_window,
+                            "window_timeout_ms": window_timeout_ms,
+                            "screenshot_window": screenshot_window,
+                        }),
+                    )?;
+                    if wait_window || screenshot_window {
+                        let timeout_ms = window_timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS);
+                        let criteria = WindowWaitCriteria {
+                            title_contains: None,
+                            class_contains: None,
+                            pid: None,
+                            app_id: Some(app_id.clone()),
+                            timeout_ms,
+                        };
+                        match wait_launch_workspace_window(
+                            state,
+                            &criteria,
+                            pre_launch_visible_window_ids.as_ref(),
+                        ) {
+                            Ok(windows) => {
+                                let found = !windows.is_empty();
+                                let response_app = state
+                                    .status
+                                    .apps
+                                    .iter()
+                                    .find(|candidate| candidate.id == app_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| app.clone());
+                                let screenshot_result = if screenshot_window {
+                                    windows
+                                        .first()
+                                        .map(|window| {
+                                            capture_workspace_window_screenshot(
+                                                &state.status,
+                                                window,
+                                                None,
+                                            )
+                                        })
+                                        .transpose()
+                                } else {
+                                    Ok(None)
+                                };
+                                match screenshot_result {
+                                    Ok(screenshot) => {
+                                        record_event(
+                                            state,
+                                            "launch_wait_window",
+                                            serde_json::json!({
+                                                "app_id": &app_id,
+                                                "timeout_ms": timeout_ms,
+                                                "found": found,
+                                                "windows": windows.len(),
+                                                "screenshot": screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
+                                            }),
+                                        )?;
+                                        let message = if screenshot.is_some() {
+                                            "app launched, window found, and screenshot captured"
+                                        } else if found {
+                                            "app launched and window found in workspace"
+                                        } else {
+                                            "app launched but window not found before timeout"
+                                        };
+                                        let mut response =
+                                            response_with_status(found, message, &state.status);
+                                        response.apps = Some(vec![response_app]);
+                                        response.windows = Some(windows);
+                                        response.screenshot = screenshot;
+                                        (response, false)
+                                    }
+                                    Err(error) => {
+                                        let mut response = response_with_status(
+                                            false,
+                                            error.to_string(),
                                             &state.status,
-                                            window,
-                                            None,
-                                        )
-                                    })
-                                    .transpose()
-                            } else {
-                                Ok(None)
-                            };
-                            match screenshot_result {
-                                Ok(screenshot) => {
-                                    record_event(
-                                        state,
-                                        "launch_wait_window",
-                                        serde_json::json!({
-                                            "app_id": &app_id,
-                                            "timeout_ms": timeout_ms,
-                                            "found": found,
-                                            "windows": windows.len(),
-                                            "screenshot": screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
-                                        }),
-                                    )?;
-                                    let message = if screenshot.is_some() {
-                                        "app launched, window found, and screenshot captured"
-                                    } else if found {
-                                        "app launched and window found in workspace"
-                                    } else {
-                                        "app launched but window not found before timeout"
-                                    };
-                                    let mut response =
-                                        response_with_status(found, message, &state.status);
-                                    response.apps = Some(vec![response_app]);
-                                    response.windows = Some(windows);
-                                    response.screenshot = screenshot;
-                                    (response, false)
-                                }
-                                Err(error) => {
-                                    let mut response = response_with_status(
-                                        false,
-                                        error.to_string(),
-                                        &state.status,
-                                    );
-                                    response.apps = Some(vec![response_app]);
-                                    response.windows = Some(windows);
-                                    (response, false)
+                                        );
+                                        response.apps = Some(vec![response_app]);
+                                        response.windows = Some(windows);
+                                        (response, false)
+                                    }
                                 }
                             }
+                            Err(error) => {
+                                let mut response =
+                                    response_with_status(false, error.to_string(), &state.status);
+                                response.apps = Some(vec![app]);
+                                (response, false)
+                            }
                         }
-                        Err(error) => {
-                            let mut response =
-                                response_with_status(false, error.to_string(), &state.status);
-                            response.apps = Some(vec![app]);
-                            (response, false)
-                        }
+                    } else {
+                        (
+                            {
+                                let mut response = response_with_status(
+                                    true,
+                                    "app launched in workspace",
+                                    &state.status,
+                                );
+                                response.apps = Some(vec![app]);
+                                response
+                            },
+                            false,
+                        )
                     }
-                } else {
-                    (
-                        {
-                            let mut response = response_with_status(
-                                true,
-                                "app launched in workspace",
-                                &state.status,
-                            );
-                            response.apps = Some(vec![app]);
-                            response
-                        },
-                        false,
-                    )
                 }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
             }
-            Err(error) => (
-                response_with_status(false, error.to_string(), &state.status),
-                false,
-            ),
-        },
+        }
         IpcRequest::ListApps {
             app_id,
             name_contains,
@@ -5804,6 +5839,36 @@ fn wait_workspace_window_with_visibility(
     }
 }
 
+fn wait_launch_workspace_window(
+    state: &mut DaemonState,
+    criteria: &WindowWaitCriteria,
+    pre_launch_visible_window_ids: Option<&BTreeSet<String>>,
+) -> Result<Vec<WorkspaceWindow>> {
+    let timeout = Duration::from_millis(criteria.timeout_ms);
+    let started = Instant::now();
+    loop {
+        refresh_apps(state)?;
+        let windows = matching_workspace_windows_with_visibility(state, criteria, false)?;
+        if !windows.is_empty() {
+            return Ok(windows);
+        }
+        if let Some(pre_launch_visible_window_ids) = pre_launch_visible_window_ids {
+            let new_windows = list_workspace_windows(&state.status, false)?
+                .into_iter()
+                .filter(|window| !pre_launch_visible_window_ids.contains(&window.id))
+                .collect::<Vec<_>>();
+            if !new_windows.is_empty() {
+                return Ok(new_windows);
+            }
+        }
+        if started.elapsed() >= timeout {
+            return Ok(Vec::new());
+        }
+        let remaining = timeout.saturating_sub(started.elapsed());
+        thread::sleep(remaining.min(Duration::from_millis(100)));
+    }
+}
+
 fn matching_workspace_windows_with_visibility(
     state: &DaemonState,
     criteria: &WindowWaitCriteria,
@@ -7820,6 +7885,23 @@ mod tests {
             0,
             capabilities(bubblewrap, false, false, slirp4netns),
         )
+    }
+
+    #[test]
+    fn strips_linux_deleted_exe_suffix() {
+        let path = Path::new("/home/me/.local/bin/agent-workspace-linux (deleted)");
+
+        assert_eq!(
+            strip_linux_deleted_exe_suffix(path),
+            Some(PathBuf::from("/home/me/.local/bin/agent-workspace-linux"))
+        );
+    }
+
+    #[test]
+    fn leaves_normal_exe_path_unchanged() {
+        let path = Path::new("/home/me/.local/bin/agent-workspace-linux");
+
+        assert_eq!(strip_linux_deleted_exe_suffix(path), None);
     }
 
     #[test]
