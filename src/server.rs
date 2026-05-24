@@ -367,7 +367,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_status",
-        description = "Return status for an isolated agent workspace, including the applied profile policy snapshot and enforcement report when a profile started the workspace.",
+        description = "Return live status for an isolated agent workspace, including its per-run session_id, applied profile policy snapshot, and enforcement report when a profile started the workspace.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -406,7 +406,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_manifest",
-        description = "Read the saved workspace manifest from disk for live or stopped workspace inspection without contacting the workspace daemon. This is read-only saved state, not live status.",
+        description = "Read the saved workspace manifest from disk for live or stopped workspace inspection without contacting the workspace daemon. The manifest includes the per-run session_id. This is read-only saved state, not live status.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -446,7 +446,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_ipc_info",
-        description = "Return daemon IPC protocol metadata for an isolated agent workspace, including protocol version, transport, framing, encoding, and socket path.",
+        description = "Return daemon IPC protocol metadata for an isolated agent workspace, including protocol version, session_id, transport, framing, encoding, and socket path.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -466,7 +466,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_env",
-        description = "Return the workspace-local environment needed to attach external tools to an isolated agent workspace, including DISPLAY, XAUTHORITY, runtime directory, and control socket path.",
+        description = "Return the workspace-local environment needed to attach external tools to an isolated agent workspace, including DISPLAY, XAUTHORITY, AGENT_WORKSPACE_SESSION_ID, runtime directory, and control socket path.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,

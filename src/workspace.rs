@@ -153,6 +153,7 @@ impl Default for WorkspaceStartOptions {
 #[derive(Debug, Clone)]
 pub struct DaemonOptions {
     pub id: String,
+    pub session_id: String,
     pub purpose: Option<String>,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
@@ -169,6 +170,8 @@ pub struct DaemonOptions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceStatus {
     pub id: String,
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purpose: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -246,6 +249,8 @@ pub struct WorkspaceArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceManifest {
     pub id: String,
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purpose: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -475,6 +480,7 @@ pub struct WorkspaceIpcInfo {
     pub protocol_version: u32,
     pub server_version: String,
     pub workspace_id: String,
+    pub session_id: String,
     pub socket_path: PathBuf,
     pub transport: String,
     pub framing: String,
@@ -484,6 +490,7 @@ pub struct WorkspaceIpcInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceEnvironment {
     pub workspace_id: String,
+    pub session_id: String,
     pub display: String,
     pub xauthority_path: PathBuf,
     pub runtime_dir: PathBuf,
@@ -852,6 +859,15 @@ pub struct IpcResponse {
 
 pub fn default_workspace_id() -> String {
     DEFAULT_WORKSPACE_ID.to_string()
+}
+
+pub fn new_session_id(workspace_id: &str) -> String {
+    format!(
+        "session-{}-{}-{}",
+        workspace_id,
+        unix_now_millis(),
+        std::process::id()
+    )
 }
 
 pub fn doctor_report() -> DoctorReport {
@@ -2415,6 +2431,7 @@ pub fn stop_workspace(id: &str, timeout_ms: Option<u64>, dry_run: bool) -> Resul
 
 pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     let id = sanitize_workspace_id(&options.id)?;
+    let session_id = normalize_session_id(&options.session_id)?;
     options.purpose = normalize_workspace_purpose(options.purpose)?;
     create_private_runtime_dir(&options.runtime_dir)?;
     remove_stale_socket(&options.socket_path)?;
@@ -2440,6 +2457,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     let mut state = DaemonState {
         status: WorkspaceStatus {
             id,
+            session_id,
             purpose: options.purpose,
             profile_id: options.profile_id,
             applied_policy: options.applied_policy,
@@ -2464,6 +2482,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     };
     write_workspace_manifest(&state.status, None)?;
     let start_detail = serde_json::json!({
+        "session_id": &state.status.session_id,
         "display": &state.status.display,
         "width": state.status.width,
         "height": state.status.height,
@@ -2647,9 +2666,11 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     let xauthority_path = runtime_dir.join("Xauthority");
     let display = pick_display()?;
     create_xauthority(&display, &xauthority_path)?;
+    let session_id = new_session_id(&id);
 
     Ok(WorkspaceStartPlan::Start(DaemonOptions {
         id,
+        session_id,
         purpose,
         profile_id: options.profile_id,
         applied_policy: options.applied_policy,
@@ -2670,6 +2691,7 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     let exe = env::current_exe().context("failed to resolve current executable")?;
     let mut daemon = Command::new("setsid");
     daemon.arg(exe).arg("daemon").arg("--id").arg(&options.id);
+    daemon.arg("--session-id").arg(&options.session_id);
     if let Some(purpose) = &options.purpose {
         daemon.arg("--purpose").arg(purpose);
     }
@@ -2735,6 +2757,7 @@ fn create_private_runtime_dir(path: &Path) -> Result<()> {
 fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) -> WorkspaceManifest {
     WorkspaceManifest {
         id: status.id.clone(),
+        session_id: status.session_id.clone(),
         purpose: status.purpose.clone(),
         profile_id: status.profile_id.clone(),
         applied_policy: status.applied_policy.clone(),
@@ -3086,6 +3109,7 @@ fn workspace_ipc_info(status: &WorkspaceStatus) -> WorkspaceIpcInfo {
         protocol_version: IPC_PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION").to_string(),
         workspace_id: status.id.clone(),
+        session_id: status.session_id.clone(),
         socket_path: status.socket_path.clone(),
         transport: "unix_socket".to_string(),
         framing: "newline_delimited_json".to_string(),
@@ -3096,6 +3120,7 @@ fn workspace_ipc_info(status: &WorkspaceStatus) -> WorkspaceIpcInfo {
 fn workspace_environment(status: &WorkspaceStatus) -> WorkspaceEnvironment {
     WorkspaceEnvironment {
         workspace_id: status.id.clone(),
+        session_id: status.session_id.clone(),
         display: status.display.clone(),
         xauthority_path: status.xauthority_path.clone(),
         runtime_dir: status.runtime_dir.clone(),
@@ -3112,6 +3137,10 @@ fn workspace_environment(status: &WorkspaceStatus) -> WorkspaceEnvironment {
             EnvVar {
                 name: "AGENT_WORKSPACE_ID".to_string(),
                 value: status.id.clone(),
+            },
+            EnvVar {
+                name: "AGENT_WORKSPACE_SESSION_ID".to_string(),
+                value: status.session_id.clone(),
             },
             EnvVar {
                 name: "AGENT_WORKSPACE_RUNTIME_DIR".to_string(),
@@ -7381,6 +7410,20 @@ fn sanitize_workspace_id(id: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
+fn normalize_session_id(session_id: &str) -> Result<String> {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        bail!("workspace session id cannot be empty");
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        bail!("workspace session id may only contain ASCII letters, numbers, '-', '_' and '.'");
+    }
+    Ok(trimmed.to_string())
+}
+
 fn normalize_workspace_purpose(purpose: Option<String>) -> Result<Option<String>> {
     let Some(purpose) = purpose else {
         return Ok(None);
@@ -7850,6 +7893,22 @@ mod tests {
         .expect_err("run preview should require a live workspace daemon");
 
         assert!(error.to_string().contains("daemon is required"));
+    }
+
+    #[test]
+    fn generated_session_id_is_valid_and_workspace_scoped() {
+        let session_id = new_session_id("qa");
+
+        assert!(session_id.contains("qa"));
+        assert!(normalize_session_id(&session_id).is_ok());
+    }
+
+    #[test]
+    fn session_id_rejects_spaces() {
+        let error = normalize_session_id("bad session")
+            .expect_err("session ids with spaces should be rejected");
+
+        assert!(error.to_string().contains("workspace session id"));
     }
 
     #[test]

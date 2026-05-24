@@ -3261,6 +3261,7 @@ fn parse_id_and_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut id = None;
+    let mut session_id = None;
     let mut purpose = None;
     let mut profile_id = None;
     let mut display = None;
@@ -3278,6 +3279,10 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
         match args[index].as_str() {
             "--id" => {
                 id = Some(value_after(&args, index, "--id")?.to_string());
+                index += 2;
+            }
+            "--session-id" => {
+                session_id = Some(value_after(&args, index, "--session-id")?.to_string());
                 index += 2;
             }
             "--profile" => {
@@ -3337,8 +3342,12 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     }
     let applied_policy = policy_path.as_ref().map(read_applied_policy).transpose()?;
 
+    let id = id.context("daemon missing --id")?;
+    let session_id = session_id.unwrap_or_else(|| workspace::new_session_id(&id));
+
     Ok(DaemonOptions {
-        id: id.context("daemon missing --id")?,
+        id,
+        session_id,
         purpose,
         profile_id,
         applied_policy,

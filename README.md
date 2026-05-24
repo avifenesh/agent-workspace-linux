@@ -220,9 +220,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable. Running and stale runtime directories can
   include a durable manifest with the hidden-workspace acknowledgement, purpose,
-  profile, display, dimensions, IPC paths captured at startup, event log path,
-  detached daemon stdout/stderr log paths, and stop timestamp when the workspace
-  shut down cleanly. Stopped manifests also include workspace runtime duration.
+  profile, per-run `session_id`, display, dimensions, IPC paths captured at
+  startup, event log path, detached daemon stdout/stderr log paths, and stop
+  timestamp when the workspace shut down cleanly. Stopped manifests also include
+  workspace runtime duration.
   The manifest preserves the final IPC event sequence and app snapshot, so
   stopped workspaces can still correlate event history and show what was running
   when they were torn down.
@@ -245,11 +246,12 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   for the pre-daemon start preview.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   attachment environment: `DISPLAY`, `XAUTHORITY`, `AGENT_WORKSPACE_ID`,
-  `AGENT_WORKSPACE_RUNTIME_DIR`, and `AGENT_WORKSPACE_SOCKET`. It can also set
-  a launch cwd and per-app environment overrides. `--name` gives the app a
-  stable workspace-local name that can be used anywhere an app id is accepted,
-  including logs, waits, kills, and window `--app` filters. `--wait-window`
-  waits for the launched app's first visible window and returns it in the same
+  `AGENT_WORKSPACE_SESSION_ID`, `AGENT_WORKSPACE_RUNTIME_DIR`, and
+  `AGENT_WORKSPACE_SOCKET`. It can also set a launch cwd and per-app environment
+  overrides. `--name` gives the app a stable workspace-local name that can be
+  used anywhere an app id is accepted, including logs, waits, kills, and window
+  `--app` filters. `--wait-window` waits for the launched app's first visible
+  window and returns it in the same
   response. `--screenshot-window`
   captures that first launched-app window in the same response, implying
   `--wait-window`. With `--profile`, profile cwd/env are applied unless explicit
@@ -395,7 +397,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   itself is marked user-only.
 - `workspace env` reports the workspace-local attachment environment in one IPC
   response, including `DISPLAY`, `XAUTHORITY`, runtime directory, and control
-  socket variables for tools that need to join the hidden workspace explicitly.
+  socket variables plus `AGENT_WORKSPACE_SESSION_ID` for tools that need to join
+  the hidden workspace explicitly.
   `--shell` prints shell-safe `export` lines for manual attachment.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
