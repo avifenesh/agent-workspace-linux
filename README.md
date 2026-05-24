@@ -105,7 +105,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   launch requires `--ack-unenforced-policy`. Each launched app gets
   workspace-local stdout/stderr log files reported in `workspace status`.
   Profile-backed launches also report the profile id and effective
-  mount/network isolation on the app entry.
+  mount/network isolation on the app entry. Completed apps report both a human
+  `exit_status` string and structured `exit_code`/`exit_signal` fields.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   `workspace logs`, `workspace wait-app`, `workspace events`, `workspace setup`,

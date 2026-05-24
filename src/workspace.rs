@@ -9,8 +9,9 @@ use std::{
     env, fs,
     io::{BufRead, BufReader, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
+    os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -160,6 +161,10 @@ pub struct WorkspaceApp {
     pub started_at_unix: u64,
     pub running: bool,
     pub exit_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_signal: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1279,6 +1284,8 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         started_at_unix: unix_now(),
         running: true,
         exit_status: None,
+        exit_code: None,
+        exit_signal: None,
     };
     state.status.apps.push(info.clone());
     state.apps.push(AppProcess {
@@ -1762,8 +1769,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
             .try_wait()
             .context("failed to check app process status")?
         {
-            app.info.running = false;
-            app.info.exit_status = Some(status.to_string());
+            apply_app_exit_status(&mut app.info, status);
             format!("workspace app {} is already stopped", app.info.id)
         } else {
             app.child
@@ -1773,8 +1779,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
                 .child
                 .wait()
                 .with_context(|| format!("failed to wait for workspace app {}", app.info.id))?;
-            app.info.running = false;
-            app.info.exit_status = Some(status.to_string());
+            apply_app_exit_status(&mut app.info, status);
             format!("workspace app {} killed", app.info.id)
         }
     };
@@ -1785,6 +1790,20 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
 
 fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
     app.id == app_id || app.pid.to_string() == app_id
+}
+
+fn apply_app_exit_status(app: &mut WorkspaceApp, status: ExitStatus) {
+    app.running = false;
+    app.exit_status = Some(status.to_string());
+    app.exit_code = status.code();
+    app.exit_signal = status.signal();
+}
+
+fn mark_app_exit_error(app: &mut WorkspaceApp, error: impl ToString) {
+    app.running = false;
+    app.exit_status = Some(error.to_string());
+    app.exit_code = None;
+    app.exit_signal = None;
 }
 
 fn workspace_command(status: &WorkspaceStatus, program: &str) -> Command {
@@ -1812,13 +1831,11 @@ fn refresh_apps(state: &mut DaemonState) {
         if app.info.running {
             match app.child.try_wait() {
                 Ok(Some(status)) => {
-                    app.info.running = false;
-                    app.info.exit_status = Some(status.to_string());
+                    apply_app_exit_status(&mut app.info, status);
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    app.info.running = false;
-                    app.info.exit_status = Some(error.to_string());
+                    mark_app_exit_error(&mut app.info, error);
                 }
             }
         }
