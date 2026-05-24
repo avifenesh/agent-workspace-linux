@@ -88,17 +88,30 @@ impl AppliedWorkspacePolicy {
         } else {
             "no mount policy requested".to_string()
         };
-        let network_detail = if restricted_network_requested {
-            if let Some(backend) = &runtime_capabilities.preferred_network_backend {
-                format!(
-                    "network policy is declared; {backend} is available as a candidate but is not active"
-                )
-            } else {
-                "network policy is declared but no network isolation backend is available"
+        let network_enforced = match network.mode {
+            NetworkMode::InheritHost => true,
+            NetworkMode::Disabled => runtime_capabilities.bubblewrap.ok,
+            NetworkMode::Allowlist => false,
+        };
+        let network_detail = match network.mode {
+            NetworkMode::InheritHost => "profile inherits the host network by policy".to_string(),
+            NetworkMode::Disabled if network_enforced => {
+                "network disabled is enforced with bubblewrap --unshare-net for launched apps"
                     .to_string()
             }
-        } else {
-            "profile inherits the host network by policy".to_string()
+            NetworkMode::Disabled => {
+                if let Some(backend) = &runtime_capabilities.preferred_network_backend {
+                    format!(
+                        "network disabled is declared; {backend} is available as a candidate but is not active"
+                    )
+                } else {
+                    "network disabled is declared but no network isolation backend is available"
+                        .to_string()
+                }
+            }
+            NetworkMode::Allowlist => {
+                "network allowlist is declared but no allowlist backend is active".to_string()
+            }
         };
         Self {
             profile_id,
@@ -125,7 +138,7 @@ impl AppliedWorkspacePolicy {
                 },
                 network: PolicyCapabilityStatus {
                     requested: restricted_network_requested,
-                    enforced: !restricted_network_requested,
+                    enforced: network_enforced,
                     detail: network_detail,
                 },
             },

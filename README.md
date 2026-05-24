@@ -23,8 +23,8 @@ Profiles are persisted in a local JSON file under the user's config directory.
 Profile mounts, network policy, and setup commands are stored as declared intent
 for the future Codex app/profile UI. The runtime snapshots that intent into
 `workspace status` with an enforcement report; this X11 runtime only enforces
-display/input scoping, display size, launch cwd, and environment overrides
-today.
+display/input scoping, disabled-network profiles through bubblewrap when
+available, display size, launch cwd, and environment overrides today.
 
 ## Commands
 
@@ -72,8 +72,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.
   If the profile asks for mounts or restricted networking, the current X11
-  runtime also requires `--ack-unenforced-policy` because those policies are
-  visible but not enforced yet.
+  runtime also requires `--ack-unenforced-policy` when any requested policy is
+  visible but not enforced yet. Disabled-network profiles do not need that extra
+  acknowledgement when bubblewrap is available because launches run with
+  `bwrap --unshare-net`.
   It then chooses a free X11 display, creates an `xauth` file, starts `Xvfb`,
   starts a lightweight window manager, and binds a control socket under
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,

@@ -1,4 +1,6 @@
-use crate::policy::{AppliedWorkspacePolicy, PolicyRuntimeCapabilities, PolicyToolCheck};
+use crate::policy::{
+    AppliedWorkspacePolicy, NetworkMode, PolicyRuntimeCapabilities, PolicyToolCheck,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -898,6 +900,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             },
         ) {
             Ok(app) => {
+                let network_isolation = uses_bubblewrap_network_isolation(&state.status);
                 record_event(
                     state,
                     "app_launch",
@@ -907,6 +910,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "command": &app.command,
                         "profile_id": app.profile_id.as_deref(),
                         "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
+                        "network_isolation": if network_isolation { "bubblewrap_unshare_net" } else { "host" },
                     }),
                 )?;
                 (
@@ -1116,8 +1120,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
 fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> {
     validate_launch_spec(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
-    let mut child_command = Command::new(&spec.command[0]);
-    child_command.args(&spec.command[1..]);
+    let uses_bubblewrap_network = uses_bubblewrap_network_isolation(&state.status);
+    let mut child_command = if uses_bubblewrap_network {
+        let mut command = Command::new("bwrap");
+        command
+            .args(["--dev-bind", "/", "/"])
+            .arg("--unshare-net")
+            .arg("--")
+            .arg(&spec.command[0])
+            .args(&spec.command[1..]);
+        command
+    } else {
+        let mut command = Command::new(&spec.command[0]);
+        command.args(&spec.command[1..]);
+        command
+    };
     child_command
         .env("DISPLAY", &state.status.display)
         .env("XAUTHORITY", &state.status.xauthority_path)
@@ -1138,7 +1155,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
     }
     let child = child_command
         .spawn()
-        .with_context(|| format!("failed to launch {}", spec.command.join(" ")))?;
+        .with_context(|| format!("failed to launch {}", launch_description(&spec.command)))?;
     let pid = child.id();
     let stdout_path = rename_app_log(&log_paths.stdout, pid, "stdout")?;
     let stderr_path = rename_app_log(&log_paths.stderr, pid, "stderr")?;
@@ -1161,6 +1178,22 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         child,
     });
     Ok(info)
+}
+
+fn uses_bubblewrap_network_isolation(status: &WorkspaceStatus) -> bool {
+    status.applied_policy.as_ref().is_some_and(|policy| {
+        matches!(policy.network.mode, NetworkMode::Disabled)
+            && policy.enforcement.network.enforced
+            && policy.runtime_capabilities.bubblewrap.ok
+    })
+}
+
+fn launch_description(command: &[String]) -> String {
+    if command.is_empty() {
+        "<empty command>".to_string()
+    } else {
+        command.join(" ")
+    }
 }
 
 struct AppLogPaths {
