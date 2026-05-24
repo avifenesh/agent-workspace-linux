@@ -53,6 +53,7 @@ cargo run -- workspace env
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
+cargo run -- workspace run --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace launch-profile-apps --profile project-dev --wait-window --screenshot-window --window-timeout-ms 10000
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace apps
@@ -181,7 +182,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `exit_status` string and structured `exit_code`/`exit_signal` fields.
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
-  completion fields in one response. It also accepts `--name`.
+  completion fields in one response. It accepts the same `--name`, `--cwd`,
+  `--env`, `--profile`, and `--ack-unenforced-policy` launch shaping flags as
+  `workspace launch`.
   `--kill-on-timeout` terminates the launched app process group if the timeout
   elapses, while preserving stdout/stderr logs in the response.
 - `workspace apps` lists launched apps from the daemon IPC state without dumping

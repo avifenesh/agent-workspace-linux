@@ -432,7 +432,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_run_app",
-        description = "Launch an optionally named app inside an isolated agent workspace, wait for it to exit or time out, optionally kill it on timeout, and return stdout/stderr logs in one response.",
+        description = "Launch an optionally named app inside an isolated agent workspace, wait for it to exit or time out, optionally kill it on timeout, and return stdout/stderr logs in one response. The command uses the same workspace attachment environment, optional cwd/env overrides, and optional launch profile policy as workspace_launch_app.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
