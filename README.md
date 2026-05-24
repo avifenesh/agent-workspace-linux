@@ -48,6 +48,7 @@ cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace launch --profile project-dev -- xterm
+cargo run -- workspace run --timeout-ms 30000 --tail-bytes 65536 -- cargo test
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
@@ -107,6 +108,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   Profile-backed launches also report the profile id and effective
   mount/network isolation on the app entry. Completed apps report both a human
   `exit_status` string and structured `exit_code`/`exit_signal` fields.
+- `workspace run` is a QA-friendly launch helper that launches an app, waits for
+  completion or timeout, and returns stdout/stderr log content with structured
+  completion fields in one response.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   `workspace logs`, `workspace wait-app`, `workspace events`, `workspace setup`,
@@ -130,8 +134,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_list`, `workspace_cleanup_stale`, `workspace_status`,
-`workspace_launch_app`, `workspace_list_windows`, `workspace_screenshot`,
-`workspace_focus_window`, `workspace_close_window`, `workspace_click`,
-`workspace_key`, `workspace_type_text`, `workspace_read_app_log`,
-`workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`.
+`workspace_launch_app`, `workspace_run_app`, `workspace_list_windows`,
+`workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
+`workspace_click`, `workspace_key`, `workspace_type_text`,
+`workspace_read_app_log`, `workspace_wait_app`, `workspace_events`,
+`workspace_run_profile_setup`, `workspace_kill_app`, and `workspace_stop`.

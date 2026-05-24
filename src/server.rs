@@ -341,6 +341,51 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_run_app",
+        description = "Launch an app inside an isolated agent workspace, wait for it to exit or time out, and return stdout/stderr logs in one response.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_run_app(
+        &self,
+        Parameters(params): Parameters<WorkspaceRunParams>,
+    ) -> Json<WorkspaceRunResult> {
+        let id = params
+            .id
+            .clone()
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        let timeout_ms = params.timeout_ms;
+        let tail_bytes = params.tail_bytes;
+        Json(
+            match params
+                .into_launch_spec()
+                .and_then(|spec| workspace::run_app_with_spec(&id, spec, timeout_ms, tail_bytes))
+            {
+                Ok(run) => WorkspaceRunResult {
+                    ok: true,
+                    message: if run.succeeded {
+                        "workspace app completed successfully".to_string()
+                    } else if run.completed {
+                        "workspace app completed with non-zero status".to_string()
+                    } else {
+                        "workspace app did not complete before timeout".to_string()
+                    },
+                    run: Some(run),
+                },
+                Err(error) => WorkspaceRunResult {
+                    ok: false,
+                    message: error.to_string(),
+                    run: None,
+                },
+            },
+        )
+    }
+
+    #[tool(
         name = "workspace_list_windows",
         description = "List visible windows inside an isolated agent workspace.",
         annotations(
@@ -649,7 +694,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_template/profile_put/profile_delete to manage saved environment profiles. profile_template can generate starter JSON such as project-dev before saving with profile_put. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when bubblewrap is available; network allowlists are still declared but not enforced by the X11 runtime. workspace_status reports the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_run_profile_setup with wait=true when setup command completion matters. Use workspace_screenshot, workspace_list_windows, workspace_wait_app, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_template/profile_put/profile_delete to manage saved environment profiles. profile_template can generate starter JSON such as project-dev before saving with profile_put. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when bubblewrap is available; network allowlists are still declared but not enforced by the X11 runtime. workspace_status reports the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_run_profile_setup with wait=true when setup command completion matters. Use workspace_screenshot, workspace_list_windows, workspace_wait_app, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -703,6 +748,14 @@ struct ProfileSetupResult {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<profile::ProfileSetupRun>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct WorkspaceRunResult {
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<workspace::WorkspaceRun>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -777,6 +830,43 @@ struct WorkspaceLaunchParams {
 }
 
 impl WorkspaceLaunchParams {
+    fn into_launch_spec(self) -> Result<LaunchSpec> {
+        let cwd_explicit = self.cwd.is_some();
+        let mut spec = LaunchSpec {
+            command: self.command,
+            profile_id: None,
+            applied_policy: None,
+            user_acknowledged_unenforced_policy: self.acknowledge_unenforced_policy,
+            cwd: self.cwd,
+            env: self.env,
+        };
+        if let Some(profile_id) = self.profile {
+            profile::apply_profile_to_launch_spec(&profile_id, &mut spec, cwd_explicit)?;
+        }
+        Ok(spec)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceRunParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
+    acknowledge_unenforced_policy: bool,
+    command: Vec<String>,
+    #[serde(default)]
+    cwd: Option<PathBuf>,
+    #[serde(default)]
+    env: Vec<EnvVar>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    tail_bytes: Option<u64>,
+}
+
+impl WorkspaceRunParams {
     fn into_launch_spec(self) -> Result<LaunchSpec> {
         let cwd_explicit = self.cwd.is_some();
         let mut spec = LaunchSpec {

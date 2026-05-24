@@ -223,6 +223,21 @@ pub struct WorkspaceAppLog {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceRun {
+    pub app_id: String,
+    pub launch: IpcResponse,
+    pub wait: IpcResponse,
+    pub stdout: WorkspaceAppLog,
+    pub stderr: WorkspaceAppLog,
+    pub completed: bool,
+    pub succeeded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_signal: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceEvent {
     pub sequence: u64,
@@ -644,6 +659,39 @@ pub fn wait_app(id: &str, app_id: String, timeout_ms: Option<u64>) -> Result<Ipc
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
+}
+
+pub fn run_app_with_spec(
+    id: &str,
+    spec: LaunchSpec,
+    timeout_ms: Option<u64>,
+    tail_bytes: Option<u64>,
+) -> Result<WorkspaceRun> {
+    let launch = launch_app_with_spec(id, spec)?;
+    let app_id =
+        response_last_app_id(&launch).context("workspace launch did not return an app id")?;
+    let wait = wait_app(id, app_id.clone(), timeout_ms)?;
+    let stdout = read_app_log(id, app_id.clone(), "stdout".to_string(), tail_bytes)?
+        .app_log
+        .context("workspace stdout log response did not include app_log")?;
+    let stderr = read_app_log(id, app_id.clone(), "stderr".to_string(), tail_bytes)?
+        .app_log
+        .context("workspace stderr log response did not include app_log")?;
+    let exit_code = response_app(&wait, &app_id).and_then(|app| app.exit_code);
+    let exit_signal = response_app(&wait, &app_id).and_then(|app| app.exit_signal);
+    let completed = wait.ok;
+    let succeeded = completed && exit_code == Some(0);
+    Ok(WorkspaceRun {
+        app_id,
+        launch,
+        wait,
+        stdout,
+        stderr,
+        completed,
+        succeeded,
+        exit_code,
+        exit_signal,
+    })
 }
 
 pub fn read_events(id: &str, tail: Option<usize>) -> Result<IpcResponse> {
@@ -1802,6 +1850,24 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
 
 fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
     app.id == app_id || app.pid.to_string() == app_id
+}
+
+fn response_last_app_id(response: &IpcResponse) -> Option<String> {
+    response
+        .status
+        .as_ref()?
+        .apps
+        .last()
+        .map(|app| app.id.clone())
+}
+
+fn response_app<'a>(response: &'a IpcResponse, app_id: &str) -> Option<&'a WorkspaceApp> {
+    response
+        .status
+        .as_ref()?
+        .apps
+        .iter()
+        .find(|app| matches_app_id(app, app_id))
 }
 
 fn apply_app_exit_status(app: &mut WorkspaceApp, status: ExitStatus) {
