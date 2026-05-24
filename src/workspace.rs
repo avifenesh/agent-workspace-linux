@@ -216,7 +216,10 @@ pub struct WorkspaceManifest {
     pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub user_acknowledged_hidden_workspace: bool,
     pub user_acknowledged_unenforced_policy: bool,
+    pub ready: bool,
     pub started_at_unix: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_at_unix: Option<u64>,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -1798,7 +1801,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
         event_path,
         next_event_sequence: 1,
     };
-    write_workspace_manifest(&state.status)?;
+    write_workspace_manifest(&state.status, None)?;
     let start_detail = serde_json::json!({
         "display": &state.status.display,
         "width": state.status.width,
@@ -1837,6 +1840,8 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     }
 
     eprintln!("agent workspace daemon stopping");
+    state.status.ready = false;
+    write_workspace_manifest(&state.status, Some(unix_now()))?;
     for app in &mut state.apps {
         let _ = terminate_app_process(&app.info.id, &mut app.child);
     }
@@ -1977,7 +1982,7 @@ fn create_private_runtime_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn workspace_manifest(status: &WorkspaceStatus) -> WorkspaceManifest {
+fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) -> WorkspaceManifest {
     WorkspaceManifest {
         id: status.id.clone(),
         purpose: status.purpose.clone(),
@@ -1985,7 +1990,9 @@ fn workspace_manifest(status: &WorkspaceStatus) -> WorkspaceManifest {
         applied_policy: status.applied_policy.clone(),
         user_acknowledged_hidden_workspace: status.user_acknowledged_hidden_workspace,
         user_acknowledged_unenforced_policy: status.user_acknowledged_unenforced_policy,
+        ready: status.ready,
         started_at_unix: status.started_at_unix,
+        stopped_at_unix,
         display: status.display.clone(),
         width: status.width,
         height: status.height,
@@ -1995,9 +2002,12 @@ fn workspace_manifest(status: &WorkspaceStatus) -> WorkspaceManifest {
     }
 }
 
-fn write_workspace_manifest(status: &WorkspaceStatus) -> Result<PathBuf> {
+fn write_workspace_manifest(
+    status: &WorkspaceStatus,
+    stopped_at_unix: Option<u64>,
+) -> Result<PathBuf> {
     let manifest_path = status.runtime_dir.join(WORKSPACE_MANIFEST_FILE);
-    let content = serde_json::to_string_pretty(&workspace_manifest(status))
+    let content = serde_json::to_string_pretty(&workspace_manifest(status, stopped_at_unix))
         .context("failed to serialize workspace manifest")?;
     fs::write(&manifest_path, format!("{content}\n"))
         .with_context(|| format!("failed to write {}", manifest_path.display()))?;

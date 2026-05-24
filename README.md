@@ -150,7 +150,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable. Running and stale runtime directories can
   include a durable manifest with the hidden-workspace acknowledgement, purpose,
-  profile, display, dimensions, and IPC paths captured at startup.
+  profile, display, dimensions, IPC paths captured at startup, and stop
+  timestamp when the workspace shut down cleanly.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
