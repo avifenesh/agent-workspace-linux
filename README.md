@@ -177,6 +177,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   policy that remains unenforced, the launch requires `--ack-unenforced-policy`.
   Each launched app gets
   workspace-local stdout/stderr log files reported in `workspace status`.
+  `workspace logs` can also read those saved log files after a workspace stops
+  when its manifest remains on disk.
   Profile-backed launches also report the profile id and effective
   mount/network isolation on the app entry. App entries include the launch pid
   and process group id so forked GUI child windows can still be associated with

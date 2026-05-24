@@ -1692,15 +1692,19 @@ pub fn read_app_log(
     if app_id.trim().is_empty() {
         bail!("app id cannot be empty");
     }
-    validate_log_stream(&stream)?;
-    request(
+    let stream = validate_log_stream(&stream)?;
+    match request(
         &workspace_socket_path(&id),
         IpcRequest::ReadAppLog {
-            app_id,
-            stream,
+            app_id: app_id.clone(),
+            stream: stream.clone(),
             tail_bytes,
         },
-    )
+    ) {
+        Ok(response) => Ok(response),
+        Err(ipc_error) => read_app_log_from_workspace_manifest(&id, &app_id, &stream, tail_bytes)?
+            .ok_or(ipc_error),
+    }
 }
 
 pub fn wait_app(
@@ -2172,6 +2176,50 @@ fn read_events_from_workspace_log(
         app_log: None,
         clipboard: None,
         events: Some(events),
+    }))
+}
+
+fn read_app_log_from_workspace_manifest(
+    id: &str,
+    app_id: &str,
+    stream: &str,
+    tail_bytes: Option<u64>,
+) -> Result<Option<IpcResponse>> {
+    let runtime_dir = workspace_dir(id);
+    let Some(manifest) = read_workspace_manifest(&runtime_dir)? else {
+        return Ok(None);
+    };
+    let app = resolve_workspace_app(&manifest.apps, app_id)?.clone();
+    let path = match stream {
+        "stdout" => app.stdout_path.as_ref(),
+        "stderr" => app.stderr_path.as_ref(),
+        _ => None,
+    }
+    .ok_or_else(|| anyhow!("workspace app {} has no {stream} log path", app.id))?;
+    let (content, bytes_read, truncated) = read_log_content(path, tail_bytes)?;
+    let app_log = WorkspaceAppLog {
+        app_id: app.id.clone(),
+        stream: stream.to_string(),
+        path: path.clone(),
+        content,
+        bytes_read,
+        truncated,
+    };
+
+    Ok(Some(IpcResponse {
+        ok: true,
+        message: "workspace app log read from saved manifest".to_string(),
+        status: None,
+        ipc: None,
+        environment: None,
+        apps: Some(vec![app]),
+        windows: None,
+        active_window: None,
+        pointer: None,
+        screenshot: None,
+        app_log: Some(app_log),
+        clipboard: None,
+        events: None,
     }))
 }
 
