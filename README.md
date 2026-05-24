@@ -42,8 +42,8 @@ cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
 cargo run -- profile check project-dev
 cargo run -- profile delete project-dev
-cargo run -- workspace start --ack-hidden-workspace --ack-unenforced-policy --profile project-dev
-cargo run -- workspace open-profile --ack-hidden-workspace --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout
+cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-unenforced-policy --profile project-dev
+cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
@@ -122,6 +122,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.
+  `--purpose TEXT` records a human-readable reason in status and the start event
+  so an app UI can explain why the unseen workspace exists.
   If the profile asks for mounts or restricted networking, the current X11
   runtime also requires `--ack-unenforced-policy` when any requested policy is
   visible but not enforced yet. Mount profiles and disabled-network profiles do
@@ -236,12 +238,13 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   with policy that remains unenforced, they require `--ack-unenforced-policy`.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
-  start timestamp, hidden-workspace acknowledgement, unenforced-policy
-  acknowledgement, applied policy snapshot, policy backend candidates discovered
-  at start time, which parts are currently enforced, and the last event sequence
-  for incremental event polling. `workspace status` and `workspace stop` talk to
-  the same socket. `workspace stop` waits for the daemon IPC socket to close
-  before returning; `--timeout-ms` overrides the default 30000ms wait.
+  start timestamp, optional purpose, hidden-workspace acknowledgement,
+  unenforced-policy acknowledgement, applied policy snapshot, policy backend
+  candidates discovered at start time, which parts are currently enforced, and
+  the last event sequence for incremental event polling. `workspace status` and
+  `workspace stop` talk to the same socket. `workspace stop` waits for the
+  daemon IPC socket to close before returning; `--timeout-ms` overrides the
+  default 30000ms wait.
 - `workspace ipc-info` reports daemon IPC protocol metadata for the workspace,
   including protocol version, Unix socket path, framing, and encoding.
 

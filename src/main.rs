@@ -592,6 +592,10 @@ fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
                 options.id = value_after(args, index, "--id")?.to_string();
                 index += 2;
             }
+            "--purpose" => {
+                options.purpose = Some(value_after(args, index, "--purpose")?.to_string());
+                index += 2;
+            }
             "--width" => {
                 options.width = value_after(args, index, "--width")?
                     .parse()
@@ -654,6 +658,10 @@ fn parse_open_profile_options(
             }
             "--id" => {
                 options.id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--purpose" => {
+                options.purpose = Some(value_after(args, index, "--purpose")?.to_string());
                 index += 2;
             }
             "--width" => {
@@ -2817,6 +2825,7 @@ fn parse_id_and_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut id = None;
+    let mut purpose = None;
     let mut profile_id = None;
     let mut display = None;
     let mut width = None;
@@ -2837,6 +2846,10 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
             }
             "--profile" => {
                 profile_id = Some(value_after(&args, index, "--profile")?.to_string());
+                index += 2;
+            }
+            "--purpose" => {
+                purpose = Some(value_after(&args, index, "--purpose")?.to_string());
                 index += 2;
             }
             "--display" => {
@@ -2890,6 +2903,7 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
 
     Ok(DaemonOptions {
         id: id.context("daemon missing --id")?,
+        purpose,
         profile_id,
         applied_policy,
         user_acknowledged_hidden_workspace,
@@ -2934,8 +2948,8 @@ Usage:
   agent-workspace-linux mcp
   agent-workspace-linux profile path|list|get|check|template|put|delete
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
-  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]
-  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--id ID] [--width PX] [--height PX]
+  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
+  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace list
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]

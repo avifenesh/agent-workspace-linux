@@ -115,6 +115,7 @@ pub struct Check {
 #[derive(Debug, Clone)]
 pub struct WorkspaceStartOptions {
     pub id: String,
+    pub purpose: Option<String>,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub user_acknowledged_hidden_workspace: bool,
@@ -127,6 +128,7 @@ impl Default for WorkspaceStartOptions {
     fn default() -> Self {
         Self {
             id: DEFAULT_WORKSPACE_ID.to_string(),
+            purpose: None,
             profile_id: None,
             applied_policy: None,
             user_acknowledged_hidden_workspace: false,
@@ -140,6 +142,7 @@ impl Default for WorkspaceStartOptions {
 #[derive(Debug, Clone)]
 pub struct DaemonOptions {
     pub id: String,
+    pub purpose: Option<String>,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub user_acknowledged_hidden_workspace: bool,
@@ -155,6 +158,8 @@ pub struct DaemonOptions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceStatus {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1681,8 +1686,9 @@ pub fn stop_workspace(id: &str, timeout_ms: Option<u64>) -> Result<IpcResponse> 
     Ok(response)
 }
 
-pub fn run_daemon(options: DaemonOptions) -> Result<()> {
+pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     let id = sanitize_workspace_id(&options.id)?;
+    options.purpose = normalize_workspace_purpose(options.purpose)?;
     fs::create_dir_all(&options.runtime_dir)
         .with_context(|| format!("failed to create {}", options.runtime_dir.display()))?;
     remove_stale_socket(&options.socket_path)?;
@@ -1698,6 +1704,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
     let mut state = DaemonState {
         status: WorkspaceStatus {
             id,
+            purpose: options.purpose,
             profile_id: options.profile_id,
             applied_policy: options.applied_policy,
             user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
@@ -1723,6 +1730,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
         "display": &state.status.display,
         "width": state.status.width,
         "height": state.status.height,
+        "purpose": state.status.purpose.as_deref(),
         "profile_id": state.status.profile_id.as_deref(),
         "started_at_unix": state.status.started_at_unix,
         "user_acknowledged_hidden_workspace": state.status.user_acknowledged_hidden_workspace,
@@ -1776,6 +1784,7 @@ enum WorkspaceStartPlan {
 
 fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceStartPlan> {
     let id = sanitize_workspace_id(&options.id)?;
+    let purpose = normalize_workspace_purpose(options.purpose)?;
     if let Ok(status) = status_workspace(&id) {
         return Ok(WorkspaceStartPlan::AlreadyRunning(status));
     }
@@ -1814,6 +1823,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
 
     Ok(WorkspaceStartPlan::Start(DaemonOptions {
         id,
+        purpose,
         profile_id: options.profile_id,
         applied_policy: options.applied_policy,
         user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
@@ -1833,6 +1843,9 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     let exe = env::current_exe().context("failed to resolve current executable")?;
     let mut daemon = Command::new("setsid");
     daemon.arg(exe).arg("daemon").arg("--id").arg(&options.id);
+    if let Some(purpose) = &options.purpose {
+        daemon.arg("--purpose").arg(purpose);
+    }
     if let Some(profile_id) = &options.profile_id {
         daemon.arg("--profile").arg(profile_id);
     }
@@ -5751,6 +5764,23 @@ fn sanitize_workspace_id(id: &str) -> Result<String> {
         bail!("workspace id may only contain ASCII letters, numbers, '-' and '_'");
     }
     Ok(trimmed.to_string())
+}
+
+fn normalize_workspace_purpose(purpose: Option<String>) -> Result<Option<String>> {
+    let Some(purpose) = purpose else {
+        return Ok(None);
+    };
+    let trimmed = purpose.trim();
+    if trimmed.is_empty() {
+        bail!("workspace purpose cannot be empty");
+    }
+    if trimmed.contains('\0') {
+        bail!("workspace purpose cannot contain NUL bytes");
+    }
+    if trimmed.len() > 512 {
+        bail!("workspace purpose cannot be longer than 512 bytes");
+    }
+    Ok(Some(trimmed.to_string()))
 }
 
 fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
