@@ -156,7 +156,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspaces are currently reachable. Running and stale runtime directories can
   include a durable manifest with the hidden-workspace acknowledgement, purpose,
   profile, display, dimensions, IPC paths captured at startup, and stop
-  timestamp when the workspace shut down cleanly.
+  timestamp when the workspace shut down cleanly. The manifest also preserves
+  the final app snapshot, so stopped workspaces can still show what was running
+  when they were torn down.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace

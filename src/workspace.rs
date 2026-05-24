@@ -228,6 +228,8 @@ pub struct WorkspaceManifest {
     pub runtime_dir: PathBuf,
     pub socket_path: PathBuf,
     pub xauthority_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<WorkspaceApp>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -2045,6 +2047,7 @@ fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) ->
         runtime_dir: status.runtime_dir.clone(),
         socket_path: status.socket_path.clone(),
         xauthority_path: status.xauthority_path.clone(),
+        apps: status.apps.clone(),
     }
 }
 
