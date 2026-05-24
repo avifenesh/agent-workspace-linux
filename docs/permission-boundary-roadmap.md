@@ -108,8 +108,9 @@ Current gate status on 2026-05-24:
   networking, local-only networking, read-only/read-write mounts, setup/startup
   commands, screenshots, window targeting, input, clipboard, app logs, events,
   manifests, stop, stale cleanup, daemon-crash recovery, self-stop from inside
-  a workspace app, and consistent workspace discovery when a Codex/MCP launcher
-  omits `XDG_RUNTIME_DIR`. `cargo test` currently passes 44 tests.
+  a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
+  discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`. `cargo test`
+  currently passes 46 tests.
 - A still has known product gaps: host-localhost bridging for `local_only`,
   network allowlist enforcement, and more varied real-project coverage.
 - B has a first Codex for Linux slice: the conversation surface can show a live
@@ -125,9 +126,10 @@ Current gate status on 2026-05-24:
   slice. The Codex for Linux app picker now accepts both executable files and
   `.desktop` launchers, parsing launcher `Name`/`Exec` fields into startup app
   commands without a shell. Authenticated browser-profile sharing now has a
-  `browser-session` starter template for explicitly user-approved browser data
-  directories, but user-friendly environment/profile creation and a safer
-  account-profile picker/copy/lock-warning flow are still open.
+  `browser-session` starter template and a first Codex for Linux picker/copy/
+  lock-warning flow for explicitly user-approved browser data directories.
+  Live real-account dogfood is still needed before making that path the default
+  recommendation for shopping-style tasks.
 
 ### A. Prove Runtime Claims With Real Workloads
 

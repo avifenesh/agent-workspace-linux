@@ -46,7 +46,7 @@ Environment:
   Chrome DevTools Protocol DOM checks and hidden-workspace screenshots.
 - The Agent Workspaces settings page in the dev app showed the MCP permissions
   card, one active-workspace card, saved-workspaces section, and a working
-  Status/Hide status toggle. The corresponding feature tests now pass 14 tests.
+  Status/Hide status toggle. The corresponding feature tests now pass 15 tests.
 - A C-gate browser-session probe added a starter profile for explicitly
   user-approved browser data directories. The first probe mounted a temporary
   user-data dir read-write and launched Chrome without `--no-sandbox`; Chrome
@@ -67,6 +67,15 @@ Environment:
   `workspace_run_app` with the local-only profile successfully round-tripped
   through an in-sandbox `127.0.0.1` listener and blocked `1.1.1.1:80` with
   `Network is unreachable`.
+- The Codex for Linux Agent Workspaces page now has a first browser-session
+  preparation flow instead of jumping from folder picker to raw profile JSON. It
+  opens a browser-data folder picker, shows the selected path plus an
+  account-data/profile-lock warning, defaults to making a managed copy under
+  Agent Workspace data while skipping browser lock files, and keeps direct
+  read-write mounting as an explicit option. The feature tests cover the bridge
+  copy path and generated UI source, and the installed app bundle was patched in
+  both `content/webview` and `resources/app.asar` so the webview and main bridge
+  load together after restart.
 
 Remaining gaps from this pass:
 
@@ -75,9 +84,9 @@ Remaining gaps from this pass:
 - Network allowlists remain declared intent until an egress-filter backend is
   implemented and tested.
 - Browser tasks that need logged-in sessions now have a starter
-  `browser-session` profile for explicitly user-approved browser data dirs, but
-  the product UI still needs a friendly picker/copy/lock-warning flow before it
-  is comfortable for real account profiles.
+  `browser-session` profile and a first picker/copy/lock-warning flow. It still
+  needs live dogfood against a real account profile before treating it as a
+  comfortable default for shopping-style tasks.
 - Hard permission enforcement in Codex for Linux should still wait until the UI
   approval boundary is wired so agents cannot call the same workspace tools
   outside the user-approved path.
@@ -95,6 +104,11 @@ Addressed in this pass:
   renderer now unwraps the bridge `params` object, recognizes workspace/profile
   actions, and shows readable rows such as Action, Profile, Run setup, startup
   window waits, and acknowledgement flags.
+- Browser-session creation in the Codex for Linux settings page no longer drops
+  users directly into generated JSON after the folder picker. A preparation
+  dialog now makes account data visible, defaults to a managed copied profile,
+  excludes common browser lock files, and requires an explicit direct-folder
+  choice before mounting a live browser data directory read-write.
 - MCP and CLI app-action responses no longer embed long stopped-app history in
   nested `status.apps`. They keep the directly affected app in top-level
   `apps`, while explicit `workspace_status`, `workspace_observe`, and
