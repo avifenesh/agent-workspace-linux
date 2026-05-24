@@ -12,10 +12,11 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
+const DEFAULT_APP_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
@@ -267,6 +268,10 @@ pub enum IpcRequest {
         app_id: String,
         stream: String,
         tail_bytes: Option<u64>,
+    },
+    WaitApp {
+        app_id: String,
+        timeout_ms: u64,
     },
     ReadEvents {
         tail: Option<usize>,
@@ -618,6 +623,20 @@ pub fn read_app_log(
             app_id,
             stream,
             tail_bytes,
+        },
+    )
+}
+
+pub fn wait_app(id: &str, app_id: String, timeout_ms: Option<u64>) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    if app_id.trim().is_empty() {
+        bail!("app id cannot be empty");
+    }
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::WaitApp {
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
 }
@@ -1124,6 +1143,31 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
+        IpcRequest::WaitApp { app_id, timeout_ms } => {
+            match wait_workspace_app(state, &app_id, timeout_ms) {
+                Ok(stopped) => {
+                    record_event(
+                        state,
+                        "wait_app",
+                        serde_json::json!({
+                            "target": &app_id,
+                            "timeout_ms": timeout_ms,
+                            "stopped": stopped,
+                        }),
+                    )?;
+                    let message = if stopped {
+                        "workspace app stopped"
+                    } else {
+                        "workspace app still running after timeout"
+                    };
+                    (response_with_status(stopped, message, &state.status), false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
         IpcRequest::ReadEvents { tail } => match read_event_log(&state.event_path, tail) {
             Ok(events) => {
                 let mut response =
@@ -1658,6 +1702,33 @@ fn read_workspace_app_log(
         bytes_read,
         truncated,
     })
+}
+
+fn wait_workspace_app(state: &mut DaemonState, app_id: &str, timeout_ms: u64) -> Result<bool> {
+    let app_id = app_id.trim();
+    if app_id.is_empty() {
+        bail!("app id cannot be empty");
+    }
+
+    let timeout = Duration::from_millis(timeout_ms);
+    let started = Instant::now();
+    loop {
+        refresh_apps(state);
+        let app = state
+            .status
+            .apps
+            .iter()
+            .find(|app| matches_app_id(app, app_id))
+            .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
+        if !app.running {
+            return Ok(true);
+        }
+        if started.elapsed() >= timeout {
+            return Ok(false);
+        }
+        let remaining = timeout.saturating_sub(started.elapsed());
+        thread::sleep(remaining.min(Duration::from_millis(100)));
+    }
 }
 
 fn read_log_content(path: &Path, tail_bytes: Option<u64>) -> Result<(String, u64, bool)> {
