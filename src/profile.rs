@@ -479,7 +479,8 @@ pub fn launch_profile_setup(
         if wait {
             let app_id = launched_app_id(&launch)
                 .context("profile setup launch did not return an app id")?;
-            let wait = workspace::wait_app(workspace_id, app_id.clone(), options.timeout_ms)?;
+            let wait =
+                workspace::wait_app(workspace_id, app_id.clone(), options.timeout_ms, false)?;
             let should_kill =
                 options.kill_on_timeout && !wait.ok && response_app_running(&wait, &app_id);
             if should_kill {

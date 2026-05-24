@@ -520,8 +520,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::read_app_log(&id, app_id, stream, tail_bytes)?)
         }
         "wait-app" => {
-            let (id, app_id, timeout_ms) = parse_wait_app_options(&args[1..])?;
-            print_json(&workspace::wait_app(&id, app_id, timeout_ms)?)
+            let (id, app_id, timeout_ms, kill_on_timeout) = parse_wait_app_options(&args[1..])?;
+            print_json(&workspace::wait_app(
+                &id,
+                app_id,
+                timeout_ms,
+                kill_on_timeout,
+            )?)
         }
         "events" => {
             let (id, tail) = parse_events_options(&args[1..])?;
@@ -2614,9 +2619,10 @@ fn parse_logs_options(args: &[String]) -> Result<(String, String, String, Option
     bail!("workspace logs requires an app id")
 }
 
-fn parse_wait_app_options(args: &[String]) -> Result<(String, String, Option<u64>)> {
+fn parse_wait_app_options(args: &[String]) -> Result<(String, String, Option<u64>, bool)> {
     let mut id = workspace::default_workspace_id();
     let mut timeout_ms = None;
+    let mut kill_on_timeout = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -2632,16 +2638,20 @@ fn parse_wait_app_options(args: &[String]) -> Result<(String, String, Option<u64
                 );
                 index += 2;
             }
+            "--kill-on-timeout" => {
+                kill_on_timeout = true;
+                index += 1;
+            }
             "--" => {
                 let app_id = args
                     .get(index + 1)
                     .context("workspace wait-app requires an app id")?
                     .to_string();
-                return Ok((id, app_id, timeout_ms));
+                return Ok((id, app_id, timeout_ms, kill_on_timeout));
             }
             _ => {
                 let app_id = args[index].clone();
-                return Ok((id, app_id, timeout_ms));
+                return Ok((id, app_id, timeout_ms, kill_on_timeout));
             }
         }
     }
@@ -2965,7 +2975,7 @@ Usage:
   agent-workspace-linux workspace paste-window [--id ID] [--key KEY] WINDOW_ID TEXT
   agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--key KEY] [--timeout-ms N] TEXT
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID_OR_NAME
-  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID_OR_NAME
+  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] [--kill-on-timeout] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace events [--id ID] [--tail N]
   agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME

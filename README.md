@@ -97,6 +97,7 @@ cargo run -- workspace paste-window --title Editor "hello from the agent workspa
 cargo run -- workspace logs --stream stdout app-12345
 cargo run -- workspace logs --stream stdout terminal
 cargo run -- workspace wait-app --timeout-ms 30000 app-12345
+cargo run -- workspace wait-app --timeout-ms 30000 --kill-on-timeout test-suite
 cargo run -- workspace wait-app --timeout-ms 30000 terminal
 cargo run -- workspace events --tail 20
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
@@ -261,6 +262,8 @@ running/stopped state.
 daemon IPC socket to close after requesting shutdown.
 `workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app
 process group when its timeout elapses.
+`workspace_wait_app` accepts `kill_on_timeout=true` for the same timeout cleanup
+behavior on an already launched app.
 `workspace_run_profile_setup` accepts `kill_on_timeout=true`, and
 `workspace_open_profile` accepts `setup_kill_on_timeout=true`, for the same
 setup-command cleanup behavior.

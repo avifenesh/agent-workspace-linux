@@ -575,6 +575,8 @@ pub enum IpcRequest {
     WaitApp {
         app_id: String,
         timeout_ms: u64,
+        #[serde(default)]
+        kill_on_timeout: bool,
     },
     ReadEvents {
         tail: Option<usize>,
@@ -1550,7 +1552,12 @@ pub fn read_app_log(
     )
 }
 
-pub fn wait_app(id: &str, app_id: String, timeout_ms: Option<u64>) -> Result<IpcResponse> {
+pub fn wait_app(
+    id: &str,
+    app_id: String,
+    timeout_ms: Option<u64>,
+    kill_on_timeout: bool,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     if app_id.trim().is_empty() {
         bail!("app id cannot be empty");
@@ -1560,6 +1567,7 @@ pub fn wait_app(id: &str, app_id: String, timeout_ms: Option<u64>) -> Result<Ipc
         IpcRequest::WaitApp {
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+            kill_on_timeout,
         },
     )
 }
@@ -1574,7 +1582,7 @@ pub fn run_app_with_spec(
     let launch = launch_app_with_spec(id, spec)?;
     let app_id =
         response_last_app_id(&launch).context("workspace launch did not return an app id")?;
-    let wait = wait_app(id, app_id.clone(), timeout_ms)?;
+    let wait = wait_app(id, app_id.clone(), timeout_ms, false)?;
     let completed = wait.ok;
     let timed_out = !completed;
     let kill = if timed_out && kill_on_timeout {
@@ -3559,33 +3567,39 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
-        IpcRequest::WaitApp { app_id, timeout_ms } => {
-            match wait_workspace_app(state, &app_id, timeout_ms) {
-                Ok((stopped, app)) => {
-                    record_event(
-                        state,
-                        "wait_app",
-                        serde_json::json!({
-                            "target": &app_id,
-                            "timeout_ms": timeout_ms,
-                            "stopped": stopped,
-                        }),
-                    )?;
-                    let message = if stopped {
-                        "workspace app stopped"
-                    } else {
-                        "workspace app still running after timeout"
-                    };
-                    let mut response = response_with_status(stopped, message, &state.status);
-                    response.apps = Some(vec![app]);
-                    (response, false)
-                }
-                Err(error) => (
-                    response_with_status(false, error.to_string(), &state.status),
-                    false,
-                ),
+        IpcRequest::WaitApp {
+            app_id,
+            timeout_ms,
+            kill_on_timeout,
+        } => match wait_workspace_app(state, &app_id, timeout_ms, kill_on_timeout) {
+            Ok((stopped, killed_on_timeout, app)) => {
+                record_event(
+                    state,
+                    "wait_app",
+                    serde_json::json!({
+                        "target": &app_id,
+                        "timeout_ms": timeout_ms,
+                        "stopped": stopped,
+                        "kill_on_timeout": kill_on_timeout,
+                        "killed_on_timeout": killed_on_timeout,
+                    }),
+                )?;
+                let message = if killed_on_timeout {
+                    "workspace app killed after timeout"
+                } else if stopped {
+                    "workspace app stopped"
+                } else {
+                    "workspace app still running after timeout"
+                };
+                let mut response = response_with_status(stopped, message, &state.status);
+                response.apps = Some(vec![app]);
+                (response, false)
             }
-        }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
         IpcRequest::ReadEvents { tail } => match read_event_log(&state.event_path, tail) {
             Ok(events) => {
                 let mut response =
@@ -3599,7 +3613,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             ),
         },
         IpcRequest::KillApp { app_id } => match kill_workspace_app(state, &app_id) {
-            Ok((message, app)) => {
+            Ok((message, app, _killed)) => {
                 record_event(
                     state,
                     "kill_app",
@@ -5109,7 +5123,8 @@ fn wait_workspace_app(
     state: &mut DaemonState,
     app_id: &str,
     timeout_ms: u64,
-) -> Result<(bool, WorkspaceApp)> {
+    kill_on_timeout: bool,
+) -> Result<(bool, bool, WorkspaceApp)> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         bail!("app id cannot be empty");
@@ -5121,10 +5136,14 @@ fn wait_workspace_app(
         refresh_apps(state)?;
         let app = resolve_workspace_app(&state.status.apps, app_id)?;
         if !app.running {
-            return Ok((true, app.clone()));
+            return Ok((true, false, app.clone()));
         }
         if started.elapsed() >= timeout {
-            return Ok((false, app.clone()));
+            if kill_on_timeout {
+                let (_message, app, killed) = kill_workspace_app(state, app_id)?;
+                return Ok((!app.running, killed, app));
+            }
+            return Ok((false, false, app.clone()));
         }
         let remaining = timeout.saturating_sub(started.elapsed());
         thread::sleep(remaining.min(Duration::from_millis(100)));
@@ -5191,13 +5210,16 @@ fn signal_process_group(pgid: u32, signal: i32) -> Result<()> {
     Err(error).with_context(|| format!("failed to signal process group {pgid}"))
 }
 
-fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<(String, WorkspaceApp)> {
+fn kill_workspace_app(
+    state: &mut DaemonState,
+    app_id: &str,
+) -> Result<(String, WorkspaceApp, bool)> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         bail!("app id cannot be empty");
     }
 
-    let (message, exit_detail, app_info) = {
+    let (message, exit_detail, app_info, killed) = {
         let app = resolve_workspace_app_process_mut(&mut state.apps, app_id)?;
 
         if !app.info.running {
@@ -5205,6 +5227,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<(String, 
                 format!("workspace app {} is already stopped", app.info.id),
                 None,
                 app.info.clone(),
+                false,
             )
         } else if let Some(status) = app
             .child
@@ -5216,6 +5239,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<(String, 
                 format!("workspace app {} is already stopped", app.info.id),
                 Some(app_exit_event_detail(&app.info)),
                 app.info.clone(),
+                false,
             )
         } else {
             let status = terminate_app_process(&app.info.id, &mut app.child)?;
@@ -5224,6 +5248,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<(String, 
                 format!("workspace app {} killed", app.info.id),
                 Some(app_exit_event_detail(&app.info)),
                 app.info.clone(),
+                true,
             )
         }
     };
@@ -5232,7 +5257,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<(String, 
     if let Some(detail) = exit_detail {
         record_event(state, "app_exit", detail)?;
     }
-    Ok((message, app_info))
+    Ok((message, app_info, killed))
 }
 
 fn resolve_workspace_app<'a>(apps: &'a [WorkspaceApp], app_id: &str) -> Result<&'a WorkspaceApp> {
