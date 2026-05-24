@@ -49,6 +49,7 @@ cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace ipc-info
+cargo run -- workspace env
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
@@ -283,12 +284,15 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace runtime directory is created with user-only permissions before the
   daemon socket and Xauthority file are placed inside it, and the control socket
   itself is marked user-only.
+- `workspace env` reports the workspace-local attachment environment in one IPC
+  response, including `DISPLAY`, `XAUTHORITY`, runtime directory, and control
+  socket variables for tools that need to join the hidden workspace explicitly.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
-`workspace_status`, `workspace_ipc_info`, `workspace_launch_app`,
+`workspace_status`, `workspace_ipc_info`, `workspace_env`, `workspace_launch_app`,
 `workspace_run_app`,
 `workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_list_windows`,
 `workspace_active_window`, `workspace_pointer`, `workspace_observe`,

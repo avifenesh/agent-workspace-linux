@@ -364,6 +364,16 @@ pub struct WorkspaceIpcInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceEnvironment {
+    pub workspace_id: String,
+    pub display: String,
+    pub xauthority_path: PathBuf,
+    pub runtime_dir: PathBuf,
+    pub socket_path: PathBuf,
+    pub variables: Vec<EnvVar>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceClipboard {
     pub selection: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,6 +413,7 @@ pub struct WorkspaceEvent {
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcRequest {
     IpcInfo,
+    Environment,
     Status,
     LaunchApp {
         command: Vec<String>,
@@ -678,6 +689,8 @@ pub struct IpcResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ipc: Option<WorkspaceIpcInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<WorkspaceEnvironment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apps: Option<Vec<WorkspaceApp>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<Vec<WorkspaceWindow>>,
@@ -779,6 +792,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             apps: Some(status.apps.clone()),
             status: Some(status),
             ipc: None,
+            environment: None,
             windows: None,
             active_window: None,
             pointer: None,
@@ -819,6 +833,11 @@ pub fn status_workspace(id: &str) -> Result<WorkspaceStatus> {
 pub fn ipc_info(id: &str) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::IpcInfo)
+}
+
+pub fn environment(id: &str) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::Environment)
 }
 
 pub fn list_workspaces() -> Result<WorkspaceList> {
@@ -2113,6 +2132,7 @@ fn response_with_status(
         message: message.into(),
         status: Some(status.clone()),
         ipc: None,
+        environment: None,
         apps: None,
         windows: None,
         active_window: None,
@@ -2153,6 +2173,38 @@ fn workspace_ipc_info(status: &WorkspaceStatus) -> WorkspaceIpcInfo {
     }
 }
 
+fn workspace_environment(status: &WorkspaceStatus) -> WorkspaceEnvironment {
+    WorkspaceEnvironment {
+        workspace_id: status.id.clone(),
+        display: status.display.clone(),
+        xauthority_path: status.xauthority_path.clone(),
+        runtime_dir: status.runtime_dir.clone(),
+        socket_path: status.socket_path.clone(),
+        variables: vec![
+            EnvVar {
+                name: "DISPLAY".to_string(),
+                value: status.display.clone(),
+            },
+            EnvVar {
+                name: "XAUTHORITY".to_string(),
+                value: status.xauthority_path.display().to_string(),
+            },
+            EnvVar {
+                name: "AGENT_WORKSPACE_ID".to_string(),
+                value: status.id.clone(),
+            },
+            EnvVar {
+                name: "AGENT_WORKSPACE_RUNTIME_DIR".to_string(),
+                value: status.runtime_dir.display().to_string(),
+            },
+            EnvVar {
+                name: "AGENT_WORKSPACE_SOCKET".to_string(),
+                value: status.socket_path.display().to_string(),
+            },
+        ],
+    }
+}
+
 struct DaemonState {
     status: WorkspaceStatus,
     apps: Vec<AppProcess>,
@@ -2181,6 +2233,13 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             let mut response =
                 response_with_status(true, "workspace IPC info returned", &state.status);
             response.ipc = Some(workspace_ipc_info(&state.status));
+            (response, false)
+        }
+        IpcRequest::Environment => {
+            record_event(state, "environment", serde_json::json!({}))?;
+            let mut response =
+                response_with_status(true, "workspace environment returned", &state.status);
+            response.environment = Some(workspace_environment(&state.status));
             (response, false)
         }
         IpcRequest::Status => {
@@ -4525,6 +4584,7 @@ fn observe_workspace(
         apps: Some(state.status.apps.clone()),
         status: Some(state.status.clone()),
         ipc: None,
+        environment: None,
         windows: Some(windows),
         active_window,
         pointer: Some(pointer),
