@@ -5,6 +5,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     env, fs,
     io::{BufRead, BufReader, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
@@ -901,6 +902,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         ) {
             Ok(app) => {
                 let network_isolation = uses_bubblewrap_network_isolation(&state.status);
+                let mount_isolation = uses_bubblewrap_mount_isolation(&state.status);
                 record_event(
                     state,
                     "app_launch",
@@ -911,6 +913,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "profile_id": app.profile_id.as_deref(),
                         "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
                         "network_isolation": if network_isolation { "bubblewrap_unshare_net" } else { "host" },
+                        "mount_isolation": if mount_isolation { "bubblewrap_mount_namespace" } else { "host" },
                     }),
                 )?;
                 (
@@ -1120,12 +1123,11 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
 fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> {
     validate_launch_spec(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
-    let uses_bubblewrap_network = uses_bubblewrap_network_isolation(&state.status);
-    let mut child_command = if uses_bubblewrap_network {
+    let sandbox = bubblewrap_sandbox_for_launch(&state.status, spec.cwd.as_deref())?;
+    let mut child_command = if let Some(sandbox) = &sandbox {
         let mut command = Command::new("bwrap");
         command
-            .args(["--dev-bind", "/", "/"])
-            .arg("--unshare-net")
+            .args(&sandbox.args)
             .arg("--")
             .arg(&spec.command[0])
             .args(&spec.command[1..]);
@@ -1147,8 +1149,10 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
             fs::File::create(&log_paths.stderr)
                 .with_context(|| format!("failed to create {}", log_paths.stderr.display()))?,
         ));
-    if let Some(cwd) = &spec.cwd {
-        child_command.current_dir(cwd);
+    if sandbox.is_none() {
+        if let Some(cwd) = &spec.cwd {
+            child_command.current_dir(cwd);
+        }
     }
     for env_var in &spec.env {
         child_command.env(&env_var.name, &env_var.value);
@@ -1180,12 +1184,149 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
     Ok(info)
 }
 
+struct BubblewrapSandbox {
+    args: Vec<String>,
+}
+
+fn bubblewrap_sandbox_for_launch(
+    status: &WorkspaceStatus,
+    cwd: Option<&Path>,
+) -> Result<Option<BubblewrapSandbox>> {
+    let network = uses_bubblewrap_network_isolation(status);
+    let mounts = uses_bubblewrap_mount_isolation(status);
+    if !network && !mounts {
+        return Ok(None);
+    }
+
+    if mounts {
+        Ok(Some(BubblewrapSandbox {
+            args: restricted_mount_namespace_args(status, cwd, network)?,
+        }))
+    } else {
+        let mut args = vec!["--dev-bind".to_string(), "/".to_string(), "/".to_string()];
+        if network {
+            args.push("--unshare-net".to_string());
+        }
+        if let Some(cwd) = cwd {
+            args.push("--chdir".to_string());
+            args.push(cwd.display().to_string());
+        }
+        Ok(Some(BubblewrapSandbox { args }))
+    }
+}
+
 fn uses_bubblewrap_network_isolation(status: &WorkspaceStatus) -> bool {
     status.applied_policy.as_ref().is_some_and(|policy| {
         matches!(policy.network.mode, NetworkMode::Disabled)
             && policy.enforcement.network.enforced
             && policy.runtime_capabilities.bubblewrap.ok
     })
+}
+
+fn uses_bubblewrap_mount_isolation(status: &WorkspaceStatus) -> bool {
+    status.applied_policy.as_ref().is_some_and(|policy| {
+        !policy.mounts.is_empty()
+            && policy.enforcement.mounts.enforced
+            && policy.runtime_capabilities.bubblewrap.ok
+    })
+}
+
+fn restricted_mount_namespace_args(
+    status: &WorkspaceStatus,
+    cwd: Option<&Path>,
+    network: bool,
+) -> Result<Vec<String>> {
+    let policy = status
+        .applied_policy
+        .as_ref()
+        .context("mount namespace requested without an applied policy")?;
+    let mut args = Vec::new();
+    let mut dirs = BTreeSet::new();
+    let mut add_dir = |path: &Path| {
+        if path != Path::new("/") {
+            dirs.insert(path.to_path_buf());
+        }
+    };
+    add_dir(Path::new("/tmp"));
+    add_parent_dirs(&mut dirs, &status.xauthority_path);
+    if Path::new("/tmp/.X11-unix").exists() {
+        add_parent_dirs(&mut dirs, Path::new("/tmp/.X11-unix"));
+    }
+    for mount in &policy.mounts {
+        if !mount.workspace_path.is_absolute() {
+            bail!(
+                "profile mount workspace_path {} must be absolute for bubblewrap enforcement",
+                mount.workspace_path.display()
+            );
+        }
+        if !mount.host_path.exists() {
+            bail!(
+                "profile mount host_path {} does not exist",
+                mount.host_path.display()
+            );
+        }
+        add_parent_dirs(&mut dirs, &mount.workspace_path);
+    }
+
+    for path in ["/usr", "/bin", "/lib", "/lib64", "/etc", "/opt"] {
+        if Path::new(path).exists() {
+            args.push("--ro-bind".to_string());
+            args.push(path.to_string());
+            args.push(path.to_string());
+        }
+    }
+    args.push("--proc".to_string());
+    args.push("/proc".to_string());
+    args.push("--dev-bind".to_string());
+    args.push("/dev".to_string());
+    args.push("/dev".to_string());
+
+    for dir in dirs {
+        args.push("--dir".to_string());
+        args.push(dir.display().to_string());
+    }
+    if Path::new("/tmp/.X11-unix").exists() {
+        args.push("--ro-bind".to_string());
+        args.push("/tmp/.X11-unix".to_string());
+        args.push("/tmp/.X11-unix".to_string());
+    }
+    args.push("--ro-bind".to_string());
+    args.push(status.xauthority_path.display().to_string());
+    args.push(status.xauthority_path.display().to_string());
+
+    for mount in &policy.mounts {
+        args.push(match mount.mode {
+            crate::policy::MountMode::ReadOnly => "--ro-bind".to_string(),
+            crate::policy::MountMode::ReadWrite => "--bind".to_string(),
+        });
+        args.push(mount.host_path.display().to_string());
+        args.push(mount.workspace_path.display().to_string());
+    }
+    if network {
+        args.push("--unshare-net".to_string());
+    }
+    args.push("--chdir".to_string());
+    args.push(
+        cwd.unwrap_or_else(|| Path::new("/tmp"))
+            .display()
+            .to_string(),
+    );
+    Ok(args)
+}
+
+fn add_parent_dirs(dirs: &mut BTreeSet<PathBuf>, path: &Path) {
+    let mut parents = Vec::new();
+    let mut current = path.parent();
+    while let Some(parent) = current {
+        if parent == Path::new("/") {
+            break;
+        }
+        parents.push(parent.to_path_buf());
+        current = parent.parent();
+    }
+    for parent in parents.into_iter().rev() {
+        dirs.insert(parent);
+    }
 }
 
 fn launch_description(command: &[String]) -> String {

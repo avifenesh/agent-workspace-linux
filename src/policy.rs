@@ -77,7 +77,10 @@ impl AppliedWorkspacePolicy {
     ) -> Self {
         let mount_policy_requested = !mounts.is_empty();
         let restricted_network_requested = !matches!(network.mode, NetworkMode::InheritHost);
-        let mount_detail = if mount_policy_requested {
+        let mounts_enforced = mount_policy_requested && runtime_capabilities.bubblewrap.ok;
+        let mount_detail = if mounts_enforced {
+            "mounts are enforced with a bubblewrap mount namespace for launched apps".to_string()
+        } else if mount_policy_requested {
             if let Some(backend) = &runtime_capabilities.preferred_mount_backend {
                 format!(
                     "mounts are declared; {backend} is available as a candidate but is not active"
@@ -133,7 +136,7 @@ impl AppliedWorkspacePolicy {
                 },
                 mounts: PolicyCapabilityStatus {
                     requested: mount_policy_requested,
-                    enforced: !mount_policy_requested,
+                    enforced: !mount_policy_requested || mounts_enforced,
                     detail: mount_detail,
                 },
                 network: PolicyCapabilityStatus {
