@@ -122,10 +122,12 @@ Current gate status on 2026-05-24:
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, and recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
-  slice. Authenticated browser-profile sharing now has a `browser-session`
-  starter template for explicitly user-approved browser data directories, but
-  user-friendly environment/profile creation and a safer account-profile
-  picker/copy/lock-warning flow are still open.
+  slice. The Codex for Linux app picker now accepts both executable files and
+  `.desktop` launchers, parsing launcher `Name`/`Exec` fields into startup app
+  commands without a shell. Authenticated browser-profile sharing now has a
+  `browser-session` starter template for explicitly user-approved browser data
+  directories, but user-friendly environment/profile creation and a safer
+  account-profile picker/copy/lock-warning flow are still open.
 
 ### A. Prove Runtime Claims With Real Workloads
 
@@ -179,7 +181,8 @@ tasks users may reasonably ask for:
 - Browser-centered tasks such as shopping or web workflows, including the
   `browser-session` starter for mounted browser data when the user explicitly
   grants that environment.
-- Arbitrary apps chosen through file pickers or configured startup apps.
+- Arbitrary apps chosen through file pickers or configured startup apps,
+  including Linux `.desktop` launchers in the Codex for Linux app picker.
 - Long-running auto-loop agents that need preconfigured network/file/app
   ceilings without Codex-specific UI.
 - Recovery and inspection flows: list active/stopped workspaces, inspect
