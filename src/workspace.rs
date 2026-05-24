@@ -278,6 +278,12 @@ pub enum IpcRequest {
     FocusWindow {
         window_id: String,
     },
+    FocusMatchingWindow {
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: u64,
+    },
     CloseWindow {
         window_id: String,
     },
@@ -594,18 +600,7 @@ pub fn wait_window(
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    if title_contains
-        .as_ref()
-        .is_some_and(|title| title.trim().is_empty())
-    {
-        bail!("window title filter cannot be empty");
-    }
-    if app_id
-        .as_ref()
-        .is_some_and(|app_id| app_id.trim().is_empty())
-    {
-        bail!("app id cannot be empty");
-    }
+    validate_window_match_options(&title_contains, pid, &app_id, false)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::WaitWindow {
@@ -631,6 +626,26 @@ pub fn focus_window(id: &str, window_id: String) -> Result<IpcResponse> {
     request(
         &workspace_socket_path(&id),
         IpcRequest::FocusWindow { window_id },
+    )
+}
+
+pub fn focus_matching_window(
+    id: &str,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_match_options(&title_contains, pid, &app_id, true)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::FocusMatchingWindow {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
     )
 }
 
@@ -1182,6 +1197,54 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ),
             }
         }
+        IpcRequest::FocusMatchingWindow {
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match focus_matching_workspace_window(state, &criteria) {
+                Ok(Some(window)) => {
+                    record_event(
+                        state,
+                        "focus_window",
+                        serde_json::json!({
+                            "window_id": &window.id,
+                            "title_contains": criteria.title_contains.as_deref(),
+                            "pid": criteria.pid,
+                            "app_id": criteria.app_id.as_deref(),
+                            "timeout_ms": criteria.timeout_ms,
+                        }),
+                    )?;
+                    let mut response = response_with_status(
+                        true,
+                        "workspace matching window focused",
+                        &state.status,
+                    );
+                    response.windows = Some(vec![window]);
+                    (response, false)
+                }
+                Ok(None) => {
+                    let mut response = response_with_status(
+                        false,
+                        "workspace window not found before timeout",
+                        &state.status,
+                    );
+                    response.windows = Some(Vec::new());
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
         IpcRequest::CloseWindow { window_id } => {
             match close_workspace_window(&state.status, &window_id) {
                 Ok(()) => {
@@ -1696,6 +1759,17 @@ fn matching_workspace_windows(
         })
         .filter(|window| pid.is_none_or(|pid| window.pid == Some(pid)))
         .collect())
+}
+
+fn focus_matching_workspace_window(
+    state: &mut DaemonState,
+    criteria: &WindowWaitCriteria,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = wait_workspace_window(state, criteria)?.into_iter().next() else {
+        return Ok(None);
+    };
+    focus_workspace_window(&state.status, &window.id)?;
+    Ok(Some(window))
 }
 
 fn window_info(status: &WorkspaceStatus, id: &str) -> Result<WorkspaceWindow> {
@@ -2261,6 +2335,30 @@ fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
         bail!("{label} must be a decimal X11 id");
     }
     Ok(trimmed.to_string())
+}
+
+fn validate_window_match_options(
+    title_contains: &Option<String>,
+    pid: Option<u32>,
+    app_id: &Option<String>,
+    require_filter: bool,
+) -> Result<()> {
+    if title_contains
+        .as_ref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        bail!("window title filter cannot be empty");
+    }
+    if app_id
+        .as_ref()
+        .is_some_and(|app_id| app_id.trim().is_empty())
+    {
+        bail!("app id cannot be empty");
+    }
+    if require_filter && title_contains.is_none() && pid.is_none() && app_id.is_none() {
+        bail!("window match requires --title, --pid, or --app");
+    }
+    Ok(())
 }
 
 fn validate_env_var(env_var: &EnvVar) -> Result<()> {
