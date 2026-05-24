@@ -98,8 +98,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   child processes.
 - `workspace open-profile --profile` starts a profile-backed workspace,
   optionally runs setup first with `--setup`, and then launches declared startup
-  apps, returning the workspace start, setup, and startup results in one
-  response.
+  apps only when setup succeeds, returning the workspace start, setup, and
+  startup results in one response.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable.
 - `workspace cleanup` removes stale workspace runtime directories while skipping

@@ -528,11 +528,19 @@ pub fn open_profile_workspace(
         } else {
             None
         };
-        let startup = Some(launch_profile_startup_apps(
-            &workspace_id,
-            profile_id,
-            open_options.startup,
-        )?);
+        let setup_succeeded = setup
+            .as_ref()
+            .and_then(|setup| setup.succeeded)
+            .unwrap_or(true);
+        let startup = if setup_succeeded {
+            Some(launch_profile_startup_apps(
+                &workspace_id,
+                profile_id,
+                open_options.startup,
+            )?)
+        } else {
+            None
+        };
         (setup, startup)
     } else {
         (None, None)
