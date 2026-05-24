@@ -8,8 +8,11 @@ use std::{
     collections::BTreeSet,
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
-    os::unix::net::{UnixListener, UnixStream},
-    os::unix::process::{CommandExt, ExitStatusExt},
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+        process::{CommandExt, ExitStatusExt},
+    },
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     str::FromStr,
@@ -34,6 +37,7 @@ const APP_TERMINATE_GRACE_MS: u64 = 1_000;
 const SIGTERM: i32 = 15;
 const SIGKILL: i32 = 9;
 const ESRCH: i32 = 3;
+const PRIVATE_RUNTIME_DIR_MODE: u32 = 0o700;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
 
@@ -1718,8 +1722,7 @@ pub fn stop_workspace(id: &str, timeout_ms: Option<u64>) -> Result<IpcResponse> 
 pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     let id = sanitize_workspace_id(&options.id)?;
     options.purpose = normalize_workspace_purpose(options.purpose)?;
-    fs::create_dir_all(&options.runtime_dir)
-        .with_context(|| format!("failed to create {}", options.runtime_dir.display()))?;
+    create_private_runtime_dir(&options.runtime_dir)?;
     remove_stale_socket(&options.socket_path)?;
 
     let mut x_server = spawn_xvfb(&options)?;
@@ -1842,8 +1845,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     }
 
     let runtime_dir = workspace_dir(&id);
-    fs::create_dir_all(&runtime_dir)
-        .with_context(|| format!("failed to create {}", runtime_dir.display()))?;
+    create_private_runtime_dir(&runtime_dir)?;
     let socket_path = runtime_dir.join("control.sock");
     remove_stale_socket(&socket_path)?;
     let xauthority_path = runtime_dir.join("Xauthority");
@@ -1925,6 +1927,13 @@ fn write_applied_policy_file(
     fs::write(&policy_path, format!("{content}\n"))
         .with_context(|| format!("failed to write {}", policy_path.display()))?;
     Ok(policy_path)
+}
+
+fn create_private_runtime_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_RUNTIME_DIR_MODE))
+        .with_context(|| format!("failed to set private permissions on {}", path.display()))?;
+    Ok(())
 }
 
 fn record_event(
