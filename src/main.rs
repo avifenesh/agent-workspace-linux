@@ -1,3 +1,4 @@
+mod approval;
 mod guardrails;
 mod policy;
 mod profile;

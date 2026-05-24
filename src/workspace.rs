@@ -1,3 +1,6 @@
+use crate::approval::{
+    hidden_workspace_acknowledgement, unenforced_policy_acknowledgement, ApprovalBundle,
+};
 use crate::policy::{
     AppliedWorkspacePolicy, NetworkMode, PolicyRuntimeCapabilities, PolicyToolCheck,
 };
@@ -316,6 +319,8 @@ pub struct WorkspaceStartPreview {
     pub can_acknowledge_unenforced_policy: bool,
     pub blocks_unenforced_policy: bool,
     pub message: String,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -349,6 +354,8 @@ pub struct WorkspaceLaunchPreview {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,
     pub message: String,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -521,6 +528,8 @@ pub struct WorkspaceRunPreview {
     pub kill_on_timeout: bool,
     pub would_run: bool,
     pub launch: IpcResponse,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1395,35 +1404,39 @@ pub fn preview_launch_app(
         "workspace launch dry run blocked".to_string()
     };
 
+    let mut preview = WorkspaceLaunchPreview {
+        id,
+        command: spec.command,
+        name: spec.name,
+        profile_id: spec.profile_id,
+        cwd: spec.cwd,
+        env: spec.env,
+        wait_window,
+        window_timeout_ms,
+        screenshot_window,
+        applied_policy,
+        user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
+        requires_unenforced_policy_ack,
+        missing_unenforced_policy_ack,
+        can_acknowledge_unenforced_policy,
+        blocks_unenforced_policy,
+        workspace_running,
+        ok_to_launch,
+        would_launch,
+        mount_isolation,
+        network_isolation,
+        blockers,
+        message,
+        approval: ApprovalBundle::default(),
+    };
+    preview.approval = launch_approval_bundle(&preview);
+
     Ok(IpcResponse {
         ok: true,
         message: "workspace launch dry run returned".to_string(),
         status: Some(running_status),
         start_preview: None,
-        launch_preview: Some(WorkspaceLaunchPreview {
-            id,
-            command: spec.command,
-            name: spec.name,
-            profile_id: spec.profile_id,
-            cwd: spec.cwd,
-            env: spec.env,
-            wait_window,
-            window_timeout_ms,
-            screenshot_window,
-            applied_policy,
-            user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
-            requires_unenforced_policy_ack,
-            missing_unenforced_policy_ack,
-            can_acknowledge_unenforced_policy,
-            blocks_unenforced_policy,
-            workspace_running,
-            ok_to_launch,
-            would_launch,
-            mount_isolation,
-            network_isolation,
-            blockers,
-            message,
-        }),
+        launch_preview: Some(preview),
         ipc: None,
         environment: None,
         apps: None,
@@ -1435,6 +1448,33 @@ pub fn preview_launch_app(
         clipboard: None,
         events: None,
     })
+}
+
+fn launch_approval_bundle(preview: &WorkspaceLaunchPreview) -> ApprovalBundle {
+    let subject = preview
+        .name
+        .clone()
+        .unwrap_or_else(|| preview.command.join(" "));
+    let mut bundle = ApprovalBundle::new(
+        "workspace_launch",
+        format!("workspace {} app {}", preview.id, subject),
+        preview.would_launch,
+    )
+    .require_acknowledgement(
+        preview.requires_unenforced_policy_ack,
+        unenforced_policy_acknowledgement(preview.user_acknowledged_unenforced_policy),
+    );
+
+    let acknowledgement_blocker =
+        "launch profile requests unenforced policy and requires acknowledgement";
+    for blocker in &preview.blockers {
+        if preview.missing_unenforced_policy_ack && blocker == acknowledgement_blocker {
+            continue;
+        }
+        bundle = bundle.add_blocker(blocker.clone());
+    }
+
+    bundle
 }
 
 fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
@@ -2276,6 +2316,19 @@ pub fn preview_run_app_with_spec(
         .launch_preview
         .as_ref()
         .is_some_and(|preview| preview.would_launch);
+    let approval = launch
+        .launch_preview
+        .as_ref()
+        .map(|preview| {
+            preview.approval.clone().retarget(
+                "workspace_run",
+                format!("workspace {id} command"),
+                would_run,
+            )
+        })
+        .unwrap_or_else(|| {
+            ApprovalBundle::new("workspace_run", format!("workspace {id} command"), false)
+        });
     Ok(WorkspaceRunPreview {
         workspace_id: id,
         timeout_ms,
@@ -2284,6 +2337,7 @@ pub fn preview_run_app_with_spec(
         kill_on_timeout,
         would_run,
         launch,
+        approval,
     })
 }
 
@@ -2489,7 +2543,7 @@ fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         "workspace start would create a new hidden workspace".to_string()
     };
 
-    Ok(WorkspaceStartPreview {
+    let mut preview = WorkspaceStartPreview {
         id,
         purpose,
         ok_to_start,
@@ -2508,7 +2562,37 @@ fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         can_acknowledge_unenforced_policy,
         blocks_unenforced_policy,
         message,
-    })
+        approval: ApprovalBundle::default(),
+    };
+    preview.approval = start_approval_bundle(&preview);
+    Ok(preview)
+}
+
+fn start_approval_bundle(preview: &WorkspaceStartPreview) -> ApprovalBundle {
+    let mut bundle = ApprovalBundle::new(
+        "workspace_start",
+        format!("workspace {}", preview.id),
+        preview.ok_to_start,
+    )
+    .require_acknowledgement(
+        preview.requires_hidden_workspace_ack,
+        hidden_workspace_acknowledgement(preview.user_acknowledged_hidden_workspace),
+    )
+    .require_acknowledgement(
+        preview.requires_unenforced_policy_ack,
+        unenforced_policy_acknowledgement(preview.user_acknowledged_unenforced_policy),
+    );
+
+    if preview.blocks_unenforced_policy {
+        bundle = bundle.add_blocker(
+            "profile requires full policy enforcement, but this runtime cannot enforce all requested policy",
+        );
+    }
+    if !preview.runtime_ready {
+        bundle = bundle.add_blockers(preview.runtime_blockers.clone());
+    }
+
+    bundle
 }
 
 enum WorkspaceStartPlan {

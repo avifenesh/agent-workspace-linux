@@ -1,3 +1,4 @@
+use crate::approval::{unenforced_policy_acknowledgement, ApprovalBundle};
 use crate::policy::{AppliedWorkspacePolicy, NetworkMode};
 pub use crate::policy::{MountMode, NetworkPolicy, ProfileMount};
 use crate::workspace::{self, EnvVar, IpcResponse, LaunchSpec, WorkspaceStartOptions};
@@ -209,6 +210,8 @@ pub struct ProfileWorkspaceOpenPreview {
     pub setup: Option<ProfileSetupPreview>,
     pub startup: ProfileStartupPreview,
     pub message: String,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -224,6 +227,8 @@ pub struct ProfileSetupPreview {
     pub all_launches_allowed_by_policy: bool,
     pub requires_running_daemon_for_launch_preview: bool,
     pub commands: Vec<ProfileLaunchPlan>,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -239,6 +244,8 @@ pub struct ProfileStartupPreview {
     pub all_launches_allowed_by_policy: bool,
     pub requires_running_daemon_for_launch_preview: bool,
     pub apps: Vec<ProfileLaunchPlan>,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -258,6 +265,8 @@ pub struct ProfileLaunchPlan {
     pub can_acknowledge_unenforced_policy: bool,
     pub blocks_unenforced_policy: bool,
     pub would_launch_after_start: bool,
+    #[serde(default)]
+    pub approval: ApprovalBundle,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -765,7 +774,6 @@ pub fn preview_open_profile_workspace(
         .start_preview
         .as_ref()
         .context("workspace start preview response did not include start_preview")?;
-    let would_open = start_preview.ok_to_start;
     let setup = if open_options.run_setup {
         Some(preview_profile_setup(
             &workspace_id,
@@ -781,14 +789,32 @@ pub fn preview_open_profile_workspace(
         &open_options.startup,
         open_options.run_setup,
     )?;
+    let launch_plan_allowed = setup
+        .as_ref()
+        .map_or(true, |setup| setup.all_launches_allowed_by_policy)
+        && startup.all_launches_allowed_by_policy;
+    let would_open = start_preview.ok_to_start && launch_plan_allowed;
     let message = if would_open {
         "profile workspace open dry run returned".to_string()
-    } else {
+    } else if !start_preview.ok_to_start {
         format!(
             "profile workspace open dry run blocked: {}",
             start_preview.message
         )
+    } else {
+        "profile workspace open dry run blocked: setup or startup declarations require acknowledgement or policy support"
+            .to_string()
     };
+    let mut approval = ApprovalBundle::new(
+        "workspace_open_profile",
+        format!("profile {profile_id} into workspace {workspace_id}"),
+        would_open,
+    );
+    approval = approval.merge_child(&start_preview.approval);
+    if let Some(setup) = &setup {
+        approval = approval.merge_child(&setup.approval);
+    }
+    approval = approval.merge_child(&startup.approval);
 
     Ok(ProfileWorkspaceOpenPreview {
         workspace_id,
@@ -798,6 +824,7 @@ pub fn preview_open_profile_workspace(
         setup,
         startup,
         message,
+        approval,
     })
 }
 
@@ -818,6 +845,12 @@ fn preview_profile_setup(
     let all_launches_allowed_by_policy = commands
         .iter()
         .all(|command| command.would_launch_after_start);
+    let approval = profile_plan_approval_bundle(
+        "profile_setup",
+        format!("profile {profile_id} setup"),
+        all_launches_allowed_by_policy,
+        &commands,
+    );
 
     Ok(ProfileSetupPreview {
         workspace_id: workspace_id.to_string(),
@@ -830,6 +863,7 @@ fn preview_profile_setup(
         all_launches_allowed_by_policy,
         requires_running_daemon_for_launch_preview: true,
         commands,
+        approval,
     })
 }
 
@@ -848,6 +882,12 @@ fn preview_profile_startup(
         .map(profile_launch_plan)
         .collect::<Vec<_>>();
     let all_launches_allowed_by_policy = apps.iter().all(|app| app.would_launch_after_start);
+    let approval = profile_plan_approval_bundle(
+        "profile_startup",
+        format!("profile {profile_id} startup apps"),
+        all_launches_allowed_by_policy,
+        &apps,
+    );
 
     Ok(ProfileStartupPreview {
         workspace_id: workspace_id.to_string(),
@@ -860,6 +900,7 @@ fn preview_profile_startup(
         all_launches_allowed_by_policy,
         requires_running_daemon_for_launch_preview: true,
         apps,
+        approval,
     })
 }
 
@@ -876,6 +917,21 @@ fn profile_launch_plan(spec: LaunchSpec) -> ProfileLaunchPlan {
     let missing_unenforced_policy_ack =
         requires_unenforced_policy_ack && !spec.user_acknowledged_unenforced_policy;
     let would_launch_after_start = !blocks_unenforced_policy && !missing_unenforced_policy_ack;
+    let subject = spec.name.clone().unwrap_or_else(|| spec.command.join(" "));
+    let mut approval = ApprovalBundle::new(
+        "profile_launch_declaration",
+        subject,
+        would_launch_after_start,
+    )
+    .require_acknowledgement(
+        requires_unenforced_policy_ack,
+        unenforced_policy_acknowledgement(spec.user_acknowledged_unenforced_policy),
+    );
+    if blocks_unenforced_policy {
+        approval = approval.add_blocker(
+            "launch profile requires full policy enforcement, but this runtime cannot enforce all requested policy",
+        );
+    }
 
     ProfileLaunchPlan {
         command: spec.command,
@@ -889,7 +945,20 @@ fn profile_launch_plan(spec: LaunchSpec) -> ProfileLaunchPlan {
         can_acknowledge_unenforced_policy,
         blocks_unenforced_policy,
         would_launch_after_start,
+        approval,
     }
+}
+
+fn profile_plan_approval_bundle(
+    action: &str,
+    subject: String,
+    would_execute: bool,
+    plans: &[ProfileLaunchPlan],
+) -> ApprovalBundle {
+    plans.iter().fold(
+        ApprovalBundle::new(action, subject, would_execute),
+        |bundle, plan| bundle.merge_child(&plan.approval),
+    )
 }
 
 pub fn launch_profile_setup(

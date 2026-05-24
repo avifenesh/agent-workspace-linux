@@ -206,6 +206,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   for approval without creating a workspace or spawning apps. Setup/startup
   command entries are declarations; daemon-attached launch previews are available
   only after a workspace is running.
+  Preview responses include an `approval` bundle with required
+  acknowledgements, missing approval flags, MCP parameters to set, and blockers
+  so the Codex app can render one confirmation surface.
   `--setup-timeout-ms` overrides the default setup wait timeout.
   `--setup-kill-on-timeout` terminates a timed-out setup command process group.
   `--startup-wait-window` waits for each startup app's first visible window.
@@ -429,9 +432,12 @@ existing files require `replace=true` before they are overwritten.
 removed without deleting it.
 `workspace_start` accepts `dry_run=true` to preview hidden-workspace
 acknowledgement, runtime readiness, profile policy acknowledgement, strict
-policy blocks, and whether a new workspace would be created.
+policy blocks, and whether a new workspace would be created. Dry-run previews
+include an `approval` bundle that summarizes missing acknowledgements, approval
+flags, MCP parameters, and non-approval blockers.
 `workspace_open_profile` accepts `dry_run=true` to preview the profile-backed
-start, setup, and startup plan without creating a workspace.
+start, setup, and startup plan without creating a workspace. Its `approval`
+bundle merges the start, setup, and startup approval requirements.
 `workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
 profile policy acknowledgement, isolation labels, blockers, and whether an app
 would be launched without spawning it. This requires a running workspace daemon.
