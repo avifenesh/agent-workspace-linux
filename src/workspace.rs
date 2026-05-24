@@ -5351,21 +5351,29 @@ struct BubblewrapSandbox {
 enum LaunchNetworkPlan {
     Host,
     BubblewrapUnshareNet,
+    BubblewrapLoopbackOnly,
 }
 
 impl LaunchNetworkPlan {
     fn uses_bubblewrap(self) -> bool {
-        matches!(self, Self::BubblewrapUnshareNet)
+        matches!(
+            self,
+            Self::BubblewrapUnshareNet | Self::BubblewrapLoopbackOnly
+        )
     }
 
     fn unshare_net(self) -> bool {
-        matches!(self, Self::BubblewrapUnshareNet)
+        matches!(
+            self,
+            Self::BubblewrapUnshareNet | Self::BubblewrapLoopbackOnly
+        )
     }
 
     fn isolation_label(self) -> &'static str {
         match self {
             Self::Host => "host",
             Self::BubblewrapUnshareNet => "bubblewrap_unshare_net",
+            Self::BubblewrapLoopbackOnly => "bubblewrap_loopback_only",
         }
     }
 }
@@ -5434,6 +5442,12 @@ fn launch_network_plan(policy: Option<&AppliedWorkspacePolicy>) -> LaunchNetwork
             && policy.runtime_capabilities.bubblewrap.ok
     }) {
         LaunchNetworkPlan::BubblewrapUnshareNet
+    } else if policy.is_some_and(|policy| {
+        matches!(policy.network.mode, NetworkMode::LocalOnly)
+            && policy.enforcement.network.enforced
+            && policy.runtime_capabilities.bubblewrap.ok
+    }) {
+        LaunchNetworkPlan::BubblewrapLoopbackOnly
     } else {
         LaunchNetworkPlan::Host
     }
@@ -7826,7 +7840,7 @@ mod tests {
     }
 
     #[test]
-    fn local_only_network_launch_plan_stays_host_until_backend_exists() {
+    fn local_only_network_launch_plan_uses_loopback_only_namespace() {
         let policy = policy(
             NetworkPolicy {
                 mode: NetworkMode::LocalOnly,
@@ -7836,7 +7850,10 @@ mod tests {
             true,
         );
 
-        assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+        assert_eq!(
+            launch_network_plan(Some(&policy)),
+            LaunchNetworkPlan::BubblewrapLoopbackOnly
+        );
     }
 
     #[test]
@@ -7912,14 +7929,14 @@ mod tests {
     }
 
     #[test]
-    fn local_only_launch_policy_requires_acknowledgement() {
+    fn local_only_launch_policy_requires_acknowledgement_without_bubblewrap() {
         let launch_policy = policy(
             NetworkPolicy {
                 mode: NetworkMode::LocalOnly,
                 allow_hosts: vec!["localhost:3000".to_string()],
             },
-            true,
-            true,
+            false,
+            false,
         );
 
         assert!(launch_policy.can_acknowledge_unenforced_policy());

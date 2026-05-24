@@ -24,14 +24,17 @@ Profile mounts, network policy, setup commands, and startup apps are stored as
 declared intent for the future Codex app/profile UI. The runtime snapshots that
 intent into `workspace status` with an enforcement report; this X11 runtime
 enforces display/input scoping, profile mounts and disabled-network profiles
-through bubblewrap when available, display size, launch cwd, and environment
-overrides today. Each enforcement report includes a machine-readable state,
-active backend, limitations, and any required acknowledgement so the app can
-show exactly what is enforced before it starts the hidden environment.
+through bubblewrap when available, local-only network profiles through a
+bubblewrap loopback-only network namespace when available, display size, launch
+cwd, and environment overrides today. Each enforcement report includes a
+machine-readable state, active backend, limitations, and any required
+acknowledgement so the app can show exactly what is enforced before it starts
+the hidden environment.
 `network.mode=local_only` is available for profile intent where workspace apps
-should reach selected localhost or loopback services but not the internet; it is
-reported as unenforced with `planned_backend=network_namespace_loopback_proxy`
-until a local bridge/proxy backend exists.
+should reach localhost or loopback services but not the internet; with
+bubblewrap it is enforced as loopback-only inside the sandbox. Host-loopback
+services are not bridged into that namespace yet, so services needed by the app
+should be started inside the workspace or the profile should use `inherit_host`.
 Profiles can also set `require_enforced_policy=true` to fail closed: if any
 requested mount or network policy is not enforced by the current runtime, starts
 and launches are rejected even when the caller passes the unenforced-policy
@@ -165,14 +168,13 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   runtime also requires `--ack-unenforced-policy` when any requested policy is
   visible but not enforced yet. Mount profiles and disabled-network profiles do
   not need that extra acknowledgement when bubblewrap is available because
-  launches run inside a bubblewrap mount namespace and/or with
-  `bwrap --unshare-net`.
+  launches run inside a bubblewrap mount namespace, `bwrap --unshare-net`, or
+  the local-only loopback namespace.
   Local-only network profiles validate `allow_hosts` to localhost or loopback
-  targets such as `localhost:3000` or `127.0.0.1:5173`, but the current runtime
-  does not yet provide the bridge/proxy needed to enforce that split, so they
-  require `--ack-unenforced-policy`. The profile check includes
-  `planned_backend` and `backend_requirements` so the UI can show what is
-  missing before the user approves a run.
+  targets such as `localhost:3000` or `127.0.0.1:5173`. With bubblewrap, they
+  are enforced without `--ack-unenforced-policy` by giving launched apps a
+  network namespace where only sandbox loopback works. Host-loopback bridging is
+  still a limitation and is reported in `applied_policy.enforcement.network`.
   If the saved profile sets `require_enforced_policy=true`, the runtime refuses
   to start or launch with unenforced policy instead of accepting that
   acknowledgement.

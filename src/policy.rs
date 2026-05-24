@@ -123,7 +123,7 @@ impl AppliedWorkspacePolicy {
         let network_enforced = match network.mode {
             NetworkMode::InheritHost => true,
             NetworkMode::Disabled => runtime_capabilities.bubblewrap.ok,
-            NetworkMode::LocalOnly => false,
+            NetworkMode::LocalOnly => runtime_capabilities.bubblewrap.ok,
             NetworkMode::Allowlist => false,
         };
         let network_detail = match network.mode {
@@ -142,9 +142,15 @@ impl AppliedWorkspacePolicy {
                         .to_string()
                 }
             }
+            NetworkMode::LocalOnly if network_enforced => {
+                format!(
+                    "local-only network is enforced with bubblewrap --unshare-net; sandbox loopback is available for {}",
+                    network.allow_hosts.join(", ")
+                )
+            }
             NetworkMode::LocalOnly => {
                 format!(
-                    "local-only network is declared for {} but no local-network backend is active",
+                    "local-only network is declared for {} but bubblewrap is not available",
                     network.allow_hosts.join(", ")
                 )
             }
@@ -180,14 +186,20 @@ impl AppliedWorkspacePolicy {
                         .to_string(),
                 );
             }
+            NetworkMode::LocalOnly if network_enforced => {
+                network_status.backend = Some("bubblewrap_loopback_only".to_string());
+                network_status.limitations.push(
+                    "host loopback services are not bridged into the sandbox; start needed local services inside the workspace or use inherit_host networking"
+                        .to_string(),
+                );
+            }
             NetworkMode::LocalOnly => {
-                network_status.planned_backend =
-                    Some("network_namespace_loopback_proxy".to_string());
+                network_status.planned_backend = Some("bubblewrap_loopback_only".to_string());
                 network_status
                     .backend_requirements
-                    .extend(["bubblewrap", "slirp4netns", "loopback_proxy"].map(str::to_string));
+                    .push("bubblewrap".to_string());
                 network_status.limitations.push(
-                    "allow_hosts is recorded for local service intent, but traffic is not restricted to those local targets"
+                    "local-only networking is recorded in the profile but launched apps keep host network access"
                         .to_string(),
                 );
                 network_status.limitations.push(
@@ -312,7 +324,7 @@ impl PolicyRuntimeCapabilities {
         };
         let can_candidate_mounts = preferred_mount_backend.is_some();
         let can_candidate_disable_network = preferred_network_backend.is_some();
-        let can_candidate_local_network = bubblewrap.ok && slirp4netns.ok;
+        let can_candidate_local_network = bubblewrap.ok;
         let can_candidate_network_allowlist = firejail.ok || slirp4netns.ok;
         let mut notes = Vec::new();
         if bubblewrap.ok {
@@ -330,7 +342,7 @@ impl PolicyRuntimeCapabilities {
             notes.push("network allowlists still need a concrete rules backend before they can be enforced".to_string());
         }
         if can_candidate_local_network {
-            notes.push("local-only networking still needs a bridge or proxy backend before selected local targets can be enforced".to_string());
+            notes.push("local-only networking can be enforced with bubblewrap loopback-only network namespaces".to_string());
         }
 
         Self {
@@ -540,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn local_only_network_stays_unenforced_until_backend_exists() {
+    fn local_only_network_is_enforced_with_bubblewrap_loopback_only() {
         let policy = AppliedWorkspacePolicy::new_with_capabilities(
             "qa-local".to_string(),
             Vec::new(),
@@ -550,45 +562,32 @@ mod tests {
             },
             false,
             0,
-            capabilities(true, false, false, true),
+            capabilities(true, false, false, false),
         );
 
         assert!(policy.enforcement.network.requested);
-        assert!(!policy.enforcement.network.enforced);
+        assert!(policy.enforcement.network.enforced);
         assert_eq!(
             policy.enforcement.network.state,
-            Some(PolicyCapabilityState::Unenforced)
+            Some(PolicyCapabilityState::Enforced)
         );
         assert_eq!(
             policy.enforcement.network.requires_acknowledgement,
-            Some(true)
+            Some(false)
         );
-        assert_eq!(
-            policy
-                .enforcement
-                .network
-                .required_acknowledgement
-                .as_deref(),
-            Some("ack_unenforced_policy")
-        );
-        assert!(policy.has_requested_unenforced_policy());
+        assert_eq!(policy.enforcement.network.required_acknowledgement, None);
+        assert!(!policy.has_requested_unenforced_policy());
         assert!(policy.runtime_capabilities.can_candidate_local_network);
         assert_eq!(
-            policy.enforcement.network.planned_backend.as_deref(),
-            Some("network_namespace_loopback_proxy")
+            policy.enforcement.network.backend.as_deref(),
+            Some("bubblewrap_loopback_only")
         );
-        assert!(policy
-            .enforcement
-            .network
-            .backend_requirements
-            .iter()
-            .any(|requirement| requirement == "loopback_proxy"));
         assert!(policy
             .enforcement
             .network
             .limitations
             .iter()
-            .any(|limitation| limitation.contains("local service intent")));
+            .any(|limitation| limitation.contains("host loopback services")));
     }
 
     #[test]
@@ -597,8 +596,8 @@ mod tests {
             "strict-local".to_string(),
             Vec::new(),
             NetworkPolicy {
-                mode: NetworkMode::LocalOnly,
-                allow_hosts: vec!["localhost:3000".to_string()],
+                mode: NetworkMode::Allowlist,
+                allow_hosts: vec!["example.com".to_string()],
             },
             true,
             0,
