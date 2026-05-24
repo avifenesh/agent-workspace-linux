@@ -77,7 +77,9 @@ cargo run -- workspace screenshot --output /tmp/agent-workspace.png
 cargo run -- workspace screenshot-window --class xterm --output /tmp/agent-window.png
 cargo run -- workspace focus-window 4194316
 cargo run -- workspace focus-window --class xterm --timeout-ms 10000
+cargo run -- workspace close-window --dry-run 4194316
 cargo run -- workspace close-window 4194316
+cargo run -- workspace close-window --dry-run --title xterm --timeout-ms 10000
 cargo run -- workspace close-window --title xterm --timeout-ms 10000
 cargo run -- workspace move-window --class xterm 80 60
 cargo run -- workspace resize-window --title xterm 800 500
@@ -254,8 +256,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   visibility state.
   `show-window` match filters also search minimized/hidden windows, so agents
   can restore an app by class, title, pid, or app id without first listing a raw
-  X11 id. `close-window` returns the targeted window record before close is
-  requested.
+  X11 id. `close-window --dry-run` returns the targeted window record without
+  closing it, and `close-window` returns the targeted window record before close
+  is requested.
   `move-pointer` and
   `move-pointer-window` move the workspace pointer without clicking and return
   the resulting pointer coordinates. `click` and `click-window` can set
@@ -346,6 +349,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 app id/pid/name, app name substring, command substring, profile id, or
 running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
+`workspace_close_window` and `workspace_close_matching_window` accept
+`dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
 directory candidates without deleting them.
 `workspace_kill_app` accepts `dry_run=true` to resolve and return the matched

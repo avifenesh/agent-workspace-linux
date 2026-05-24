@@ -279,10 +279,10 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             }
         }
         "close-window" => {
-            let (id, target) = parse_close_window_options(&args[1..])?;
+            let (id, target, dry_run) = parse_close_window_options(&args[1..])?;
             match target {
                 CloseWindowTarget::WindowId(window_id) => {
-                    print_json(&workspace::close_window(&id, window_id)?)
+                    print_json(&workspace::close_window(&id, window_id, dry_run)?)
                 }
                 CloseWindowTarget::Match {
                     title_contains,
@@ -297,6 +297,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                     pid,
                     app_id,
                     timeout_ms,
+                    dry_run,
                 )?),
             }
         }
@@ -1617,7 +1618,7 @@ enum CloseWindowTarget {
     },
 }
 
-fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTarget)> {
+fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTarget, bool)> {
     let mut id = workspace::default_workspace_id();
     let mut window_id = None;
     let mut title_contains = None;
@@ -1625,6 +1626,7 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
+    let mut dry_run = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -1660,6 +1662,10 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
                 );
                 index += 2;
             }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
             value if value.starts_with("--") => {
                 bail!("unknown workspace close-window option '{value}'")
             }
@@ -1679,7 +1685,7 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
         if has_match_filter || timeout_ms.is_some() {
             bail!("workspace close-window accepts either a window id or match options, not both");
         }
-        return Ok((id, CloseWindowTarget::WindowId(window_id)));
+        return Ok((id, CloseWindowTarget::WindowId(window_id), dry_run));
     }
     if !has_match_filter {
         bail!("workspace close-window requires a window id or --title, --class, --pid, or --app");
@@ -1693,6 +1699,7 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
             app_id,
             timeout_ms,
         },
+        dry_run,
     ))
 }
 
@@ -3209,8 +3216,8 @@ Usage:
   agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--output PATH] [--timeout-ms N]
   agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
-  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
+  agent-workspace-linux workspace close-window [--id ID] [--dry-run] WINDOW_ID
+  agent-workspace-linux workspace close-window [--id ID] [--dry-run] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace move-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N] X Y
   agent-workspace-linux workspace resize-window [--id ID] WINDOW_ID WIDTH HEIGHT

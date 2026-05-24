@@ -548,6 +548,8 @@ pub enum IpcRequest {
     },
     CloseWindow {
         window_id: String,
+        #[serde(default)]
+        dry_run: bool,
     },
     CloseMatchingWindow {
         title_contains: Option<String>,
@@ -555,6 +557,8 @@ pub enum IpcRequest {
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: u64,
+        #[serde(default)]
+        dry_run: bool,
     },
     MoveWindow {
         window_id: Option<String>,
@@ -1444,12 +1448,12 @@ pub fn focus_matching_window(
     )
 }
 
-pub fn close_window(id: &str, window_id: String) -> Result<IpcResponse> {
+pub fn close_window(id: &str, window_id: String, dry_run: bool) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     let window_id = sanitize_x11_id(&window_id, "window id")?;
     request(
         &workspace_socket_path(&id),
-        IpcRequest::CloseWindow { window_id },
+        IpcRequest::CloseWindow { window_id, dry_run },
     )
 }
 
@@ -1460,6 +1464,7 @@ pub fn close_matching_window(
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: Option<u64>,
+    dry_run: bool,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     validate_window_match_options(&title_contains, &class_contains, pid, &app_id, true)?;
@@ -1471,6 +1476,7 @@ pub fn close_matching_window(
             pid,
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+            dry_run,
         },
     )
 }
@@ -3311,7 +3317,31 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 },
             }
         }
-        IpcRequest::CloseWindow { window_id } => {
+        IpcRequest::CloseWindow { window_id, dry_run } if dry_run => {
+            match window_info(&state.status, &window_id) {
+                Ok(window) => {
+                    record_event(
+                        state,
+                        "close_window_dry_run",
+                        serde_json::json!({
+                            "window_id": &window_id,
+                            "title": &window.title,
+                            "pid": window.pid,
+                            "app_id": window.app_id.as_deref(),
+                        }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace window close dry run", &state.status);
+                    response.windows = Some(vec![window]);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
+        IpcRequest::CloseWindow { window_id, .. } => {
             match window_info(&state.status, &window_id).and_then(|window| {
                 close_workspace_window(&state.status, &window_id).map(|()| window)
             }) {
@@ -3341,6 +3371,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             pid,
             app_id,
             timeout_ms,
+            dry_run,
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
@@ -3360,6 +3391,47 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
+                Ok(()) if dry_run => match wait_workspace_window(state, &criteria)
+                    .map(|windows| windows.into_iter().next())
+                {
+                    Ok(Some(window)) => {
+                        record_event(
+                            state,
+                            "close_window_dry_run",
+                            serde_json::json!({
+                                "window_id": &window.id,
+                                "title": &window.title,
+                                "pid": window.pid,
+                                "app_id": window.app_id.as_deref(),
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "class_contains": criteria.class_contains.as_deref(),
+                                "filter_pid": criteria.pid,
+                                "filter_app_id": criteria.app_id.as_deref(),
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response = response_with_status(
+                            true,
+                            "workspace matching window close dry run",
+                            &state.status,
+                        );
+                        response.windows = Some(vec![window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
                 Ok(()) => match close_matching_workspace_window(state, &criteria) {
                     Ok(Some(window)) => {
                         record_event(
