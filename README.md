@@ -47,7 +47,8 @@ paths, and mount destinations must be non-overlapping absolute paths under
 Permission hardening is intentionally deferred until the dogfood flows are
 validated. See [Permission Boundary Roadmap](docs/permission-boundary-roadmap.md)
 for the target authority model and the validation gates required before final
-enforcement.
+enforcement, and [Dogfood Validation](docs/dogfood-validation.md) for the
+current evidence log.
 
 ## Commands
 

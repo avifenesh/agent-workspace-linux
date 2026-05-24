@@ -93,6 +93,8 @@ Rules:
 Before making permissions hard, validate that the current claims actually hold
 under real usage:
 
+Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
+
 - Start Chrome inside the agent workspace and verify it is controllable without
   stealing the host desktop.
 - Run workspace QA against several real user projects, including apps that need

@@ -723,6 +723,8 @@ pub fn apply_profile_to_start_options(
     let profile = get_profile(profile_id)?;
     options.profile_id = Some(profile.id.clone());
     options.applied_policy = Some(applied_policy(&profile));
+    options.profile_cwd = profile.cwd.clone();
+    options.profile_env = profile.env.clone();
     if !width_explicit {
         if let Some(width) = profile.width {
             options.width = width;

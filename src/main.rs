@@ -3264,6 +3264,8 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut session_id = None;
     let mut purpose = None;
     let mut profile_id = None;
+    let mut profile_cwd = None;
+    let mut profile_env = Vec::new();
     let mut display = None;
     let mut width = None;
     let mut height = None;
@@ -3287,6 +3289,18 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
             }
             "--profile" => {
                 profile_id = Some(value_after(&args, index, "--profile")?.to_string());
+                index += 2;
+            }
+            "--profile-cwd" => {
+                profile_cwd = Some(PathBuf::from(value_after(&args, index, "--profile-cwd")?));
+                index += 2;
+            }
+            "--profile-env" => {
+                profile_env.push(parse_env_assignment(value_after(
+                    &args,
+                    index,
+                    "--profile-env",
+                )?)?);
                 index += 2;
             }
             "--purpose" => {
@@ -3351,6 +3365,8 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
         purpose,
         profile_id,
         applied_policy,
+        profile_cwd,
+        profile_env,
         user_acknowledged_hidden_workspace,
         user_acknowledged_unenforced_policy,
         display: display.context("daemon missing --display")?,

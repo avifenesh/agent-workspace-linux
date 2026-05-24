@@ -130,6 +130,8 @@ pub struct WorkspaceStartOptions {
     pub purpose: Option<String>,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub profile_cwd: Option<PathBuf>,
+    pub profile_env: Vec<EnvVar>,
     pub user_acknowledged_hidden_workspace: bool,
     pub user_acknowledged_unenforced_policy: bool,
     pub width: u32,
@@ -143,6 +145,8 @@ impl Default for WorkspaceStartOptions {
             purpose: None,
             profile_id: None,
             applied_policy: None,
+            profile_cwd: None,
+            profile_env: Vec::new(),
             user_acknowledged_hidden_workspace: false,
             user_acknowledged_unenforced_policy: false,
             width: DEFAULT_WIDTH,
@@ -158,6 +162,8 @@ pub struct DaemonOptions {
     pub purpose: Option<String>,
     pub profile_id: Option<String>,
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub profile_cwd: Option<PathBuf>,
+    pub profile_env: Vec<EnvVar>,
     pub user_acknowledged_hidden_workspace: bool,
     pub user_acknowledged_unenforced_policy: bool,
     pub display: String,
@@ -179,6 +185,10 @@ pub struct WorkspaceStatus {
     pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile_env: Vec<EnvVar>,
     pub user_acknowledged_hidden_workspace: bool,
     pub user_acknowledged_unenforced_policy: bool,
     pub ready: bool,
@@ -258,6 +268,10 @@ pub struct WorkspaceManifest {
     pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_policy: Option<AppliedWorkspacePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile_env: Vec<EnvVar>,
     pub user_acknowledged_hidden_workspace: bool,
     pub user_acknowledged_unenforced_policy: bool,
     pub ready: bool,
@@ -1360,6 +1374,9 @@ pub fn preview_launch_app(
     screenshot_window: bool,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
+    let running_status = status_workspace(&id)
+        .with_context(|| format!("workspace {id:?} daemon is required for launch dry run"))?;
+    let spec = launch_spec_with_workspace_defaults(&running_status, spec);
     validate_launch_spec(&spec)?;
 
     let launch_policy = spec.applied_policy.clone();
@@ -1373,8 +1390,6 @@ pub fn preview_launch_app(
     let missing_unenforced_policy_ack =
         requires_unenforced_policy_ack && !spec.user_acknowledged_unenforced_policy;
 
-    let running_status = status_workspace(&id)
-        .with_context(|| format!("workspace {id:?} daemon is required for launch dry run"))?;
     let mut blockers = Vec::new();
     if blocks_unenforced_policy {
         blockers.push(
@@ -2462,6 +2477,8 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
             purpose: options.purpose,
             profile_id: options.profile_id,
             applied_policy: options.applied_policy,
+            profile_cwd: options.profile_cwd,
+            profile_env: options.profile_env,
             user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
             user_acknowledged_unenforced_policy: options.user_acknowledged_unenforced_policy,
             ready: true,
@@ -2675,6 +2692,8 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         purpose,
         profile_id: options.profile_id,
         applied_policy: options.applied_policy,
+        profile_cwd: options.profile_cwd,
+        profile_env: options.profile_env,
         user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
         user_acknowledged_unenforced_policy: options.user_acknowledged_unenforced_policy,
         display,
@@ -2698,6 +2717,14 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     }
     if let Some(profile_id) = &options.profile_id {
         daemon.arg("--profile").arg(profile_id);
+    }
+    if let Some(profile_cwd) = &options.profile_cwd {
+        daemon.arg("--profile-cwd").arg(profile_cwd);
+    }
+    for env_var in &options.profile_env {
+        daemon
+            .arg("--profile-env")
+            .arg(format!("{}={}", env_var.name, env_var.value));
     }
     if let Some(policy) = &options.applied_policy {
         let policy_path = write_applied_policy_file(&options.runtime_dir, policy)?;
@@ -2781,6 +2808,8 @@ fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) ->
         purpose: status.purpose.clone(),
         profile_id: status.profile_id.clone(),
         applied_policy: status.applied_policy.clone(),
+        profile_cwd: status.profile_cwd.clone(),
+        profile_env: status.profile_env.clone(),
         user_acknowledged_hidden_workspace: status.user_acknowledged_hidden_workspace,
         user_acknowledged_unenforced_policy: status.user_acknowledged_unenforced_policy,
         ready: status.ready,
@@ -5295,6 +5324,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
 }
 
 fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> {
+    let spec = launch_spec_with_workspace_defaults(&state.status, spec);
     validate_launch_spec(&spec)?;
     validate_launch_policy_ack(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
@@ -5374,6 +5404,38 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         child,
     });
     Ok(info)
+}
+
+fn launch_spec_with_workspace_defaults(
+    status: &WorkspaceStatus,
+    mut spec: LaunchSpec,
+) -> LaunchSpec {
+    if spec.profile_id.is_some() || spec.applied_policy.is_some() {
+        return spec;
+    }
+
+    spec.profile_id = status.profile_id.clone();
+    spec.applied_policy = status.applied_policy.clone();
+    spec.user_acknowledged_unenforced_policy |= status.user_acknowledged_unenforced_policy;
+    if spec.cwd.is_none() {
+        spec.cwd = status.profile_cwd.clone();
+    }
+    spec.env = merged_launch_env(status.profile_env.clone(), spec.env);
+    spec
+}
+
+fn merged_launch_env(mut base: Vec<EnvVar>, overrides: Vec<EnvVar>) -> Vec<EnvVar> {
+    for override_var in overrides {
+        if let Some(existing) = base
+            .iter_mut()
+            .find(|base_var| base_var.name == override_var.name)
+        {
+            *existing = override_var;
+        } else {
+            base.push(override_var);
+        }
+    }
+    base
 }
 
 struct BubblewrapSandbox {
@@ -7887,6 +7949,41 @@ mod tests {
         )
     }
 
+    fn status_with_profile_defaults(policy: AppliedWorkspacePolicy) -> WorkspaceStatus {
+        WorkspaceStatus {
+            id: "qa-ws".to_string(),
+            session_id: "session-qa".to_string(),
+            purpose: Some("QA".to_string()),
+            profile_id: Some(policy.profile_id.clone()),
+            applied_policy: Some(policy),
+            profile_cwd: Some(PathBuf::from("/workspace/project")),
+            profile_env: vec![
+                EnvVar {
+                    name: "BASE".to_string(),
+                    value: "one".to_string(),
+                },
+                EnvVar {
+                    name: "OVERRIDE".to_string(),
+                    value: "from-profile".to_string(),
+                },
+            ],
+            user_acknowledged_hidden_workspace: true,
+            user_acknowledged_unenforced_policy: true,
+            ready: true,
+            started_at_unix: 1,
+            display: ":90".to_string(),
+            width: 1280,
+            height: 720,
+            runtime_dir: PathBuf::from("/tmp/qa-ws"),
+            socket_path: PathBuf::from("/tmp/qa-ws/control.sock"),
+            xauthority_path: PathBuf::from("/tmp/qa-ws/Xauthority"),
+            x_server_pid: 0,
+            window_manager_pid: None,
+            last_event_sequence: 0,
+            apps: Vec::new(),
+        }
+    }
+
     #[test]
     fn strips_linux_deleted_exe_suffix() {
         let path = Path::new("/home/me/.local/bin/agent-workspace-linux (deleted)");
@@ -7943,6 +8040,74 @@ mod tests {
         let policy = policy(NetworkPolicy::default(), true, true);
 
         assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+    }
+
+    #[test]
+    fn unprofiled_launch_inherits_started_profile_defaults() {
+        let status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
+        let spec = launch_spec_with_workspace_defaults(
+            &status,
+            LaunchSpec {
+                command: vec!["/bin/true".to_string()],
+                name: Some("probe".to_string()),
+                profile_id: None,
+                applied_policy: None,
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: vec![EnvVar {
+                    name: "OVERRIDE".to_string(),
+                    value: "from-launch".to_string(),
+                }],
+            },
+        );
+
+        assert_eq!(spec.profile_id.as_deref(), Some("qa"));
+        assert_eq!(spec.cwd.as_deref(), Some(Path::new("/workspace/project")));
+        assert!(spec.applied_policy.is_some());
+        assert!(spec.user_acknowledged_unenforced_policy);
+        assert_eq!(
+            spec.env
+                .iter()
+                .find(|env| env.name == "BASE")
+                .map(|env| env.value.as_str()),
+            Some("one")
+        );
+        assert_eq!(
+            spec.env
+                .iter()
+                .find(|env| env.name == "OVERRIDE")
+                .map(|env| env.value.as_str()),
+            Some("from-launch")
+        );
+    }
+
+    #[test]
+    fn explicit_launch_profile_skips_started_profile_defaults() {
+        let status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
+        let explicit_policy = AppliedWorkspacePolicy::new_with_capabilities(
+            "other".to_string(),
+            Vec::new(),
+            NetworkPolicy::default(),
+            false,
+            0,
+            capabilities(true, false, false, true),
+        );
+        let spec = launch_spec_with_workspace_defaults(
+            &status,
+            LaunchSpec {
+                command: vec!["/bin/true".to_string()],
+                name: Some("probe".to_string()),
+                profile_id: Some("other".to_string()),
+                applied_policy: Some(explicit_policy),
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: Vec::new(),
+            },
+        );
+
+        assert_eq!(spec.profile_id.as_deref(), Some("other"));
+        assert_eq!(spec.cwd, None);
+        assert!(spec.env.is_empty());
     }
 
     #[test]
