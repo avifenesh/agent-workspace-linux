@@ -28,6 +28,9 @@ through bubblewrap when available, display size, launch cwd, and environment
 overrides today. Each enforcement report includes a machine-readable state,
 active backend, limitations, and any required acknowledgement so the app can
 show exactly what is enforced before it starts the hidden environment.
+`network.mode=local_only` is available for profile intent where workspace apps
+should reach selected localhost or loopback services but not the internet; it is
+reported as unenforced until a local bridge/proxy backend exists.
 
 For the current bubblewrap runtime, profile mount sources must use absolute host
 paths, and mount destinations must be non-overlapping absolute paths under
@@ -150,6 +153,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   not need that extra acknowledgement when bubblewrap is available because
   launches run inside a bubblewrap mount namespace and/or with
   `bwrap --unshare-net`.
+  Local-only network profiles validate `allow_hosts` to localhost or loopback
+  targets such as `localhost:3000` or `127.0.0.1:5173`, but the current runtime
+  does not yet provide the bridge/proxy needed to enforce that split, so they
+  require `--ack-unenforced-policy`.
   Network allowlists are different: `allow_hosts` is saved and shown as profile
   intent, but host filtering is not active yet, so allowlist profiles always
   require `--ack-unenforced-policy` and report the limitation in

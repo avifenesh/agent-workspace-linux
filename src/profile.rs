@@ -427,11 +427,7 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
         validate_env_var(env_var)?;
     }
     validate_mounts(&profile.mounts)?;
-    if matches!(profile.network.mode, NetworkMode::Allowlist)
-        && profile.network.allow_hosts.is_empty()
-    {
-        bail!("allowlist network profiles require at least one host");
-    }
+    validate_network_policy(&profile.network)?;
     for setup in &profile.setup_commands {
         workspace::validate_optional_app_name(&setup.name)?;
         if setup.command.is_empty() {
@@ -451,6 +447,76 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn validate_network_policy(network: &NetworkPolicy) -> Result<()> {
+    if matches!(
+        network.mode,
+        NetworkMode::Allowlist | NetworkMode::LocalOnly
+    ) && network.allow_hosts.is_empty()
+    {
+        bail!(
+            "{} network profiles require at least one host",
+            network_mode_name(&network.mode)
+        );
+    }
+    if matches!(network.mode, NetworkMode::LocalOnly) {
+        for host in &network.allow_hosts {
+            if !is_local_network_target(host) {
+                bail!(
+                    "local_only network profiles may only allow localhost or loopback targets, got {host:?}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn network_mode_name(mode: &NetworkMode) -> &'static str {
+    match mode {
+        NetworkMode::InheritHost => "inherit_host",
+        NetworkMode::Disabled => "disabled",
+        NetworkMode::LocalOnly => "local_only",
+        NetworkMode::Allowlist => "allowlist",
+    }
+}
+
+fn is_local_network_target(target: &str) -> bool {
+    let Some(host) = network_target_host(target) else {
+        return false;
+    };
+    host == "localhost" || host == "::1" || host.starts_with("127.")
+}
+
+fn network_target_host(target: &str) -> Option<String> {
+    let trimmed = target.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        return None;
+    }
+    let without_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(without_scheme)
+        .trim();
+    if authority.is_empty() {
+        return None;
+    }
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        rest.split_once(']').map(|(host, _)| host).unwrap_or(rest)
+    } else if authority.matches(':').count() == 1 {
+        authority
+            .split_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(authority)
+    } else {
+        authority
+    };
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
 }
 
 fn validate_mounts(mounts: &[ProfileMount]) -> Result<()> {
@@ -873,4 +939,51 @@ fn validate_env_var(env_var: &EnvVar) -> Result<()> {
         bail!("environment variable cannot contain NUL bytes");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile_with_network(network: NetworkPolicy) -> WorkspaceProfile {
+        WorkspaceProfile {
+            id: "qa-local".to_string(),
+            description: None,
+            width: None,
+            height: None,
+            cwd: None,
+            env: Vec::new(),
+            mounts: Vec::new(),
+            network,
+            setup_commands: Vec::new(),
+            startup_apps: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn local_only_network_accepts_loopback_targets() {
+        let profile = profile_with_network(NetworkPolicy {
+            mode: NetworkMode::LocalOnly,
+            allow_hosts: vec![
+                "localhost:3000".to_string(),
+                "http://127.0.0.1:5173/path".to_string(),
+                "[::1]:9000".to_string(),
+            ],
+        });
+
+        validate_profile(&profile).expect("local_only loopback targets should validate");
+    }
+
+    #[test]
+    fn local_only_network_rejects_remote_targets() {
+        let profile = profile_with_network(NetworkPolicy {
+            mode: NetworkMode::LocalOnly,
+            allow_hosts: vec!["example.com".to_string()],
+        });
+
+        let error = validate_profile(&profile).expect_err("remote local_only target should fail");
+        assert!(error
+            .to_string()
+            .contains("may only allow localhost or loopback"));
+    }
 }

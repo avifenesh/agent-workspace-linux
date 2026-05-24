@@ -45,6 +45,7 @@ impl Default for NetworkPolicy {
 pub enum NetworkMode {
     InheritHost,
     Disabled,
+    LocalOnly,
     Allowlist,
 }
 
@@ -115,6 +116,7 @@ impl AppliedWorkspacePolicy {
         let network_enforced = match network.mode {
             NetworkMode::InheritHost => true,
             NetworkMode::Disabled => runtime_capabilities.bubblewrap.ok,
+            NetworkMode::LocalOnly => false,
             NetworkMode::Allowlist => false,
         };
         let network_detail = match network.mode {
@@ -132,6 +134,12 @@ impl AppliedWorkspacePolicy {
                     "network disabled is declared but no network isolation backend is available"
                         .to_string()
                 }
+            }
+            NetworkMode::LocalOnly => {
+                format!(
+                    "local-only network is declared for {} but no local-network backend is active",
+                    network.allow_hosts.join(", ")
+                )
             }
             NetworkMode::Allowlist => {
                 format!(
@@ -158,6 +166,16 @@ impl AppliedWorkspacePolicy {
             NetworkMode::Disabled => {
                 network_status.limitations.push(
                     "network disabled is recorded in the profile but launched apps keep host network access"
+                        .to_string(),
+                );
+            }
+            NetworkMode::LocalOnly => {
+                network_status.limitations.push(
+                    "allow_hosts is recorded for local service intent, but traffic is not restricted to those local targets"
+                        .to_string(),
+                );
+                network_status.limitations.push(
+                    "launched apps keep host network access when this profile is acknowledged"
                         .to_string(),
                 );
             }
@@ -220,6 +238,7 @@ pub struct PolicyRuntimeCapabilities {
     pub slirp4netns: PolicyToolCheck,
     pub can_candidate_mounts: bool,
     pub can_candidate_disable_network: bool,
+    pub can_candidate_local_network: bool,
     pub can_candidate_network_allowlist: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_mount_backend: Option<String>,
@@ -256,6 +275,7 @@ impl PolicyRuntimeCapabilities {
         };
         let can_candidate_mounts = preferred_mount_backend.is_some();
         let can_candidate_disable_network = preferred_network_backend.is_some();
+        let can_candidate_local_network = bubblewrap.ok && slirp4netns.ok;
         let can_candidate_network_allowlist = firejail.ok || slirp4netns.ok;
         let mut notes = Vec::new();
         if bubblewrap.ok {
@@ -272,6 +292,9 @@ impl PolicyRuntimeCapabilities {
         if can_candidate_network_allowlist {
             notes.push("network allowlists still need a concrete rules backend before they can be enforced".to_string());
         }
+        if can_candidate_local_network {
+            notes.push("local-only networking still needs a bridge or proxy backend before selected local targets can be enforced".to_string());
+        }
 
         Self {
             bubblewrap,
@@ -280,6 +303,7 @@ impl PolicyRuntimeCapabilities {
             slirp4netns,
             can_candidate_mounts,
             can_candidate_disable_network,
+            can_candidate_local_network,
             can_candidate_network_allowlist,
             preferred_mount_backend,
             preferred_network_backend,
@@ -455,6 +479,47 @@ mod tests {
             .limitations
             .iter()
             .any(|limitation| limitation.contains("allow_hosts")));
+    }
+
+    #[test]
+    fn local_only_network_stays_unenforced_until_backend_exists() {
+        let policy = AppliedWorkspacePolicy::new_with_capabilities(
+            "qa-local".to_string(),
+            Vec::new(),
+            NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string(), "127.0.0.1:5173".to_string()],
+            },
+            0,
+            capabilities(true, false, false, true),
+        );
+
+        assert!(policy.enforcement.network.requested);
+        assert!(!policy.enforcement.network.enforced);
+        assert_eq!(
+            policy.enforcement.network.state,
+            Some(PolicyCapabilityState::Unenforced)
+        );
+        assert_eq!(
+            policy.enforcement.network.requires_acknowledgement,
+            Some(true)
+        );
+        assert_eq!(
+            policy
+                .enforcement
+                .network
+                .required_acknowledgement
+                .as_deref(),
+            Some("ack_unenforced_policy")
+        );
+        assert!(policy.has_requested_unenforced_policy());
+        assert!(policy.runtime_capabilities.can_candidate_local_network);
+        assert!(policy
+            .enforcement
+            .network
+            .limitations
+            .iter()
+            .any(|limitation| limitation.contains("local service intent")));
     }
 
     #[test]

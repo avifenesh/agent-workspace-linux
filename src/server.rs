@@ -268,7 +268,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_start",
-        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when available.",
+        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when available; local_only and allowlist network profiles are declared intent until dedicated backends exist.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
