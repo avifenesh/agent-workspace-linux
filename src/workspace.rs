@@ -4170,11 +4170,22 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             ),
         },
         IpcRequest::KillApp { app_id } => match kill_workspace_app(state, &app_id) {
-            Ok((message, app, _killed)) => {
+            Ok((message, app, killed)) => {
                 record_event(
                     state,
                     "kill_app",
-                    serde_json::json!({ "target": &app_id, "message": &message }),
+                    serde_json::json!({
+                        "target": &app_id,
+                        "message": &message,
+                        "killed": killed,
+                        "app_id": &app.id,
+                        "name": app.name.as_deref(),
+                        "running": app.running,
+                        "exit_code": app.exit_code,
+                        "exit_signal": app.exit_signal,
+                        "stopped_at_unix": app.stopped_at_unix,
+                        "runtime_seconds": app.runtime_seconds,
+                    }),
                 )?;
                 let mut response = response_with_status(true, message, &state.status);
                 response.apps = Some(vec![app]);
