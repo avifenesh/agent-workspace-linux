@@ -73,6 +73,7 @@ cargo run -- workspace env --shell
 cargo run -- workspace launch --dry-run --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
+cargo run -- workspace run --dry-run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
 cargo run -- workspace run --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace launch-profile-apps --dry-run --profile project-dev --wait-window --screenshot-window --window-timeout-ms 10000
@@ -258,6 +259,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   completion fields in one response. It accepts the same `--name`, `--cwd`,
   `--env`, `--profile`, and `--ack-unenforced-policy` launch shaping flags as
   `workspace launch`.
+  `--dry-run` returns the launch preview plus timeout, log-tail, and
+  kill-on-timeout options without spawning the app.
   `--kill-on-timeout` terminates the launched app process group if the timeout
   elapses, while preserving stdout/stderr logs in the response.
 - `workspace apps` lists launched apps from the daemon IPC state without dumping
@@ -420,6 +423,8 @@ policy blocks, and whether a new workspace would be created.
 `workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
 profile policy acknowledgement, isolation labels, blockers, and whether an app
 would be launched without spawning it.
+`workspace_run_app` accepts `dry_run=true` to preview the launch plus timeout,
+log-tail, and kill-on-timeout options without spawning the command.
 `workspace_launch_profile_apps` accepts `dry_run=true` to return one launch
 preview per startup app declared by the profile without spawning any of them.
 `workspace_close_window` and `workspace_close_matching_window` accept

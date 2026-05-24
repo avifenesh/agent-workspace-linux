@@ -511,6 +511,18 @@ pub struct WorkspaceRun {
     pub exit_signal: Option<i32>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceRunPreview {
+    pub workspace_id: String,
+    pub timeout_ms: Option<u64>,
+    pub effective_timeout_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail_bytes: Option<u64>,
+    pub kill_on_timeout: bool,
+    pub would_run: bool,
+    pub launch: IpcResponse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceEvent {
     pub sequence: u64,
@@ -2260,6 +2272,30 @@ pub fn run_app_with_spec(
         killed_on_timeout: timed_out && kill_on_timeout,
         exit_code,
         exit_signal,
+    })
+}
+
+pub fn preview_run_app_with_spec(
+    id: &str,
+    spec: LaunchSpec,
+    timeout_ms: Option<u64>,
+    tail_bytes: Option<u64>,
+    kill_on_timeout: bool,
+) -> Result<WorkspaceRunPreview> {
+    let id = sanitize_workspace_id(id)?;
+    let launch = preview_launch_app(&id, spec, false, None, false)?;
+    let would_run = launch
+        .launch_preview
+        .as_ref()
+        .is_some_and(|preview| preview.would_launch);
+    Ok(WorkspaceRunPreview {
+        workspace_id: id,
+        timeout_ms,
+        effective_timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        tail_bytes,
+        kill_on_timeout,
+        would_run,
+        launch,
     })
 }
 
@@ -7767,5 +7803,39 @@ mod tests {
             .blockers
             .iter()
             .any(|blocker| blocker.contains("requires acknowledgement")));
+    }
+
+    #[test]
+    fn run_preview_wraps_launch_preview_without_logs() {
+        let id = format!("run-preview-stopped-{}", std::process::id());
+        let preview = preview_run_app_with_spec(
+            &id,
+            LaunchSpec {
+                command: vec!["/bin/true".to_string()],
+                name: Some("run-probe".to_string()),
+                profile_id: None,
+                applied_policy: None,
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: Vec::new(),
+            },
+            Some(456),
+            Some(1024),
+            true,
+        )
+        .expect("run preview should return structured launch preview");
+
+        assert_eq!(preview.workspace_id, id);
+        assert_eq!(preview.timeout_ms, Some(456));
+        assert_eq!(preview.effective_timeout_ms, 456);
+        assert_eq!(preview.tail_bytes, Some(1024));
+        assert!(preview.kill_on_timeout);
+        assert!(!preview.would_run);
+        let launch_preview = preview
+            .launch
+            .launch_preview
+            .expect("run dry run should include nested launch preview");
+        assert_eq!(launch_preview.name.as_deref(), Some("run-probe"));
+        assert!(!launch_preview.would_launch);
     }
 }

@@ -167,15 +167,24 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&response)
         }
         "run" => {
-            let (id, spec, timeout_ms, tail_bytes, kill_on_timeout) =
-                parse_run_options(&args[1..])?;
-            print_json(&workspace::run_app_with_spec(
-                &id,
-                spec,
-                timeout_ms,
-                tail_bytes,
-                kill_on_timeout,
-            )?)
+            let run = parse_run_options(&args[1..])?;
+            if run.dry_run {
+                print_json(&workspace::preview_run_app_with_spec(
+                    &run.id,
+                    run.spec,
+                    run.timeout_ms,
+                    run.tail_bytes,
+                    run.kill_on_timeout,
+                )?)
+            } else {
+                print_json(&workspace::run_app_with_spec(
+                    &run.id,
+                    run.spec,
+                    run.timeout_ms,
+                    run.tail_bytes,
+                    run.kill_on_timeout,
+                )?)
+            }
         }
         "launch-profile-apps" => {
             let (id, profile_id, options) = parse_profile_launch_options(&args[1..])?;
@@ -1273,9 +1282,16 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
     bail!("workspace launch requires a command")
 }
 
-fn parse_run_options(
-    args: &[String],
-) -> Result<(String, LaunchSpec, Option<u64>, Option<u64>, bool)> {
+struct RunOptions {
+    id: String,
+    spec: LaunchSpec,
+    timeout_ms: Option<u64>,
+    tail_bytes: Option<u64>,
+    kill_on_timeout: bool,
+    dry_run: bool,
+}
+
+fn parse_run_options(args: &[String]) -> Result<RunOptions> {
     let mut id = workspace::default_workspace_id();
     let mut name = None;
     let mut profile_id = None;
@@ -1285,6 +1301,7 @@ fn parse_run_options(
     let mut timeout_ms = None;
     let mut tail_bytes = None;
     let mut kill_on_timeout = false;
+    let mut dry_run = false;
     let mut env = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -1312,6 +1329,10 @@ fn parse_run_options(
             }
             "--ack-unenforced-policy" => {
                 user_acknowledged_unenforced_policy = true;
+                index += 1;
+            }
+            "--dry-run" => {
+                dry_run = true;
                 index += 1;
             }
             "--timeout-ms" => {
@@ -1351,7 +1372,14 @@ fn parse_run_options(
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec, timeout_ms, tail_bytes, kill_on_timeout));
+                return Ok(RunOptions {
+                    id,
+                    spec,
+                    timeout_ms,
+                    tail_bytes,
+                    kill_on_timeout,
+                    dry_run,
+                });
             }
             _ => {
                 let command = args[index..].to_vec();
@@ -1370,7 +1398,14 @@ fn parse_run_options(
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec, timeout_ms, tail_bytes, kill_on_timeout));
+                return Ok(RunOptions {
+                    id,
+                    spec,
+                    timeout_ms,
+                    tail_bytes,
+                    kill_on_timeout,
+                    dry_run,
+                });
             }
         }
     }
@@ -3347,7 +3382,7 @@ Usage:
   agent-workspace-linux workspace ipc-info [--id ID]
   agent-workspace-linux workspace env [--id ID] [--shell]
   agent-workspace-linux workspace launch [--dry-run] [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] [--screenshot-window] -- COMMAND [ARGS...]
-  agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
+  agent-workspace-linux workspace run [--dry-run] [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--dry-run] [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N] [--screenshot-window]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]

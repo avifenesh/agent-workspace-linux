@@ -548,7 +548,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_run_app",
-        description = "Launch an optionally named app inside an isolated agent workspace, wait for it to exit or time out, optionally kill it on timeout, and return stdout/stderr logs in one response. The command uses the same workspace attachment environment, optional cwd/env overrides, and optional launch profile policy as workspace_launch_app.",
+        description = "Launch an optionally named app inside an isolated agent workspace, wait for it to exit or time out, optionally kill it on timeout, and return stdout/stderr logs in one response. Set dry_run=true to preview the launch and run options without spawning a process. The command uses the same workspace attachment environment, optional cwd/env overrides, and optional launch profile policy as workspace_launch_app.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -567,27 +567,45 @@ impl AgentWorkspaceLinux {
         let timeout_ms = params.timeout_ms;
         let tail_bytes = params.tail_bytes;
         let kill_on_timeout = params.kill_on_timeout;
+        let dry_run = params.dry_run;
         Json(
             match params.into_launch_spec().and_then(|spec| {
+                if dry_run {
+                    return workspace::preview_run_app_with_spec(
+                        &id,
+                        spec,
+                        timeout_ms,
+                        tail_bytes,
+                        kill_on_timeout,
+                    )
+                    .map(|preview| (None, Some(preview)));
+                }
                 workspace::run_app_with_spec(&id, spec, timeout_ms, tail_bytes, kill_on_timeout)
+                    .map(|run| (Some(run), None))
             }) {
-                Ok(run) => WorkspaceRunResult {
+                Ok((run, preview)) => WorkspaceRunResult {
                     ok: true,
-                    message: if run.succeeded {
-                        "workspace app completed successfully".to_string()
-                    } else if run.completed {
-                        "workspace app completed with non-zero status".to_string()
-                    } else if run.killed_on_timeout {
-                        "workspace app timed out and was killed".to_string()
+                    message: if let Some(run) = &run {
+                        if run.succeeded {
+                            "workspace app completed successfully".to_string()
+                        } else if run.completed {
+                            "workspace app completed with non-zero status".to_string()
+                        } else if run.killed_on_timeout {
+                            "workspace app timed out and was killed".to_string()
+                        } else {
+                            "workspace app did not complete before timeout".to_string()
+                        }
                     } else {
-                        "workspace app did not complete before timeout".to_string()
+                        "workspace run dry run returned".to_string()
                     },
-                    run: Some(run),
+                    run,
+                    preview,
                 },
                 Err(error) => WorkspaceRunResult {
                     ok: false,
                     message: error.to_string(),
                     run: None,
+                    preview: None,
                 },
             },
         )
@@ -1787,6 +1805,8 @@ struct WorkspaceRunResult {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<workspace::WorkspaceRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview: Option<workspace::WorkspaceRunPreview>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -2038,6 +2058,8 @@ struct WorkspaceRunParams {
     profile: Option<String>,
     #[serde(default)]
     acknowledge_unenforced_policy: bool,
+    #[serde(default)]
+    dry_run: bool,
     command: Vec<String>,
     #[serde(default)]
     cwd: Option<PathBuf>,
