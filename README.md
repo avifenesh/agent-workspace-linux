@@ -111,6 +111,7 @@ cargo run -- workspace events --tail 20
 cargo run -- workspace events --since 42
 cargo run -- workspace observe --events-since 42 --events-tail 20
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
+cargo run -- workspace kill-app --dry-run app-12345
 cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop --dry-run
 cargo run -- workspace stop --timeout-ms 30000
@@ -347,6 +348,8 @@ running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
 directory candidates without deleting them.
+`workspace_kill_app` accepts `dry_run=true` to resolve and return the matched
+app without terminating it.
 `workspace_stop` accepts `dry_run=true` to preview currently running apps
 without stopping the workspace. It accepts `timeout_ms` to control how long it
 waits for the daemon IPC socket to close after requesting shutdown.

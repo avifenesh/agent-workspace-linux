@@ -729,6 +729,8 @@ pub enum IpcRequest {
     },
     KillApp {
         app_id: String,
+        #[serde(default)]
+        dry_run: bool,
     },
     Stop,
 }
@@ -2001,7 +2003,7 @@ pub fn run_app_with_spec(
     let completed = wait.ok;
     let timed_out = !completed;
     let kill = if timed_out && kill_on_timeout {
-        Some(kill_app(id, app_id.clone())?)
+        Some(kill_app(id, app_id.clone(), false)?)
     } else {
         None
     };
@@ -2051,12 +2053,15 @@ pub fn read_events(
     }
 }
 
-pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
+pub fn kill_app(id: &str, app_id: String, dry_run: bool) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     if app_id.trim().is_empty() {
         bail!("app id cannot be empty");
     }
-    request(&workspace_socket_path(&id), IpcRequest::KillApp { app_id })
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::KillApp { app_id, dry_run },
+    )
 }
 
 pub fn stop_workspace(id: &str, timeout_ms: Option<u64>, dry_run: bool) -> Result<IpcResponse> {
@@ -4660,7 +4665,38 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
-        IpcRequest::KillApp { app_id } => match kill_workspace_app(state, &app_id) {
+        IpcRequest::KillApp { app_id, dry_run } if dry_run => {
+            match refresh_apps(state)
+                .and_then(|()| resolve_workspace_app(&state.status.apps, &app_id).cloned())
+            {
+                Ok(app) => {
+                    record_event(
+                        state,
+                        "kill_app_dry_run",
+                        serde_json::json!({
+                            "target": &app_id,
+                            "would_kill": app.running,
+                            "app_id": &app.id,
+                            "name": app.name.as_deref(),
+                            "running": app.running,
+                            "exit_code": app.exit_code,
+                            "exit_signal": app.exit_signal,
+                            "stopped_at_unix": app.stopped_at_unix,
+                            "runtime_seconds": app.runtime_seconds,
+                        }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace app kill dry run", &state.status);
+                    response.apps = Some(vec![app]);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
+        IpcRequest::KillApp { app_id, .. } => match kill_workspace_app(state, &app_id) {
             Ok((message, app, killed)) => {
                 record_event(
                     state,

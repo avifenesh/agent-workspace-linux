@@ -491,7 +491,7 @@ pub fn launch_profile_setup(
             let should_kill =
                 options.kill_on_timeout && !wait.ok && response_app_running(&wait, &app_id);
             if should_kill {
-                killed.push(workspace::kill_app(workspace_id, app_id.clone())?);
+                killed.push(workspace::kill_app(workspace_id, app_id.clone(), false)?);
             }
             app_ids.push(app_id);
             waited.push(wait);

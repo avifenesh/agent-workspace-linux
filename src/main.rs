@@ -580,9 +580,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&profile::launch_profile_setup(&id, &profile_id, options)?)
         }
         "kill-app" => {
-            let (id, app_id) =
-                parse_one_arg_command(&args[1..], "workspace kill-app requires an app id or pid")?;
-            print_json(&workspace::kill_app(&id, app_id)?)
+            let (id, app_id, dry_run) = parse_kill_app_options(&args[1..])?;
+            print_json(&workspace::kill_app(&id, app_id, dry_run)?)
         }
         "stop" => {
             let (id, timeout_ms, dry_run) = parse_stop_options(&args[1..])?;
@@ -2838,6 +2837,40 @@ fn parse_wait_app_options(args: &[String]) -> Result<(String, String, Option<u64
     bail!("workspace wait-app requires an app id")
 }
 
+fn parse_kill_app_options(args: &[String]) -> Result<(String, String, bool)> {
+    let mut id = workspace::default_workspace_id();
+    let mut dry_run = false;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            "--" => {
+                values.extend(args[index + 1..].iter().cloned());
+                break;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace kill-app option '{value}'")
+            }
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    if values.len() != 1 {
+        bail!("workspace kill-app requires an app id or pid");
+    }
+    Ok((id, values.remove(0), dry_run))
+}
+
 fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>, Option<u64>)> {
     let mut id = workspace::default_workspace_id();
     let mut tail = None;
@@ -3216,7 +3249,7 @@ Usage:
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] [--kill-on-timeout] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace events [--id ID] [--tail N] [--since SEQUENCE]
   agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
-  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME
+  agent-workspace-linux workspace kill-app [--id ID] [--dry-run] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace stop [--id ID] [--timeout-ms N] [--dry-run]"#
     );
 }
