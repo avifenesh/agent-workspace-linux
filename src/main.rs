@@ -68,8 +68,8 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             print_json(&profile::template_profile(&kind, id, host_path)?)
         }
         "put" => {
-            let (profile, replace) = parse_profile_put_options(&args[1..])?;
-            print_json(&profile::put_profile(profile, replace)?)
+            let (profile, replace, dry_run) = parse_profile_put_options(&args[1..])?;
+            print_json(&profile::put_profile(profile, replace, dry_run)?)
         }
         "delete" => {
             let (id, dry_run) = parse_profile_delete_options(&args[1..])?;
@@ -971,9 +971,10 @@ fn parse_required_id_arg(args: &[String], missing_message: &str) -> Result<Strin
     Ok(args[0].clone())
 }
 
-fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool)> {
+fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool, bool)> {
     let mut json_path = None;
     let mut replace = false;
+    let mut dry_run = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -985,7 +986,13 @@ fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool)
                 replace = true;
                 index += 1;
             }
-            flag => bail!("unknown profile put option '{flag}'. Expected: --json PATH [--replace]"),
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            flag => {
+                bail!("unknown profile put option '{flag}'. Expected: --json PATH [--replace] [--dry-run]")
+            }
         }
     }
     let json_path = json_path.context("profile put requires --json PATH")?;
@@ -993,7 +1000,7 @@ fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool)
         .with_context(|| format!("failed to read {}", json_path.display()))?;
     let profile = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse profile JSON from {}", json_path.display()))?;
-    Ok((profile, replace))
+    Ok((profile, replace, dry_run))
 }
 
 fn parse_profile_template_options(
@@ -3228,7 +3235,7 @@ Usage:
   agent-workspace-linux doctor
   agent-workspace-linux mcp
   agent-workspace-linux profile path|list|get|check|template|put|delete
-  agent-workspace-linux profile put --json PATH [--replace]
+  agent-workspace-linux profile put --json PATH [--replace] [--dry-run]
   agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]

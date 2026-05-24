@@ -38,7 +38,9 @@ cargo run -- doctor
 cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
+cargo run -- profile put --json ./profile.json --dry-run
 cargo run -- profile put --json ./profile.json
+cargo run -- profile put --json ./profile.json --dry-run --replace
 cargo run -- profile put --json ./profile.json --replace
 cargo run -- profile get project-dev
 cargo run -- profile check project-dev
@@ -149,8 +151,11 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
   profile width/height are applied unless explicit flags override them, and the
   profile's mounts/network/setup intent is snapshotted into status.
-- `profile put --json` creates a saved profile by id. If that id already
-  exists, it fails unless `--replace` is passed explicitly.
+- `profile put --json --dry-run` previews whether the profile would be created,
+  replaced, or rejected without writing. Its response includes the requested
+  profile and, when the id already exists, the existing saved profile.
+  `profile put --json` creates a saved profile by id. If that id already exists,
+  it fails unless `--replace` is passed explicitly.
 - `profile delete --dry-run` returns the saved profile that would be removed
   without deleting it, so a UI can ask for confirmation with the full profile
   content visible.
@@ -356,8 +361,9 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 app id/pid/name, app name substring, command substring, profile id, or
 running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
-`profile_put` rejects existing profile ids by default; set `replace=true` only
-when intentionally overwriting a saved environment profile.
+`profile_put` accepts `dry_run=true` to preview whether a profile would be
+created, replaced, or rejected. It rejects existing profile ids by default; set
+`replace=true` only when intentionally overwriting a saved environment profile.
 `profile_delete` accepts `dry_run=true` to return the profile that would be
 removed without deleting it.
 `workspace_close_window` and `workspace_close_matching_window` accept

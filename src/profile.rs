@@ -85,6 +85,45 @@ pub struct ProfileDeleteResult {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfilePutResult {
+    pub ok: bool,
+    pub message: String,
+    pub id: String,
+    pub action: String,
+    pub saved: bool,
+    pub created: bool,
+    pub replaced: bool,
+    pub would_create: bool,
+    pub would_replace: bool,
+    pub replace: bool,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<WorkspaceProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_profile: Option<WorkspaceProfile>,
+}
+
+impl ProfilePutResult {
+    pub fn error(profile: WorkspaceProfile, replace: bool, dry_run: bool, message: String) -> Self {
+        Self {
+            ok: false,
+            message,
+            id: profile.id.clone(),
+            action: "error".to_string(),
+            saved: false,
+            created: false,
+            replaced: false,
+            would_create: false,
+            would_replace: false,
+            replace,
+            dry_run,
+            profile: Some(profile),
+            existing_profile: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ProfileCheck {
     pub profile: WorkspaceProfile,
     pub applied_policy: AppliedWorkspacePolicy,
@@ -242,28 +281,77 @@ pub fn check_profile(id: &str) -> Result<ProfileCheck> {
     })
 }
 
-pub fn put_profile(profile: WorkspaceProfile, replace: bool) -> Result<WorkspaceProfile> {
+pub fn put_profile(
+    profile: WorkspaceProfile,
+    replace: bool,
+    dry_run: bool,
+) -> Result<ProfilePutResult> {
     validate_profile(&profile)?;
     let path = profiles_path();
     let mut store = read_store(&path)?;
-    if let Some(existing) = store
+    let existing_index = store
         .profiles
-        .iter_mut()
-        .find(|existing| existing.id == profile.id)
-    {
-        if !replace {
+        .iter()
+        .position(|existing| existing.id == profile.id);
+    let existing_profile = existing_index.map(|index| store.profiles[index].clone());
+    let action = match (&existing_profile, replace) {
+        (None, _) => "create",
+        (Some(_), true) => "replace",
+        (Some(_), false) => "reject_existing",
+    };
+    let would_create = existing_profile.is_none();
+    let would_replace = existing_profile.is_some() && replace;
+
+    if !dry_run {
+        if let Some(index) = existing_index {
+            if !replace {
+                bail!(
+                    "profile {:?} already exists; pass --replace or set replace=true to overwrite it",
+                    profile.id
+                );
+            }
+            store.profiles[index] = profile.clone();
+        } else {
+            store.profiles.push(profile.clone());
+        }
+        store.profiles.sort_by(|left, right| left.id.cmp(&right.id));
+        write_store(&path, &store)?;
+    }
+
+    let saved = !dry_run && action != "reject_existing";
+    let created = saved && action == "create";
+    let replaced = saved && action == "replace";
+    let message = match (dry_run, action) {
+        (true, "create") => "profile put dry run: profile would be created",
+        (true, "replace") => "profile put dry run: profile would be replaced",
+        (true, "reject_existing") => {
+            "profile put dry run: profile exists and requires replace=true to overwrite"
+        }
+        (false, "create") => "profile created",
+        (false, "replace") => "profile replaced",
+        _ => {
             bail!(
                 "profile {:?} already exists; pass --replace or set replace=true to overwrite it",
                 profile.id
             );
         }
-        *existing = profile.clone();
-    } else {
-        store.profiles.push(profile.clone());
-    }
-    store.profiles.sort_by(|left, right| left.id.cmp(&right.id));
-    write_store(&path, &store)?;
-    Ok(profile)
+    };
+
+    Ok(ProfilePutResult {
+        ok: true,
+        message: message.to_string(),
+        id: profile.id.clone(),
+        action: action.to_string(),
+        saved,
+        created,
+        replaced,
+        would_create,
+        would_replace,
+        replace,
+        dry_run,
+        profile: Some(profile),
+        existing_profile,
+    })
 }
 
 pub fn delete_profile(id: &str, dry_run: bool) -> Result<ProfileDeleteResult> {
