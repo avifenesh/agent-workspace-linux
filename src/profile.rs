@@ -79,7 +79,22 @@ pub struct ProfileCheck {
 pub struct ProfileSetupRun {
     pub workspace_id: String,
     pub profile_id: String,
+    pub wait: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
     pub launched: Vec<IpcResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waited: Vec<IpcResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub succeeded: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfileSetupOptions {
+    pub wait: bool,
+    pub timeout_ms: Option<u64>,
 }
 
 pub fn profiles_path() -> PathBuf {
@@ -353,17 +368,65 @@ pub fn setup_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
         .collect()
 }
 
-pub fn launch_profile_setup(workspace_id: &str, profile_id: &str) -> Result<ProfileSetupRun> {
+pub fn launch_profile_setup(
+    workspace_id: &str,
+    profile_id: &str,
+    options: ProfileSetupOptions,
+) -> Result<ProfileSetupRun> {
     let specs = setup_launch_specs(profile_id)?;
     let mut launched = Vec::new();
+    let mut waited = Vec::new();
+    let mut app_ids = Vec::new();
     for spec in specs {
-        launched.push(workspace::launch_app_with_spec(workspace_id, spec)?);
+        let launch = workspace::launch_app_with_spec(workspace_id, spec)?;
+        if options.wait {
+            let app_id = launched_app_id(&launch)
+                .context("profile setup launch did not return an app id")?;
+            let wait = workspace::wait_app(workspace_id, app_id.clone(), options.timeout_ms)?;
+            app_ids.push(app_id);
+            waited.push(wait);
+        }
+        launched.push(launch);
     }
+    let completed = options
+        .wait
+        .then(|| waited.iter().all(|response| response.ok));
+    let succeeded = options.wait.then(|| {
+        completed.unwrap_or(false)
+            && waited
+                .iter()
+                .zip(app_ids.iter())
+                .all(|(response, app_id)| response_app_exit_code(response, app_id) == Some(0))
+    });
     Ok(ProfileSetupRun {
         workspace_id: workspace_id.to_string(),
         profile_id: profile_id.to_string(),
+        wait: options.wait,
+        timeout_ms: options.timeout_ms,
         launched,
+        waited,
+        completed,
+        succeeded,
     })
+}
+
+fn launched_app_id(response: &IpcResponse) -> Option<String> {
+    response
+        .status
+        .as_ref()?
+        .apps
+        .last()
+        .map(|app| app.id.clone())
+}
+
+fn response_app_exit_code(response: &IpcResponse, app_id: &str) -> Option<i32> {
+    response
+        .status
+        .as_ref()?
+        .apps
+        .iter()
+        .find(|app| app.id == app_id || app.pid.to_string() == app_id)?
+        .exit_code
 }
 
 fn merged_env(mut base: Vec<EnvVar>, overrides: Vec<EnvVar>) -> Vec<EnvVar> {

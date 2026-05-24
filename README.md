@@ -59,7 +59,7 @@ cargo run -- workspace type "hello from the agent workspace"
 cargo run -- workspace logs --stream stdout app-12345
 cargo run -- workspace wait-app --timeout-ms 30000 app-12345
 cargo run -- workspace events --tail 20
-cargo run -- workspace setup --profile project-dev
+cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000
 cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop
 cargo run -- mcp
@@ -116,8 +116,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   App launches and exits are recorded with structured metadata. Typed text is
   logged as metadata such as character count, not raw text.
 - `workspace setup --profile` launches the profile's setup commands as ordinary
-  workspace apps; their status and logs are available through the same app
-  status/log tools.
+  workspace apps; with `--wait`, commands are supervised in sequence and the
+  result reports whether they completed and exited successfully. Their status
+  and logs are available through the same app status/log tools.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
   hidden-workspace acknowledgement, unenforced-policy acknowledgement, applied
