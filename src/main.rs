@@ -171,12 +171,23 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::active_window(&id)?)
         }
         "observe" => {
-            let (id, screenshot, include_hidden, output_path) = parse_observe_options(&args[1..])?;
+            let (
+                id,
+                screenshot,
+                include_hidden,
+                output_path,
+                include_events,
+                events_tail,
+                events_since_sequence,
+            ) = parse_observe_options(&args[1..])?;
             print_json(&workspace::observe(
                 &id,
                 screenshot,
                 include_hidden,
                 output_path,
+                include_events,
+                events_tail,
+                events_since_sequence,
             )?)
         }
         "wait-window" => {
@@ -1150,11 +1161,24 @@ fn parse_screenshot_options(args: &[String]) -> Result<(String, Option<PathBuf>)
     Ok((id, output_path))
 }
 
-fn parse_observe_options(args: &[String]) -> Result<(String, bool, bool, Option<PathBuf>)> {
+type ObserveOptions = (
+    String,
+    bool,
+    bool,
+    Option<PathBuf>,
+    bool,
+    Option<usize>,
+    Option<u64>,
+);
+
+fn parse_observe_options(args: &[String]) -> Result<ObserveOptions> {
     let mut id = workspace::default_workspace_id();
     let mut screenshot = false;
     let mut include_hidden = false;
     let mut output_path = None;
+    let mut include_events = false;
+    let mut events_tail = None;
+    let mut events_since_sequence = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -1174,13 +1198,43 @@ fn parse_observe_options(args: &[String]) -> Result<(String, bool, bool, Option<
                 output_path = Some(PathBuf::from(value_after(args, index, "--output")?));
                 index += 2;
             }
+            "--events" => {
+                include_events = true;
+                index += 1;
+            }
+            "--events-tail" => {
+                include_events = true;
+                events_tail = Some(
+                    value_after(args, index, "--events-tail")?
+                        .parse()
+                        .context("--events-tail must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--events-since" => {
+                include_events = true;
+                events_since_sequence = Some(
+                    value_after(args, index, "--events-since")?
+                        .parse()
+                        .context("--events-since must be a non-negative integer")?,
+                );
+                index += 2;
+            }
             flag => bail!("unknown workspace observe option '{flag}'"),
         }
     }
     if output_path.is_some() && !screenshot {
         bail!("workspace observe --output requires --screenshot");
     }
-    Ok((id, screenshot, include_hidden, output_path))
+    Ok((
+        id,
+        screenshot,
+        include_hidden,
+        output_path,
+        include_events,
+        events_tail,
+        events_since_sequence,
+    ))
 }
 
 type ScreenshotWindowOptions = (
@@ -2960,7 +3014,7 @@ Usage:
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]
-  agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]
+  agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH] [--events] [--events-tail N] [--events-since SEQUENCE]
   agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace screenshot [--id ID] [--output PATH]
   agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--output PATH] [--timeout-ms N]

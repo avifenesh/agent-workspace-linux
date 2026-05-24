@@ -102,6 +102,7 @@ cargo run -- workspace wait-app --timeout-ms 30000 --kill-on-timeout test-suite
 cargo run -- workspace wait-app --timeout-ms 30000 terminal
 cargo run -- workspace events --tail 20
 cargo run -- workspace events --since 42
+cargo run -- workspace observe --events-since 42 --events-tail 20
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
 cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop --timeout-ms 30000
@@ -194,8 +195,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--pid`, or `--app`. `active-window` reports the current workspace-local focus,
   and `observe` returns status, apps, windows, active window, and optionally a
   root screenshot in one IPC call. Screenshot records include path, dimensions,
-  PNG byte size, and capture timestamp. `observe --all-windows` uses the same
-  hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
+  PNG byte size, and capture timestamp. `observe --events`, `--events-tail`,
+  and `--events-since` include recent or incremental event records in the same
+  IPC response. `observe --all-windows` uses the same hidden-window listing as
+  `windows --all`. `focus-window`, `screenshot-window`,
   `close-window`, `move-window`, `resize-window`, `raise-window`,
   `minimize-window`, `key-window`, and `type-window` can use either a raw X11
   window id or the same title/class/pid/app filters as `wait-window`; class
@@ -286,4 +289,5 @@ setup-command cleanup behavior.
 pid, app id, or app name, with class matching `wm_class` and `wm_instance`.
 `workspace_list_windows` accepts `include_hidden=true` to return
 minimized/hidden windows as well as visible windows. `workspace_observe` also
-accepts `include_hidden=true`.
+accepts `include_hidden=true` plus `events`, `events_tail`, and
+`events_since_sequence` for single-call polling.

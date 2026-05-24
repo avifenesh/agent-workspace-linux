@@ -520,7 +520,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_observe",
-        description = "Return status, windows, active window, and optionally a root screenshot for an isolated agent workspace. By default windows are visible-only; set include_hidden=true to include minimized/hidden windows.",
+        description = "Return status, windows, active window, optional root screenshot, and optional recent/incremental events for an isolated agent workspace. By default windows are visible-only; set include_hidden=true to include minimized/hidden windows.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -540,6 +540,9 @@ impl AgentWorkspaceLinux {
             params.screenshot,
             params.include_hidden,
             params.output_path,
+            params.events,
+            params.events_tail,
+            params.events_since_sequence,
         )))
     }
 
@@ -1839,6 +1842,12 @@ struct WorkspaceObserveParams {
     include_hidden: bool,
     #[serde(default)]
     output_path: Option<PathBuf>,
+    #[serde(default)]
+    events: bool,
+    #[serde(default)]
+    events_tail: Option<usize>,
+    #[serde(default)]
+    events_since_sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]

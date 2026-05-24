@@ -397,6 +397,12 @@ pub enum IpcRequest {
         #[serde(default)]
         include_hidden: bool,
         output_path: Option<PathBuf>,
+        #[serde(default)]
+        include_events: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        events_tail: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        events_since_sequence: Option<u64>,
     },
     WaitWindow {
         title_contains: Option<String>,
@@ -967,6 +973,9 @@ pub fn observe(
     screenshot: bool,
     include_hidden: bool,
     output_path: Option<PathBuf>,
+    include_events: bool,
+    events_tail: Option<usize>,
+    events_since_sequence: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(
@@ -975,6 +984,9 @@ pub fn observe(
             screenshot,
             include_hidden,
             output_path,
+            include_events,
+            events_tail,
+            events_since_sequence,
         },
     )
 }
@@ -2193,6 +2205,9 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             screenshot,
             include_hidden,
             output_path,
+            include_events,
+            events_tail,
+            events_since_sequence,
         } => match observe_workspace(state, screenshot, include_hidden, output_path) {
             Ok(mut response) => {
                 record_event(
@@ -2203,10 +2218,28 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "include_hidden": include_hidden,
                         "active_window_id": response.active_window.as_ref().map(|window| window.id.as_str()),
                         "screenshot": response.screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
+                        "events": include_events,
+                        "events_tail": events_tail,
+                        "events_since_sequence": events_since_sequence,
                     }),
                 )?;
-                response.status = Some(state.status.clone());
-                (response, false)
+                let event_read_error = if include_events {
+                    match read_event_log(&state.event_path, events_tail, events_since_sequence) {
+                        Ok(events) => {
+                            response.events = Some(events);
+                            None
+                        }
+                        Err(error) => Some(error.to_string()),
+                    }
+                } else {
+                    None
+                };
+                if let Some(message) = event_read_error {
+                    (response_with_status(false, message, &state.status), false)
+                } else {
+                    response.status = Some(state.status.clone());
+                    (response, false)
+                }
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
