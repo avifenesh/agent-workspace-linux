@@ -76,4 +76,5 @@ Post-patch verification:
   `network.mode=local_only`, `network.mode=disabled`, read-write/read-only mount
   enforcement, session tracking, a real X11 window with screenshot, window
   listing, clipboard, keyboard input, app wait, artifact inspection, event
-  history, and stopped manifests.
+  history, stopped manifests, and daemon-crash recovery where stale cleanup
+  removes manifest-recorded orphan app and X11 runtime processes.

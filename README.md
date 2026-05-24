@@ -309,8 +309,12 @@ exiting.
   the path exists, its filesystem type, and byte size for regular files.
   `--existing` returns only paths that currently exist.
 - `workspace cleanup --dry-run` previews stale workspace runtime directories in
-  `candidates` without deleting them. `workspace cleanup` removes those stale
-  runtime directories while skipping running workspaces.
+  `candidates` without deleting files or signaling processes. Candidates
+  include `process_cleanup` actions for manifest-recorded orphan app process
+  groups, X server, window manager, and daemon PIDs when the process identity
+  can be verified. `workspace cleanup` runs those best-effort process cleanup
+  actions and removes stale runtime directories while skipping running
+  workspaces.
 - `workspace launch --dry-run` previews the command, cwd/env overrides, launch
   profile policy, acknowledgement requirements, mount/network isolation labels,
   and whether the app would launch without spawning a process or adding an app
@@ -539,7 +543,8 @@ fail instead of starting a workspace when no daemon exists.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
-directory candidates without deleting them.
+directory candidates and verified orphan process cleanup without deleting files
+or signaling processes.
 `workspace_kill_app` accepts `dry_run=true` to resolve and return the matched
 app without terminating it.
 `workspace_stop` accepts `dry_run=true` to preview currently running apps

@@ -23,6 +23,7 @@ RUNTIME_DIR="$SMOKE_DIR/runtime"
 mkdir -p "$CONFIG_DIR" "$RUNTIME_DIR"
 
 WORKSPACE_IDS=()
+STALE_CLEANUP_IDS=()
 
 run_awl() {
   XDG_CONFIG_HOME="$CONFIG_DIR" XDG_RUNTIME_DIR="$RUNTIME_DIR" "$BIN" "$@"
@@ -32,6 +33,9 @@ cleanup() {
   exit_code=$?
   for workspace_id in "${WORKSPACE_IDS[@]:-}"; do
     run_awl workspace stop --id "$workspace_id" >/dev/null 2>&1 || true
+  done
+  for workspace_id in "${STALE_CLEANUP_IDS[@]:-}"; do
+    run_awl workspace cleanup --id "$workspace_id" >/dev/null 2>&1 || true
   done
   if [[ "$exit_code" -eq 0 ]]; then
     rm -rf "$SMOKE_DIR"
@@ -46,6 +50,45 @@ assert_json() {
   local file="$2"
   shift 2
   jq -e "$@" "$filter" "$file" >/dev/null
+}
+
+pid_alive() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 0 ]] && kill -0 "$pid" 2>/dev/null
+}
+
+pgid_alive() {
+  local pgid="$1"
+  [[ "$pgid" =~ ^[0-9]+$ ]] && [[ "$pgid" -gt 0 ]] || return 1
+  ps -eo pgid= | tr -d ' ' | grep -qx "$pgid"
+}
+
+wait_pid_gone() {
+  local label="$1"
+  local pid="$2"
+  [[ -n "$pid" && "$pid" != "null" ]] || return 0
+  for _ in {1..40}; do
+    if ! pid_alive "$pid"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$label pid $pid is still running" >&2
+  return 1
+}
+
+wait_pgid_gone() {
+  local label="$1"
+  local pgid="$2"
+  [[ -n "$pgid" && "$pgid" != "null" ]] || return 0
+  for _ in {1..40}; do
+    if ! pgid_alive "$pgid"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$label process group $pgid is still running" >&2
+  return 1
 }
 
 echo "== doctor =="
@@ -245,6 +288,41 @@ assert_json '.ok == true and .apps[0].running == false and .apps[0].exit_code ==
 run_awl workspace stop --id "$GUI_ID" > /dev/null
 run_awl workspace artifacts --id "$GUI_ID" --existing > "$SMOKE_DIR/gui-artifacts.json"
 assert_json '(.files[] | select(.kind == "manifest" and .exists == true)) and (.files[] | select(.kind == "event_log" and .exists == true and .bytes > 0)) and (.files[] | select(.kind == "app_log" and .exists == true)) and (.files[] | select(.kind == "screenshot" and .exists == true and .bytes > 0))' "$SMOKE_DIR/gui-artifacts.json"
+
+echo "== crashed-daemon stale cleanup =="
+CRASH_ID="crash-cleanup-smoke-$$"
+WORKSPACE_IDS+=("$CRASH_ID")
+STALE_CLEANUP_IDS+=("$CRASH_ID")
+run_awl workspace start --ack-hidden-workspace --id "$CRASH_ID" --purpose "Crash cleanup smoke" > "$SMOKE_DIR/crash-start.json"
+run_awl workspace status --id "$CRASH_ID" > "$SMOKE_DIR/crash-status.json"
+CRASH_DAEMON_PID="$(jq -r '.daemon_pid // empty' "$SMOKE_DIR/crash-status.json")"
+CRASH_X_PID="$(jq -r '.x_server_pid // empty' "$SMOKE_DIR/crash-status.json")"
+CRASH_WM_PID="$(jq -r '.window_manager_pid // empty' "$SMOKE_DIR/crash-status.json")"
+test -n "$CRASH_DAEMON_PID"
+test -n "$CRASH_X_PID"
+run_awl workspace launch --id "$CRASH_ID" --name sleepy -- sleep 1000 > "$SMOKE_DIR/crash-launch.json"
+assert_json '.ok == true and .apps[0].name == "sleepy" and .apps[0].running == true and .apps[0].process_group_id != null' "$SMOKE_DIR/crash-launch.json"
+CRASH_APP_PID="$(jq -r '.apps[0].pid' "$SMOKE_DIR/crash-launch.json")"
+CRASH_APP_PGID="$(jq -r '.apps[0].process_group_id' "$SMOKE_DIR/crash-launch.json")"
+kill -9 "$CRASH_DAEMON_PID"
+wait_pid_gone "workspace daemon" "$CRASH_DAEMON_PID"
+for _ in {1..40}; do
+  run_awl workspace list > "$SMOKE_DIR/crash-list.json"
+  if jq -e --arg id "$CRASH_ID" '.workspaces[] | select(.id == $id and .running == false)' "$SMOKE_DIR/crash-list.json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+assert_json '.workspaces[] | select(.id == $id and .running == false)' "$SMOKE_DIR/crash-list.json" --arg id "$CRASH_ID"
+run_awl workspace cleanup --dry-run --id "$CRASH_ID" > "$SMOKE_DIR/crash-cleanup-dry.json"
+assert_json '.candidates[] | select(.id == $id and (.process_cleanup[] | contains("would terminate app sleepy process group")) and (.process_cleanup[] | contains("would terminate X server pid")))' "$SMOKE_DIR/crash-cleanup-dry.json" --arg id "$CRASH_ID"
+run_awl workspace cleanup --id "$CRASH_ID" > "$SMOKE_DIR/crash-cleanup.json"
+assert_json '.removed[] | select(.id == $id and (.process_cleanup[] | contains("terminated app sleepy process group")))' "$SMOKE_DIR/crash-cleanup.json" --arg id "$CRASH_ID"
+wait_pgid_gone "sleepy app" "$CRASH_APP_PGID"
+wait_pid_gone "sleepy app" "$CRASH_APP_PID"
+wait_pid_gone "window manager" "$CRASH_WM_PID"
+wait_pid_gone "X server" "$CRASH_X_PID"
+test ! -d "$RUNTIME_DIR/agent-workspace-linux/$CRASH_ID"
 
 echo "== self-stop from workspace app =="
 SELF_STOP_ID="self-stop-smoke-$$"

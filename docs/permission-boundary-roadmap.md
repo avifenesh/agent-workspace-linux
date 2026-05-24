@@ -108,6 +108,8 @@ Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
   failed writes to read-only mounts.
 - Verify screenshots, window listing, input, clipboard, app logs, events, and
   cleanup across both successful and failed app launches.
+- Verify daemon-crash recovery cleans manifest-recorded orphan app process
+  groups and X11 runtime processes before hard permission enforcement.
 - Keep network allowlist marked as declared intent until a real filtering
   backend exists and is tested.
 

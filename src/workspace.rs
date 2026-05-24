@@ -199,6 +199,8 @@ pub struct WorkspaceStatus {
     pub runtime_dir: PathBuf,
     pub socket_path: PathBuf,
     pub xauthority_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_pid: Option<u32>,
     pub x_server_pid: u32,
     pub window_manager_pid: Option<u32>,
     #[serde(default)]
@@ -286,6 +288,12 @@ pub struct WorkspaceManifest {
     pub runtime_dir: PathBuf,
     pub socket_path: PathBuf,
     pub xauthority_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_server_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_manager_pid: Option<u32>,
     #[serde(default)]
     pub event_log_path: PathBuf,
     #[serde(default)]
@@ -313,6 +321,8 @@ pub struct WorkspaceCleanupEntry {
     pub id: String,
     pub runtime_dir: PathBuf,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub process_cleanup: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1299,15 +1309,19 @@ pub fn cleanup_stale_workspaces(id: Option<String>, dry_run: bool) -> Result<Wor
                 id: workspace.id,
                 runtime_dir: workspace.runtime_dir,
                 reason: "workspace is running".to_string(),
+                process_cleanup: Vec::new(),
             });
             continue;
         }
 
+        let process_cleanup =
+            cleanup_stale_workspace_processes(workspace.manifest.as_ref(), dry_run);
         if dry_run {
             candidates.push(WorkspaceCleanupEntry {
                 id: workspace.id,
                 runtime_dir: workspace.runtime_dir,
                 reason: "would remove stale workspace runtime".to_string(),
+                process_cleanup,
             });
             continue;
         }
@@ -1317,11 +1331,13 @@ pub fn cleanup_stale_workspaces(id: Option<String>, dry_run: bool) -> Result<Wor
                 id: workspace.id,
                 runtime_dir: workspace.runtime_dir,
                 reason: "removed stale workspace runtime".to_string(),
+                process_cleanup,
             }),
             Err(error) => skipped.push(WorkspaceCleanupEntry {
                 id: workspace.id,
                 runtime_dir: workspace.runtime_dir,
                 reason: error.to_string(),
+                process_cleanup,
             }),
         }
     }
@@ -1333,6 +1349,211 @@ pub fn cleanup_stale_workspaces(id: Option<String>, dry_run: bool) -> Result<Wor
         removed,
         skipped,
     })
+}
+
+fn cleanup_stale_workspace_processes(
+    manifest: Option<&WorkspaceManifest>,
+    dry_run: bool,
+) -> Vec<String> {
+    let Some(manifest) = manifest else {
+        return Vec::new();
+    };
+    let mut actions = Vec::new();
+
+    for app in &manifest.apps {
+        cleanup_stale_app_process_group(app, dry_run, &mut actions);
+    }
+    if let Some(pid) = manifest.window_manager_pid {
+        cleanup_stale_process_pid(pid, "window manager", &["openbox"], dry_run, &mut actions);
+    }
+    if let Some(pid) = manifest.x_server_pid {
+        cleanup_stale_process_pid(pid, "X server", &["Xvfb"], dry_run, &mut actions);
+    }
+    if let Some(pid) = manifest.daemon_pid {
+        cleanup_stale_process_pid(
+            pid,
+            "workspace daemon",
+            &["agent-workspace-linux"],
+            dry_run,
+            &mut actions,
+        );
+    }
+
+    actions
+}
+
+fn cleanup_stale_app_process_group(app: &WorkspaceApp, dry_run: bool, actions: &mut Vec<String>) {
+    if !app.running {
+        return;
+    }
+    let app_label = app.name.as_deref().unwrap_or(app.id.as_str());
+    let Some(pgid) = app.process_group_id else {
+        actions.push(format!(
+            "skipped app {} process group: no process group recorded",
+            app_label
+        ));
+        return;
+    };
+    if pgid == 0 {
+        return;
+    }
+    if !process_is_alive(app.pid) {
+        actions.push(format!(
+            "skipped app {} process group {pgid}: leader pid {} is not running",
+            app_label, app.pid
+        ));
+        return;
+    }
+    match linux_process_group_id(app.pid) {
+        Some(actual_pgid) if actual_pgid == pgid => {}
+        Some(actual_pgid) => {
+            actions.push(format!(
+                "skipped app {} process group {pgid}: leader pid {} is in process group {actual_pgid}",
+                app_label, app.pid
+            ));
+            return;
+        }
+        None => {
+            actions.push(format!(
+                "skipped app {} process group {pgid}: could not verify leader pid {}",
+                app_label, app.pid
+            ));
+            return;
+        }
+    }
+
+    if dry_run {
+        actions.push(format!(
+            "would terminate app {} process group {pgid}",
+            app_label
+        ));
+        return;
+    }
+
+    match terminate_process_group_best_effort(pgid, Some(app.pid)) {
+        Ok(()) => actions.push(format!("terminated app {} process group {pgid}", app_label)),
+        Err(error) => actions.push(format!(
+            "failed to terminate app {} process group {pgid}: {error}",
+            app_label
+        )),
+    }
+}
+
+fn cleanup_stale_process_pid(
+    pid: u32,
+    label: &str,
+    expected_names: &[&str],
+    dry_run: bool,
+    actions: &mut Vec<String>,
+) {
+    if pid == 0 || !process_is_alive(pid) {
+        return;
+    }
+    if !process_matches_any_name(pid, expected_names) {
+        actions.push(format!(
+            "skipped {label} pid {pid}: process identity did not match {}",
+            expected_names.join("/")
+        ));
+        return;
+    }
+
+    if dry_run {
+        actions.push(format!("would terminate {label} pid {pid}"));
+        return;
+    }
+
+    match terminate_process_pid_best_effort(pid) {
+        Ok(()) => actions.push(format!("terminated {label} pid {pid}")),
+        Err(error) => actions.push(format!("failed to terminate {label} pid {pid}: {error}")),
+    }
+}
+
+fn terminate_process_group_best_effort(pgid: u32, leader_pid: Option<u32>) -> Result<()> {
+    signal_process_group(pgid, SIGTERM)?;
+    if wait_for_process_exit(leader_pid, Duration::from_millis(APP_TERMINATE_GRACE_MS)) {
+        return Ok(());
+    }
+    signal_process_group(pgid, SIGKILL)?;
+    let _ = wait_for_process_exit(leader_pid, Duration::from_millis(APP_TERMINATE_GRACE_MS));
+    Ok(())
+}
+
+fn terminate_process_pid_best_effort(pid: u32) -> Result<()> {
+    signal_process_pid(pid, SIGTERM)?;
+    if wait_for_process_exit(Some(pid), Duration::from_millis(APP_TERMINATE_GRACE_MS)) {
+        return Ok(());
+    }
+    signal_process_pid(pid, SIGKILL)?;
+    let _ = wait_for_process_exit(Some(pid), Duration::from_millis(APP_TERMINATE_GRACE_MS));
+    Ok(())
+}
+
+fn wait_for_process_exit(pid: Option<u32>, timeout: Duration) -> bool {
+    let Some(pid) = pid else {
+        return false;
+    };
+    let started = Instant::now();
+    loop {
+        if !process_is_alive(pid) {
+            return true;
+        }
+        if started.elapsed() >= timeout {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn signal_process_pid(pid: u32, signal: i32) -> Result<()> {
+    if pid > i32::MAX as u32 {
+        bail!("process id {pid} is too large to signal");
+    }
+    let result = unsafe { kill(pid as i32, signal) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(ESRCH) {
+        return Ok(());
+    }
+    Err(error).with_context(|| format!("failed to signal process pid {pid}"))
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    if pid == 0 || pid > i32::MAX as u32 {
+        return false;
+    }
+    let result = unsafe { kill(pid as i32, 0) };
+    if result == 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() != Some(ESRCH)
+}
+
+fn process_matches_any_name(pid: u32, expected_names: &[&str]) -> bool {
+    let comm = fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+    let cmdline = fs::read(format!("/proc/{pid}/cmdline"))
+        .map(|bytes| {
+            bytes
+                .split(|byte| *byte == b'\0')
+                .filter_map(|part| std::str::from_utf8(part).ok())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    expected_names.iter().any(|name| {
+        let name = *name;
+        comm.trim() == name || cmdline.contains(name)
+    })
+}
+
+fn linux_process_group_id(pid: u32) -> Option<u32> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(") ")?.1;
+    let mut fields = after_comm.split_whitespace();
+    let _state = fields.next()?;
+    let _ppid = fields.next()?;
+    fields.next()?.parse().ok()
 }
 
 pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
@@ -2489,6 +2710,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
             runtime_dir: options.runtime_dir,
             socket_path: options.socket_path,
             xauthority_path: options.xauthority_path,
+            daemon_pid: Some(std::process::id()),
             x_server_pid: x_server.id(),
             window_manager_pid: window_manager.as_ref().map(Child::id),
             last_event_sequence: 0,
@@ -2823,6 +3045,9 @@ fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) ->
         runtime_dir: status.runtime_dir.clone(),
         socket_path: status.socket_path.clone(),
         xauthority_path: status.xauthority_path.clone(),
+        daemon_pid: status.daemon_pid,
+        x_server_pid: Some(status.x_server_pid),
+        window_manager_pid: status.window_manager_pid,
         event_log_path: status.runtime_dir.join(EVENT_LOG_FILE),
         daemon_stdout_path: status.runtime_dir.join("daemon.out.log"),
         daemon_stderr_path: status.runtime_dir.join("daemon.err.log"),
@@ -2953,6 +3178,7 @@ fn record_event(
     serde_json::to_writer(&mut file, &event).context("failed to serialize workspace event")?;
     file.write_all(b"\n")
         .with_context(|| format!("failed to write {}", state.event_path.display()))?;
+    write_workspace_manifest(&state.status, None)?;
     Ok(event)
 }
 
@@ -7991,6 +8217,7 @@ mod tests {
             runtime_dir: PathBuf::from("/tmp/qa-ws"),
             socket_path: PathBuf::from("/tmp/qa-ws/control.sock"),
             xauthority_path: PathBuf::from("/tmp/qa-ws/Xauthority"),
+            daemon_pid: None,
             x_server_pid: 0,
             window_manager_pid: None,
             last_event_sequence: 0,
