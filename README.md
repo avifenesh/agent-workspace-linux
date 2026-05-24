@@ -438,6 +438,7 @@ flags, MCP parameters, and non-approval blockers.
 `workspace_open_profile` accepts `dry_run=true` to preview the profile-backed
 start, setup, and startup plan without creating a workspace. Its `approval`
 bundle merges the start, setup, and startup approval requirements.
+These two dry-run tools are pre-daemon previews.
 `workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
 profile policy acknowledgement, isolation labels, blockers, and whether an app
 would be launched without spawning it. This requires a running workspace daemon.
@@ -450,6 +451,8 @@ This requires a running workspace daemon.
 `workspace_run_profile_setup` accepts `dry_run=true` to return one launch preview
 per setup command declared by the profile without spawning any of them. This
 requires a running workspace daemon.
+Launch, run, setup, and startup app dry-runs are daemon-attached previews; they
+fail instead of starting a workspace when no daemon exists.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
