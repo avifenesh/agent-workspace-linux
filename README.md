@@ -134,8 +134,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace display. `active-window` reports the current workspace-local focus.
   `focus-window`, `screenshot-window`, `key-window`, and `type-window` can use
   either a raw X11 window id or the same title/pid/app filters as `wait-window`;
-  `click-window` resolves the same targets and clicks window-relative
-  coordinates.
+  app filters match the launched process and its child processes. `click-window`
+  resolves the same targets and clicks window-relative coordinates.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   App launches and exits are recorded with structured metadata. Typed text is
   logged as metadata such as character count, not raw text.

@@ -2214,7 +2214,7 @@ fn matching_workspace_windows(
     state: &DaemonState,
     criteria: &WindowWaitCriteria,
 ) -> Result<Vec<WorkspaceWindow>> {
-    let app_pid = criteria.app_id.as_ref().and_then(|app_id| {
+    let app_root_pid = criteria.app_id.as_ref().and_then(|app_id| {
         state
             .status
             .apps
@@ -2222,7 +2222,6 @@ fn matching_workspace_windows(
             .find(|app| matches_app_id(app, app_id))
             .map(|app| app.pid)
     });
-    let pid = criteria.pid.or(app_pid);
     Ok(list_workspace_windows(&state.status)?
         .into_iter()
         .filter(|window| {
@@ -2231,8 +2230,40 @@ fn matching_workspace_windows(
                 .as_ref()
                 .is_none_or(|title| window.title.contains(title))
         })
-        .filter(|window| pid.is_none_or(|pid| window.pid == Some(pid)))
+        .filter(|window| {
+            if let Some(pid) = criteria.pid {
+                return window.pid == Some(pid);
+            }
+            if let Some(app_root_pid) = app_root_pid {
+                return window.pid.is_some_and(|window_pid| {
+                    process_is_descendant_or_self(window_pid, app_root_pid)
+                });
+            }
+            true
+        })
         .collect())
+}
+
+fn process_is_descendant_or_self(pid: u32, ancestor_pid: u32) -> bool {
+    let mut current = Some(pid);
+    for _ in 0..64 {
+        let Some(current_pid) = current else {
+            return false;
+        };
+        if current_pid == ancestor_pid {
+            return true;
+        }
+        current = parent_pid(current_pid);
+    }
+    false
+}
+
+fn parent_pid(pid: u32) -> Option<u32> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_command = stat.rsplit_once(") ")?.1;
+    let mut fields = after_command.split_whitespace();
+    fields.next()?;
+    fields.next()?.parse().ok()
 }
 
 fn focus_matching_workspace_window(
