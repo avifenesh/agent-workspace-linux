@@ -3506,7 +3506,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             stream,
             tail_bytes,
         } => match read_workspace_app_log(state, &app_id, &stream, tail_bytes) {
-            Ok(app_log) => {
+            Ok((app_log, app)) => {
                 record_event(
                     state,
                     "read_app_log",
@@ -3521,6 +3521,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 let mut response =
                     response_with_status(true, "workspace app log read", &state.status);
                 response.app_log = Some(app_log);
+                response.apps = Some(vec![app]);
                 (response, false)
             }
             Err(error) => (
@@ -5043,7 +5044,7 @@ fn read_workspace_app_log(
     app_id: &str,
     stream: &str,
     tail_bytes: Option<u64>,
-) -> Result<WorkspaceAppLog> {
+) -> Result<(WorkspaceAppLog, WorkspaceApp)> {
     refresh_apps(state)?;
     let stream = validate_log_stream(stream)?;
     let app = resolve_workspace_app(&state.status.apps, app_id)?;
@@ -5055,14 +5056,17 @@ fn read_workspace_app_log(
     .ok_or_else(|| anyhow!("workspace app {} has no {stream} log path", app.id))?;
     let (content, bytes_read, truncated) = read_log_content(path, tail_bytes)?;
 
-    Ok(WorkspaceAppLog {
-        app_id: app.id.clone(),
-        stream,
-        path: path.clone(),
-        content,
-        bytes_read,
-        truncated,
-    })
+    Ok((
+        WorkspaceAppLog {
+            app_id: app.id.clone(),
+            stream,
+            path: path.clone(),
+            content,
+            bytes_read,
+            truncated,
+        },
+        app.clone(),
+    ))
 }
 
 fn wait_workspace_app(

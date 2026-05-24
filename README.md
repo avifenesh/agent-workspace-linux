@@ -152,9 +152,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace-local stdout/stderr log files reported in `workspace status`.
   Profile-backed launches also report the profile id and effective
   mount/network isolation on the app entry. App action responses such as
-  `launch`, `wait-app`, and `kill-app` include the directly affected app in the
-  top-level `apps` field. Completed apps report both a human `exit_status`
-  string and structured `exit_code`/`exit_signal` fields.
+  `launch`, `logs`, `wait-app`, and `kill-app` include the directly affected
+  app in the top-level `apps` field. Completed apps report both a human
+  `exit_status` string and structured `exit_code`/`exit_signal` fields.
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
   completion fields in one response. It also accepts `--name`.
