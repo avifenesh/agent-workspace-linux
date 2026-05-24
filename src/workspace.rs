@@ -927,7 +927,7 @@ pub fn read_manifest(id: &str) -> WorkspaceManifestRead {
     }
 }
 
-pub fn artifacts(id: &str) -> WorkspaceArtifacts {
+pub fn artifacts(id: &str, existing_only: bool) -> WorkspaceArtifacts {
     let id = match sanitize_workspace_id(id) {
         Ok(id) => id,
         Err(error) => {
@@ -1048,6 +1048,9 @@ pub fn artifacts(id: &str) -> WorkspaceArtifacts {
         }
     }
     add_workspace_screenshot_artifacts(&runtime_dir, &mut files, &mut seen);
+    if existing_only {
+        files.retain(|file| file.exists);
+    }
 
     let ok = runtime_dir.exists() && manifest_error.is_none();
     let message = if ok {

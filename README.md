@@ -49,7 +49,7 @@ cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace manifest
-cargo run -- workspace artifacts
+cargo run -- workspace artifacts --existing
 cargo run -- workspace ipc-info
 cargo run -- workspace env
 cargo run -- workspace env --shell
@@ -171,6 +171,7 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   policy snapshot, event log, daemon logs, app logs, and any screenshots
   captured into the workspace runtime directory. Each artifact reports whether
   the path exists, its filesystem type, and byte size for regular files.
+  `--existing` returns only paths that currently exist.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace

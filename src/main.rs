@@ -113,8 +113,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::read_manifest(&id))
         }
         "artifacts" => {
-            let id = parse_id_option(&args[1..])?;
-            print_json(&workspace::artifacts(&id))
+            let (id, existing_only) = parse_workspace_artifacts_options(&args[1..])?;
+            print_json(&workspace::artifacts(&id, existing_only))
         }
         "ipc-info" => {
             let id = parse_id_option(&args[1..])?;
@@ -809,6 +809,26 @@ fn parse_workspace_env_options(args: &[String]) -> Result<(String, bool)> {
         }
     }
     Ok((id, shell))
+}
+
+fn parse_workspace_artifacts_options(args: &[String]) -> Result<(String, bool)> {
+    let mut id = workspace::default_workspace_id();
+    let mut existing_only = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--existing" => {
+                existing_only = true;
+                index += 1;
+            }
+            flag => bail!("unknown workspace artifacts option '{flag}'"),
+        }
+    }
+    Ok((id, existing_only))
 }
 
 struct ParsedAppsOptions {
@@ -3130,7 +3150,7 @@ Usage:
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace manifest [--id ID]
-  agent-workspace-linux workspace artifacts [--id ID]
+  agent-workspace-linux workspace artifacts [--id ID] [--existing]
   agent-workspace-linux workspace ipc-info [--id ID]
   agent-workspace-linux workspace env [--id ID] [--shell]
   agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] [--screenshot-window] -- COMMAND [ARGS...]
