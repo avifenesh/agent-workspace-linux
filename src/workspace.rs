@@ -337,6 +337,12 @@ pub enum IpcRequest {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         env: Vec<EnvVar>,
     },
+    ListApps {
+        app_id: Option<String>,
+        name_contains: Option<String>,
+        profile_id: Option<String>,
+        running: Option<bool>,
+    },
     ListWindows {
         #[serde(default)]
         include_hidden: bool,
@@ -571,6 +577,8 @@ pub struct IpcResponse {
     pub message: String,
     pub status: Option<WorkspaceStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apps: Option<Vec<WorkspaceApp>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<Vec<WorkspaceWindow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_window: Option<WorkspaceWindow>,
@@ -666,6 +674,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             ok: true,
             message: format!("workspace {:?} is already running", status.id),
             status: Some(status),
+            apps: None,
             windows: None,
             active_window: None,
             screenshot: None,
@@ -851,6 +860,26 @@ fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
         );
     }
     Ok(())
+}
+
+pub fn list_apps(
+    id: &str,
+    app_id: Option<String>,
+    name_contains: Option<String>,
+    profile_id: Option<String>,
+    running: Option<bool>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_app_list_filters(&app_id, &name_contains, &profile_id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ListApps {
+            app_id,
+            name_contains,
+            profile_id,
+            running,
+        },
+    )
 }
 
 pub fn list_windows(
@@ -1827,6 +1856,7 @@ fn response_with_status(
         ok,
         message: message.into(),
         status: Some(status.clone()),
+        apps: None,
         windows: None,
         active_window: None,
         screenshot: None,
@@ -1902,6 +1932,38 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     response_with_status(true, "app launched in workspace", &state.status),
                     false,
                 )
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::ListApps {
+            app_id,
+            name_contains,
+            profile_id,
+            running,
+        } => match validate_app_list_filters(&app_id, &name_contains, &profile_id)
+            .and_then(|()| refresh_apps(state))
+            .map(|()| {
+                filter_workspace_apps(&state.status, &app_id, &name_contains, &profile_id, running)
+            }) {
+            Ok(apps) => {
+                record_event(
+                    state,
+                    "list_apps",
+                    serde_json::json!({
+                        "count": apps.len(),
+                        "app_id": app_id.as_deref(),
+                        "name_contains": name_contains.as_deref(),
+                        "profile_id": profile_id.as_deref(),
+                        "running": running,
+                    }),
+                )?;
+                let mut response =
+                    response_with_status(true, "workspace apps listed", &state.status);
+                response.apps = Some(apps);
+                (response, false)
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
@@ -3872,6 +3934,7 @@ fn observe_workspace(
         ok: true,
         message: "workspace observed".to_string(),
         status: Some(state.status.clone()),
+        apps: None,
         windows: Some(windows),
         active_window,
         screenshot,
@@ -3879,6 +3942,38 @@ fn observe_workspace(
         clipboard: None,
         events: None,
     })
+}
+
+fn filter_workspace_apps(
+    status: &WorkspaceStatus,
+    app_id: &Option<String>,
+    name_contains: &Option<String>,
+    profile_id: &Option<String>,
+    running: Option<bool>,
+) -> Vec<WorkspaceApp> {
+    status
+        .apps
+        .iter()
+        .filter(|app| {
+            app_id
+                .as_ref()
+                .is_none_or(|target| matches_app_id(app, target))
+        })
+        .filter(|app| {
+            name_contains.as_ref().is_none_or(|needle| {
+                app.name
+                    .as_ref()
+                    .is_some_and(|name| contains_ascii_case_insensitive(name, needle))
+            })
+        })
+        .filter(|app| {
+            profile_id
+                .as_ref()
+                .is_none_or(|target| app.profile_id.as_deref() == Some(target.as_str()))
+        })
+        .filter(|app| running.is_none_or(|running| app.running == running))
+        .cloned()
+        .collect()
 }
 
 struct WindowMatchCriteria {
@@ -5317,6 +5412,32 @@ fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
         bail!("{label} must be a decimal X11 id");
     }
     Ok(trimmed.to_string())
+}
+
+fn validate_app_list_filters(
+    app_id: &Option<String>,
+    name_contains: &Option<String>,
+    profile_id: &Option<String>,
+) -> Result<()> {
+    if app_id
+        .as_ref()
+        .is_some_and(|app_id| app_id.trim().is_empty())
+    {
+        bail!("app id cannot be empty");
+    }
+    if name_contains
+        .as_ref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
+        bail!("app name filter cannot be empty");
+    }
+    if profile_id
+        .as_ref()
+        .is_some_and(|profile| profile.trim().is_empty())
+    {
+        bail!("profile id cannot be empty");
+    }
+    Ok(())
 }
 
 fn validate_window_match_options(

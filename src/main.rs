@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -132,6 +132,16 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 &id,
                 &profile_id,
                 options,
+            )?)
+        }
+        "apps" => {
+            let (id, app_id, name_contains, profile_id, running) = parse_apps_options(&args[1..])?;
+            print_json(&workspace::list_apps(
+                &id,
+                app_id,
+                name_contains,
+                profile_id,
+                running,
             )?)
         }
         "windows" => {
@@ -527,7 +537,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -693,6 +703,59 @@ fn parse_id_option(args: &[String]) -> Result<String> {
         }
     }
     Ok(id)
+}
+
+fn parse_apps_options(
+    args: &[String],
+) -> Result<(
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+)> {
+    let mut id = workspace::default_workspace_id();
+    let mut app_id = None;
+    let mut name_contains = None;
+    let mut profile_id = None;
+    let mut running = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--name" => {
+                name_contains = Some(value_after(args, index, "--name")?.to_string());
+                index += 2;
+            }
+            "--profile" => {
+                profile_id = Some(value_after(args, index, "--profile")?.to_string());
+                index += 2;
+            }
+            "--running" => {
+                if running == Some(false) {
+                    bail!("workspace apps accepts only one of --running or --stopped");
+                }
+                running = Some(true);
+                index += 1;
+            }
+            "--stopped" => {
+                if running == Some(true) {
+                    bail!("workspace apps accepts only one of --running or --stopped");
+                }
+                running = Some(false);
+                index += 1;
+            }
+            flag => bail!("unknown workspace apps option '{flag}'"),
+        }
+    }
+    Ok((id, app_id, name_contains, profile_id, running))
 }
 
 fn parse_windows_options(
@@ -2795,6 +2858,7 @@ Usage:
   agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
+  agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]

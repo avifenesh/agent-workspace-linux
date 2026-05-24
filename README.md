@@ -52,6 +52,9 @@ cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
+cargo run -- workspace apps
+cargo run -- workspace apps --running
+cargo run -- workspace apps --name terminal
 cargo run -- workspace windows
 cargo run -- workspace windows --all
 cargo run -- workspace windows --app app-12345
@@ -153,6 +156,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
   completion fields in one response. It also accepts `--name`.
+- `workspace apps` lists launched apps from the daemon IPC state without dumping
+  the full workspace status. It can filter by `--app APP_ID_OR_PID_OR_NAME`,
+  app `--name TEXT`, `--profile PROFILE`, `--running`, or `--stopped`.
 - `workspace windows`, `workspace active-window`, `workspace observe`,
   `workspace wait-window`, `workspace screenshot`, `workspace screenshot-window`,
   `workspace focus-window`, `workspace close-window`, `workspace move-window`,
@@ -225,7 +231,7 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_launch_app`, `workspace_run_app`,
-`workspace_launch_profile_apps`, `workspace_list_windows`,
+`workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_list_windows`,
 `workspace_active_window`, `workspace_observe`, `workspace_wait_window`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
 `workspace_focus_matching_window`, `workspace_close_window`, `workspace_click`,
@@ -238,8 +244,10 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_type_window`, `workspace_set_clipboard`, `workspace_get_clipboard`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` and
-window-targeted tools can filter by title, class, pid, app id, or app name, with
-class matching `wm_class` and `wm_instance`. `workspace_list_windows` accepts
-`include_hidden=true` to return minimized/hidden windows as well as visible
-windows. `workspace_observe` also accepts `include_hidden=true`.
+`workspace_kill_app`, and `workspace_stop`. `workspace_list_apps` can filter by
+app id/pid/name, app name substring, profile id, or running/stopped state.
+`workspace_list_windows` and window-targeted tools can filter by title, class,
+pid, app id, or app name, with class matching `wm_class` and `wm_instance`.
+`workspace_list_windows` accepts `include_hidden=true` to return
+minimized/hidden windows as well as visible windows. `workspace_observe` also
+accepts `include_hidden=true`.
