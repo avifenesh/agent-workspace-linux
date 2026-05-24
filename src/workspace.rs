@@ -422,7 +422,12 @@ pub enum IpcRequest {
         timeout_ms: u64,
     },
     ShowWindow {
-        window_id: String,
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        class_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: u64,
     },
     Click {
         x: i32,
@@ -1107,12 +1112,27 @@ pub fn minimize_window(
     )
 }
 
-pub fn show_window(id: &str, window_id: String) -> Result<IpcResponse> {
+pub fn show_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    class_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    let window_id = sanitize_x11_id(&window_id, "window id")?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     request(
         &workspace_socket_path(&id),
-        IpcRequest::ShowWindow { window_id },
+        IpcRequest::ShowWindow {
+            window_id,
+            title_contains,
+            class_contains,
+            pid,
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
     )
 }
 
@@ -2558,23 +2578,67 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 }
             }
         }
-        IpcRequest::ShowWindow { window_id } => {
-            match show_workspace_window(&state.status, &window_id) {
-                Ok(window) => {
-                    record_event(
-                        state,
-                        "show_window",
-                        serde_json::json!({ "window_id": &window.id }),
-                    )?;
-                    let mut response =
-                        response_with_status(true, "workspace window shown", &state.status);
-                    response.windows = Some(vec![window]);
-                    (response, false)
-                }
+        IpcRequest::ShowWindow {
+            window_id,
+            title_contains,
+            class_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                class_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                &criteria.class_contains,
+                criteria.pid,
+                &criteria.app_id,
+            ) {
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
+                Ok(()) => {
+                    match show_workspace_window_target(state, window_id.as_deref(), &criteria) {
+                        Ok(Some(window)) => {
+                            record_event(
+                                state,
+                                "show_window",
+                                serde_json::json!({
+                                    "window_id": &window.id,
+                                    "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
+                                    "pid": criteria.pid,
+                                    "app_id": criteria.app_id.as_deref(),
+                                    "timeout_ms": criteria.timeout_ms,
+                                }),
+                            )?;
+                            let mut response =
+                                response_with_status(true, "workspace window shown", &state.status);
+                            response.windows = Some(vec![window]);
+                            (response, false)
+                        }
+                        Ok(None) => {
+                            let mut response = response_with_status(
+                                false,
+                                "workspace window not found before timeout",
+                                &state.status,
+                            );
+                            response.windows = Some(Vec::new());
+                            (response, false)
+                        }
+                        Err(error) => (
+                            response_with_status(false, error.to_string(), &state.status),
+                            false,
+                        ),
+                    }
+                }
             }
         }
         IpcRequest::Click {
@@ -3824,11 +3888,19 @@ fn wait_workspace_window(
     state: &mut DaemonState,
     criteria: &WindowWaitCriteria,
 ) -> Result<Vec<WorkspaceWindow>> {
+    wait_workspace_window_with_visibility(state, criteria, false)
+}
+
+fn wait_workspace_window_with_visibility(
+    state: &mut DaemonState,
+    criteria: &WindowWaitCriteria,
+    include_hidden: bool,
+) -> Result<Vec<WorkspaceWindow>> {
     let timeout = Duration::from_millis(criteria.timeout_ms);
     let started = Instant::now();
     loop {
         refresh_apps(state)?;
-        let windows = matching_workspace_windows(state, criteria)?;
+        let windows = matching_workspace_windows_with_visibility(state, criteria, include_hidden)?;
         if !windows.is_empty() {
             return Ok(windows);
         }
@@ -3840,9 +3912,10 @@ fn wait_workspace_window(
     }
 }
 
-fn matching_workspace_windows(
+fn matching_workspace_windows_with_visibility(
     state: &DaemonState,
     criteria: &WindowWaitCriteria,
+    include_hidden: bool,
 ) -> Result<Vec<WorkspaceWindow>> {
     let match_criteria = WindowMatchCriteria {
         title_contains: criteria.title_contains.clone(),
@@ -3850,7 +3923,7 @@ fn matching_workspace_windows(
         pid: criteria.pid,
         app_id: criteria.app_id.clone(),
     };
-    list_matching_workspace_windows(state, false, &match_criteria)
+    list_matching_workspace_windows(state, include_hidden, &match_criteria)
 }
 
 fn list_matching_workspace_windows(
@@ -4000,6 +4073,20 @@ fn minimize_workspace_window_target(
     minimize_workspace_window(&state.status, &window.id)
         .with_context(|| format!("failed to minimize workspace window {}", window.id))?;
     Ok(Some(window))
+}
+
+fn show_workspace_window_target(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = resolve_workspace_window_with_visibility(state, window_id, criteria, true)?
+    else {
+        return Ok(None);
+    };
+    show_workspace_window(&state.status, &window.id)
+        .map(Some)
+        .with_context(|| format!("failed to show workspace window {}", window.id))
 }
 
 struct WindowClickResult {
@@ -4277,11 +4364,24 @@ fn resolve_workspace_window(
     window_id: Option<&str>,
     criteria: &WindowWaitCriteria,
 ) -> Result<Option<WorkspaceWindow>> {
+    resolve_workspace_window_with_visibility(state, window_id, criteria, false)
+}
+
+fn resolve_workspace_window_with_visibility(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    include_hidden: bool,
+) -> Result<Option<WorkspaceWindow>> {
     if let Some(window_id) = window_id {
         let window_id = sanitize_x11_id(window_id, "window id")?;
         return window_info(&state.status, &window_id).map(Some);
     }
-    Ok(wait_workspace_window(state, criteria)?.into_iter().next())
+    Ok(
+        wait_workspace_window_with_visibility(state, criteria, include_hidden)?
+            .into_iter()
+            .next(),
+    )
 }
 
 fn window_info(status: &WorkspaceStatus, id: &str) -> Result<WorkspaceWindow> {

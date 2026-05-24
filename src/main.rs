@@ -307,9 +307,17 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "show-window" => {
-            let (id, window_id) =
-                parse_one_arg_command(&args[1..], "workspace show-window requires a window id")?;
-            print_json(&workspace::show_window(&id, window_id)?)
+            let (id, window_id, title_contains, class_contains, pid, app_id, timeout_ms) =
+                parse_targeted_window_action_options(&args[1..], "workspace show-window")?;
+            print_json(&workspace::show_window(
+                &id,
+                window_id,
+                title_contains,
+                class_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            )?)
         }
         "click" => {
             let (id, x, y, button, count) = parse_click_options(&args[1..])?;
@@ -2791,6 +2799,7 @@ Usage:
   agent-workspace-linux workspace minimize-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace minimize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace show-window [--id ID] WINDOW_ID
+  agent-workspace-linux workspace show-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace click [--id ID] [--button N] [--count N] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y

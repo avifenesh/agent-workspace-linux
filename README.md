@@ -72,6 +72,7 @@ cargo run -- workspace resize-window --title xterm 800 500
 cargo run -- workspace raise-window --title xterm
 cargo run -- workspace minimize-window --title xterm
 cargo run -- workspace show-window 4194316
+cargo run -- workspace show-window --class xterm --timeout-ms 10000
 cargo run -- workspace click 100 120
 cargo run -- workspace click --button 3 100 120
 cargo run -- workspace click-window --title xterm 24 32
@@ -177,6 +178,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `resize-window` update the returned window geometry so screenshots and
   interactions can be staged predictably. `raise-window`, `minimize-window`,
   and `show-window` manage visibility and stacking without terminating apps.
+  `show-window` match filters also search minimized/hidden windows, so agents
+  can restore an app by class, title, pid, or app id without first listing a raw
+  X11 id.
   `move-pointer` and
   `move-pointer-window` move the workspace pointer without clicking. `click` and
   `click-window` can set button/count for right-clicks and double-clicks.
