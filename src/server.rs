@@ -104,7 +104,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "profile_put",
-        description = "Create or replace an agent workspace profile. Mounts, network, and setup commands are persisted as declared intent; only width, height, cwd, and env are currently enforceable.",
+        description = "Create or replace an agent workspace profile. Mounts, network, and setup commands are persisted as declared intent and surfaced in workspace status; display size, cwd, and env are currently applied by the X11 runtime.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -173,7 +173,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_status",
-        description = "Return status for an isolated agent workspace.",
+        description = "Return status for an isolated agent workspace, including the applied profile policy snapshot and enforcement report when a profile started the workspace.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -534,7 +534,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles; profile mounts and network are persisted as declared intent until enforcement exists. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles. workspace_status reports the applied profile policy snapshot and enforcement state; mount and restricted-network policies are currently declared but not enforced by the X11 runtime. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 

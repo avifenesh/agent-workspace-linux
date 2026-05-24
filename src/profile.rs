@@ -1,3 +1,5 @@
+use crate::policy::{AppliedWorkspacePolicy, NetworkMode};
+pub use crate::policy::{NetworkPolicy, ProfileMount};
 use crate::workspace::{self, EnvVar, IpcResponse, LaunchSpec, WorkspaceStartOptions};
 use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
@@ -26,58 +28,6 @@ pub struct WorkspaceProfile {
     pub network: NetworkPolicy,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setup_commands: Vec<ProfileSetupCommand>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ProfileMount {
-    pub host_path: PathBuf,
-    pub workspace_path: PathBuf,
-    #[serde(default)]
-    pub mode: MountMode,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MountMode {
-    ReadOnly,
-    ReadWrite,
-}
-
-impl Default for MountMode {
-    fn default() -> Self {
-        Self::ReadOnly
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct NetworkPolicy {
-    #[serde(default)]
-    pub mode: NetworkMode,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allow_hosts: Vec<String>,
-}
-
-impl Default for NetworkPolicy {
-    fn default() -> Self {
-        Self {
-            mode: NetworkMode::InheritHost,
-            allow_hosts: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum NetworkMode {
-    InheritHost,
-    Disabled,
-    Allowlist,
-}
-
-impl Default for NetworkMode {
-    fn default() -> Self {
-        Self::InheritHost
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -221,6 +171,7 @@ pub fn apply_profile_to_start_options(
 ) -> Result<WorkspaceProfile> {
     let profile = get_profile(profile_id)?;
     options.profile_id = Some(profile.id.clone());
+    options.applied_policy = Some(applied_policy(&profile));
     if !width_explicit {
         if let Some(width) = profile.width {
             options.width = width;
@@ -232,6 +183,15 @@ pub fn apply_profile_to_start_options(
         }
     }
     Ok(profile)
+}
+
+pub fn applied_policy(profile: &WorkspaceProfile) -> AppliedWorkspacePolicy {
+    AppliedWorkspacePolicy::new(
+        profile.id.clone(),
+        profile.mounts.clone(),
+        profile.network.clone(),
+        profile.setup_commands.len(),
+    )
 }
 
 pub fn apply_profile_to_launch_spec(

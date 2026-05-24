@@ -1,8 +1,10 @@
+mod policy;
 mod profile;
 mod server;
 mod workspace;
 
 use anyhow::{bail, Context, Result};
+use policy::AppliedWorkspacePolicy;
 use profile::WorkspaceProfile;
 use std::{fs, path::PathBuf};
 use workspace::{DaemonOptions, EnvVar, LaunchSpec, WorkspaceStartOptions};
@@ -486,6 +488,7 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut runtime_dir = None;
     let mut socket_path = None;
     let mut xauthority_path = None;
+    let mut policy_path = None;
     let mut index = 0;
 
     while index < args.len() {
@@ -530,13 +533,19 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
                 xauthority_path = Some(PathBuf::from(value_after(&args, index, "--xauthority")?));
                 index += 2;
             }
+            "--policy" => {
+                policy_path = Some(PathBuf::from(value_after(&args, index, "--policy")?));
+                index += 2;
+            }
             flag => bail!("unknown daemon option '{flag}'"),
         }
     }
+    let applied_policy = policy_path.as_ref().map(read_applied_policy).transpose()?;
 
     Ok(DaemonOptions {
         id: id.context("daemon missing --id")?,
         profile_id,
+        applied_policy,
         display: display.context("daemon missing --display")?,
         width: width.context("daemon missing --width")?,
         height: height.context("daemon missing --height")?,
@@ -544,6 +553,13 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
         socket_path: socket_path.context("daemon missing --socket")?,
         xauthority_path: xauthority_path.context("daemon missing --xauthority")?,
     })
+}
+
+fn read_applied_policy(path: &PathBuf) -> Result<AppliedWorkspacePolicy> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("failed to read applied policy {}", path.display()))?;
+    serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse applied policy {}", path.display()))
 }
 
 fn value_after<'a>(args: &'a [String], index: usize, flag: &str) -> Result<&'a str> {

@@ -1,3 +1,4 @@
+use crate::policy::AppliedWorkspacePolicy;
 use anyhow::{anyhow, bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ pub const DEFAULT_WORKSPACE_ID: &str = "default";
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
+const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DoctorReport {
@@ -45,6 +47,7 @@ pub struct Check {
 pub struct WorkspaceStartOptions {
     pub id: String,
     pub profile_id: Option<String>,
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub width: u32,
     pub height: u32,
 }
@@ -54,6 +57,7 @@ impl Default for WorkspaceStartOptions {
         Self {
             id: DEFAULT_WORKSPACE_ID.to_string(),
             profile_id: None,
+            applied_policy: None,
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
         }
@@ -64,6 +68,7 @@ impl Default for WorkspaceStartOptions {
 pub struct DaemonOptions {
     pub id: String,
     pub profile_id: Option<String>,
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -77,6 +82,8 @@ pub struct WorkspaceStatus {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
     pub ready: bool,
     pub display: String,
     pub width: u32,
@@ -564,6 +571,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
         status: WorkspaceStatus {
             id,
             profile_id: options.profile_id,
+            applied_policy: options.applied_policy,
             ready: true,
             display: options.display,
             width: options.width,
@@ -649,6 +657,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     Ok(WorkspaceStartPlan::Start(DaemonOptions {
         id,
         profile_id: options.profile_id,
+        applied_policy: options.applied_policy,
         display,
         width: options.width,
         height: options.height,
@@ -666,6 +675,10 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     daemon.arg(exe).arg("daemon").arg("--id").arg(&options.id);
     if let Some(profile_id) = &options.profile_id {
         daemon.arg("--profile").arg(profile_id);
+    }
+    if let Some(policy) = &options.applied_policy {
+        let policy_path = write_applied_policy_file(&options.runtime_dir, policy)?;
+        daemon.arg("--policy").arg(policy_path);
     }
     daemon
         .arg("--display")
@@ -692,6 +705,18 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
         .spawn()
         .context("failed to spawn agent workspace daemon")?;
     Ok(())
+}
+
+fn write_applied_policy_file(
+    runtime_dir: &Path,
+    policy: &AppliedWorkspacePolicy,
+) -> Result<PathBuf> {
+    let policy_path = runtime_dir.join(APPLIED_POLICY_FILE);
+    let content =
+        serde_json::to_string_pretty(policy).context("failed to serialize applied policy")?;
+    fs::write(&policy_path, format!("{content}\n"))
+        .with_context(|| format!("failed to write {}", policy_path.display()))?;
+    Ok(policy_path)
 }
 
 struct DaemonState {

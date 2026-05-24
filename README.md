@@ -21,8 +21,10 @@ not the host desktop.
 
 Profiles are persisted in a local JSON file under the user's config directory.
 Profile mounts, network policy, and setup commands are stored as declared intent
-for the future Codex app/profile UI; this X11 runtime only applies display size,
-launch cwd, and environment overrides today.
+for the future Codex app/profile UI. The runtime snapshots that intent into
+`workspace status` with an enforcement report; this X11 runtime only enforces
+display/input scoping, display size, launch cwd, and environment overrides
+today.
 
 ## Commands
 
@@ -68,7 +70,8 @@ socket daemon:
 - `workspace start` chooses a free X11 display, creates an `xauth` file, starts
   `Xvfb`, starts a lightweight window manager, and binds a control socket under
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
-  profile width/height are applied unless explicit flags override them.
+  profile width/height are applied unless explicit flags override them, and the
+  profile's mounts/network/setup intent is snapshotted into status.
 - `workspace start --foreground` runs the same workspace daemon in the current
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
@@ -90,8 +93,9 @@ socket daemon:
   workspace apps; their status and logs are available through the same app
   status/log tools.
 - `workspace status` reports the workspace profile id, launched apps, and app
-  profile ids when a profile shaped the workspace or app. `workspace status`
-  and `workspace stop` talk to the same socket.
+  profile ids when a profile shaped the workspace or app. It also reports the
+  applied policy snapshot and which parts are currently enforced. `workspace
+  status` and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,
