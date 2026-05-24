@@ -647,6 +647,7 @@ fn parse_open_profile_options(
             }
             "--setup" => {
                 open_options.run_setup = true;
+                open_options.setup.wait = true;
                 index += 1;
             }
             "--setup-timeout-ms" => {

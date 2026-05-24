@@ -130,9 +130,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
 - `workspace open-profile --profile` starts a profile-backed workspace,
-  optionally runs setup first with `--setup`, and then launches declared startup
-  apps only when setup succeeds, returning the workspace start, setup, and
-  startup results plus a top-level `ready` flag in one response.
+  optionally waits for setup first with `--setup`, and then launches declared
+  startup apps only when setup succeeds, returning the workspace start, setup,
+  and startup results plus a top-level `ready` flag in one response.
+  `--setup-timeout-ms` overrides the default setup wait timeout.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
