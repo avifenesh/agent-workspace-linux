@@ -961,7 +961,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_move_pointer",
-        description = "Move the pointer to workspace-local coordinates inside an isolated agent workspace without clicking.",
+        description = "Move the pointer to workspace-local coordinates inside an isolated agent workspace without clicking. Response includes pointer and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

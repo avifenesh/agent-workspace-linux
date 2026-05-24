@@ -235,9 +235,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `drag` and `drag-window` can set the mouse button for press/move/release
   gestures and return the resulting pointer coordinates. `scroll` and
   `scroll-window` send wheel ticks in the requested direction and also return
-  pointer coordinates. Successful mouse-action responses include the active
-  window when focus can be resolved after the action. Window-targeted pointer
-  tools resolve the same targets and use window-relative coordinates.
+  pointer coordinates. Successful pointer/mouse-action responses include the
+  active window when focus can be resolved after the action. Window-targeted
+  pointer tools resolve the same targets and use window-relative coordinates.
 - `workspace key`, `workspace type`, and `workspace paste` return the
   workspace-local active window when one can be resolved after the input action.
   Their window-targeted variants also return the matched target window in

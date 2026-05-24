@@ -3310,6 +3310,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         let mut response =
                             response_with_status(true, "workspace pointer moved", &state.status);
                         response.pointer = Some(pointer);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Err(error) => (
