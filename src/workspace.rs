@@ -5307,22 +5307,69 @@ fn pick_display() -> Result<String> {
     for number in DISPLAY_RANGE {
         let display = format!(":{number}");
         let socket = PathBuf::from(format!("/tmp/.X11-unix/X{number}"));
-        if socket.exists() {
+        let lock = PathBuf::from(format!("/tmp/.X{number}-lock"));
+        if socket.exists() || lock.exists() {
+            if display_is_reachable(&display) {
+                continue;
+            }
+            if remove_dead_x11_display_artifacts(number, &socket, &lock)? {
+                return Ok(display);
+            }
             continue;
         }
-        let in_use = Command::new("xdpyinfo")
-            .arg("-display")
-            .arg(&display)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if !in_use {
+        if !display_is_reachable(&display) {
             return Ok(display);
         }
     }
     bail!("no free X11 display found in range :90..:179");
+}
+
+fn display_is_reachable(display: &str) -> bool {
+    Command::new("xdpyinfo")
+        .arg("-display")
+        .arg(display)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn remove_dead_x11_display_artifacts(number: u32, socket: &Path, lock: &Path) -> Result<bool> {
+    let Some(pid) = read_x11_lock_pid(lock) else {
+        return Ok(false);
+    };
+    if process_exists(pid) {
+        return Ok(false);
+    }
+    if socket.exists() {
+        fs::remove_file(socket)
+            .with_context(|| format!("failed to remove stale X11 socket {}", socket.display()))?;
+    }
+    if lock.exists() {
+        fs::remove_file(lock)
+            .with_context(|| format!("failed to remove stale X11 lock {}", lock.display()))?;
+    }
+    eprintln!("removed stale X11 display artifacts for :{number} with dead pid {pid}");
+    Ok(true)
+}
+
+fn read_x11_lock_pid(lock: &Path) -> Option<u32> {
+    if !lock.exists() {
+        return None;
+    }
+    let Ok(content) = fs::read_to_string(lock) else {
+        return None;
+    };
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<u32>().ok()
+}
+
+fn process_exists(pid: u32) -> bool {
+    PathBuf::from(format!("/proc/{pid}")).exists()
 }
 
 fn create_xauthority(display: &str, path: &Path) -> Result<()> {
