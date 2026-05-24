@@ -1131,7 +1131,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_key",
-        description = "Send a key chord to the isolated agent workspace with xdotool syntax, for example Return or ctrl+l.",
+        description = "Send a key chord to the isolated agent workspace with xdotool syntax, for example Return or ctrl+l. Response includes active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1151,7 +1151,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_key_window",
-        description = "Send a key chord to a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters.",
+        description = "Send a key chord to a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Response includes the target window and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1180,7 +1180,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_type_text",
-        description = "Type literal text into the focused app inside an isolated agent workspace.",
+        description = "Type literal text into the focused app inside an isolated agent workspace. Response includes active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1200,7 +1200,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_type_window",
-        description = "Type literal text into a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters.",
+        description = "Type literal text into a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Response includes the target window and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1269,7 +1269,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_paste_text",
-        description = "Set the isolated workspace clipboard to text, then send a paste key chord to the focused app. Defaults to ctrl+v. Event logs store only size metadata, not the raw text.",
+        description = "Set the isolated workspace clipboard to text, then send a paste key chord to the focused app. Defaults to ctrl+v. Response includes active_window when focus can be resolved after the action. Event logs store only size metadata, not the raw text.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1293,7 +1293,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_paste_window",
-        description = "Set the isolated workspace clipboard to text, focus a visible window by X11 id/title/class/pid/app filter, then send a paste key chord. Defaults to ctrl+v. Event logs store only size metadata, not the raw text.",
+        description = "Set the isolated workspace clipboard to text, focus a visible window by X11 id/title/class/pid/app filter, then send a paste key chord. Defaults to ctrl+v. Response includes the target window and active_window when focus can be resolved after the action. Event logs store only size metadata, not the raw text.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

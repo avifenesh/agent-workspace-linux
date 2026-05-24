@@ -30,6 +30,8 @@ const DEFAULT_CLICK_COUNT: u8 = 1;
 const DEFAULT_SCROLL_AMOUNT: u8 = 1;
 const MAX_SCROLL_AMOUNT: u8 = 100;
 const DEFAULT_PASTE_KEY: &str = "ctrl+v";
+const ACTIVE_WINDOW_RESPONSE_WAIT_MS: u64 = 250;
+const ACTIVE_WINDOW_RESPONSE_POLL_MS: u64 = 20;
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
@@ -2122,6 +2124,22 @@ fn response_with_status(
     }
 }
 
+fn attach_active_window_best_effort(response: &mut IpcResponse, status: &WorkspaceStatus) {
+    let deadline = Instant::now() + Duration::from_millis(ACTIVE_WINDOW_RESPONSE_WAIT_MS);
+    loop {
+        match active_workspace_window(status) {
+            Ok(Some(window)) => {
+                response.active_window = Some(window);
+                return;
+            }
+            Ok(None) | Err(_) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(ACTIVE_WINDOW_RESPONSE_POLL_MS));
+            }
+            Ok(None) | Err(_) => return,
+        }
+    }
+}
+
 fn workspace_ipc_info(status: &WorkspaceStatus) -> WorkspaceIpcInfo {
     WorkspaceIpcInfo {
         protocol: IPC_PROTOCOL_NAME.to_string(),
@@ -3644,10 +3662,10 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match key_workspace(&state.status, key) {
                 Ok(()) => {
                     record_event(state, "key", serde_json::json!({ "key": logged_key }))?;
-                    (
-                        response_with_status(true, "workspace key sent", &state.status),
-                        false,
-                    )
+                    let mut response =
+                        response_with_status(true, "workspace key sent", &state.status);
+                    attach_active_window_best_effort(&mut response, &state.status);
+                    (response, false)
                 }
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),
@@ -3707,6 +3725,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         let mut response =
                             response_with_status(true, "workspace window key sent", &state.status);
                         response.windows = Some(vec![window]);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Ok(None) => {
@@ -3734,10 +3753,10 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "type_text",
                         serde_json::json!({ "char_count": char_count }),
                     )?;
-                    (
-                        response_with_status(true, "workspace text typed", &state.status),
-                        false,
-                    )
+                    let mut response =
+                        response_with_status(true, "workspace text typed", &state.status);
+                    attach_active_window_best_effort(&mut response, &state.status);
+                    (response, false)
                 }
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),
@@ -3801,6 +3820,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 &state.status,
                             );
                             response.windows = Some(vec![window]);
+                            attach_active_window_best_effort(&mut response, &state.status);
                             (response, false)
                         }
                         Ok(None) => {
@@ -3886,6 +3906,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     let mut response =
                         response_with_status(true, "workspace text pasted", &state.status);
                     response.clipboard = Some(clipboard);
+                    attach_active_window_best_effort(&mut response, &state.status);
                     (response, false)
                 }
                 Err(error) => (
@@ -3957,6 +3978,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         );
                         response.windows = Some(vec![pasted.window]);
                         response.clipboard = Some(pasted.clipboard);
+                        attach_active_window_best_effort(&mut response, &state.status);
                         (response, false)
                     }
                     Ok(None) => {
