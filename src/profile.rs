@@ -199,6 +199,67 @@ pub struct ProfileWorkspaceOpen {
     pub startup: Option<ProfileStartupRun>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileWorkspaceOpenPreview {
+    pub workspace_id: String,
+    pub profile_id: String,
+    pub would_open: bool,
+    pub start: IpcResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<ProfileSetupPreview>,
+    pub startup: ProfileStartupPreview,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileSetupPreview {
+    pub workspace_id: String,
+    pub profile_id: String,
+    pub would_run_setup: bool,
+    pub wait: bool,
+    pub kill_on_timeout: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    pub command_count: usize,
+    pub all_launches_allowed_by_policy: bool,
+    pub requires_running_daemon_for_launch_preview: bool,
+    pub commands: Vec<ProfileLaunchPlan>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileStartupPreview {
+    pub workspace_id: String,
+    pub profile_id: String,
+    pub conditional_on_setup_success: bool,
+    pub wait_window: bool,
+    pub screenshot_window: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_timeout_ms: Option<u64>,
+    pub app_count: usize,
+    pub all_launches_allowed_by_policy: bool,
+    pub requires_running_daemon_for_launch_preview: bool,
+    pub apps: Vec<ProfileLaunchPlan>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileLaunchPlan {
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<EnvVar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    pub user_acknowledged_unenforced_policy: bool,
+    pub requires_unenforced_policy_ack: bool,
+    pub missing_unenforced_policy_ack: bool,
+    pub can_acknowledge_unenforced_policy: bool,
+    pub blocks_unenforced_policy: bool,
+    pub would_launch_after_start: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProfileWorkspaceOpenOptions {
     pub run_setup: bool,
@@ -691,6 +752,144 @@ pub fn startup_app_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
             })
         })
         .collect()
+}
+
+pub fn preview_open_profile_workspace(
+    options: WorkspaceStartOptions,
+    profile_id: &str,
+    open_options: ProfileWorkspaceOpenOptions,
+) -> Result<ProfileWorkspaceOpenPreview> {
+    let workspace_id = options.id.clone();
+    let start = workspace::preview_workspace_start(options)?;
+    let start_preview = start
+        .start_preview
+        .as_ref()
+        .context("workspace start preview response did not include start_preview")?;
+    let would_open = start_preview.ok_to_start;
+    let setup = if open_options.run_setup {
+        Some(preview_profile_setup(
+            &workspace_id,
+            profile_id,
+            &open_options.setup,
+        )?)
+    } else {
+        None
+    };
+    let startup = preview_profile_startup(
+        &workspace_id,
+        profile_id,
+        &open_options.startup,
+        open_options.run_setup,
+    )?;
+    let message = if would_open {
+        "profile workspace open dry run returned".to_string()
+    } else {
+        format!(
+            "profile workspace open dry run blocked: {}",
+            start_preview.message
+        )
+    };
+
+    Ok(ProfileWorkspaceOpenPreview {
+        workspace_id,
+        profile_id: profile_id.to_string(),
+        would_open,
+        start,
+        setup,
+        startup,
+        message,
+    })
+}
+
+fn preview_profile_setup(
+    workspace_id: &str,
+    profile_id: &str,
+    options: &ProfileSetupOptions,
+) -> Result<ProfileSetupPreview> {
+    let wait = options.wait || options.timeout_ms.is_some() || options.kill_on_timeout;
+    let mut specs = setup_launch_specs(profile_id)?;
+    for spec in &mut specs {
+        spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
+    }
+    let commands = specs
+        .into_iter()
+        .map(profile_launch_plan)
+        .collect::<Vec<_>>();
+    let all_launches_allowed_by_policy = commands
+        .iter()
+        .all(|command| command.would_launch_after_start);
+
+    Ok(ProfileSetupPreview {
+        workspace_id: workspace_id.to_string(),
+        profile_id: profile_id.to_string(),
+        would_run_setup: true,
+        wait,
+        kill_on_timeout: options.kill_on_timeout,
+        timeout_ms: options.timeout_ms,
+        command_count: commands.len(),
+        all_launches_allowed_by_policy,
+        requires_running_daemon_for_launch_preview: true,
+        commands,
+    })
+}
+
+fn preview_profile_startup(
+    workspace_id: &str,
+    profile_id: &str,
+    options: &ProfileStartupOptions,
+    conditional_on_setup_success: bool,
+) -> Result<ProfileStartupPreview> {
+    let mut specs = startup_app_launch_specs(profile_id)?;
+    for spec in &mut specs {
+        spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
+    }
+    let apps = specs
+        .into_iter()
+        .map(profile_launch_plan)
+        .collect::<Vec<_>>();
+    let all_launches_allowed_by_policy = apps.iter().all(|app| app.would_launch_after_start);
+
+    Ok(ProfileStartupPreview {
+        workspace_id: workspace_id.to_string(),
+        profile_id: profile_id.to_string(),
+        conditional_on_setup_success,
+        wait_window: options.wait_window,
+        screenshot_window: options.screenshot_window,
+        window_timeout_ms: options.window_timeout_ms,
+        app_count: apps.len(),
+        all_launches_allowed_by_policy,
+        requires_running_daemon_for_launch_preview: true,
+        apps,
+    })
+}
+
+fn profile_launch_plan(spec: LaunchSpec) -> ProfileLaunchPlan {
+    let blocks_unenforced_policy = spec
+        .applied_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::blocks_requested_unenforced_policy);
+    let can_acknowledge_unenforced_policy = spec
+        .applied_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::can_acknowledge_unenforced_policy);
+    let requires_unenforced_policy_ack = can_acknowledge_unenforced_policy;
+    let missing_unenforced_policy_ack =
+        requires_unenforced_policy_ack && !spec.user_acknowledged_unenforced_policy;
+    let would_launch_after_start = !blocks_unenforced_policy && !missing_unenforced_policy_ack;
+
+    ProfileLaunchPlan {
+        command: spec.command,
+        name: spec.name,
+        cwd: spec.cwd,
+        env: spec.env,
+        profile_id: spec.profile_id,
+        user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
+        requires_unenforced_policy_ack,
+        missing_unenforced_policy_ack,
+        can_acknowledge_unenforced_policy,
+        blocks_unenforced_policy,
+        would_launch_after_start,
+    }
 }
 
 pub fn launch_profile_setup(

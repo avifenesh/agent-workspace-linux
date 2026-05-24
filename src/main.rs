@@ -106,11 +106,19 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         "open-profile" => {
             let (start, profile_id, open_options) = parse_open_profile_options(&args[1..])?;
-            print_json(&profile::open_profile_workspace(
-                start.options,
-                &profile_id,
-                open_options,
-            )?)
+            if start.dry_run {
+                print_json(&profile::preview_open_profile_workspace(
+                    start.options,
+                    &profile_id,
+                    open_options,
+                )?)
+            } else {
+                print_json(&profile::open_profile_workspace(
+                    start.options,
+                    &profile_id,
+                    open_options,
+                )?)
+            }
         }
         "status" => {
             let id = parse_id_option(&args[1..])?;
@@ -725,6 +733,11 @@ fn parse_open_profile_options(
                 open_options.startup.acknowledge_unenforced_policy = true;
                 index += 1;
             }
+            "--dry-run" => {
+                open_options.setup.dry_run = true;
+                open_options.startup.dry_run = true;
+                index += 1;
+            }
             "--profile" => {
                 profile_id = Some(value_after(args, index, "--profile")?.to_string());
                 index += 2;
@@ -804,7 +817,7 @@ fn parse_open_profile_options(
         ParsedStartOptions {
             options,
             foreground: false,
-            dry_run: false,
+            dry_run: open_options.setup.dry_run || open_options.startup.dry_run,
         },
         profile_id,
         open_options,
@@ -3377,7 +3390,7 @@ Usage:
   agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux workspace start [--dry-run] --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
-  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--startup-screenshot-window] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
+  agent-workspace-linux workspace open-profile [--dry-run] [--ack-hidden-workspace] [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--startup-screenshot-window] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace list
   agent-workspace-linux workspace cleanup [--id ID] [--dry-run]
   agent-workspace-linux workspace status [--id ID]

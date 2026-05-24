@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 11,
+        version: 12,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -64,6 +64,14 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 "Workspace start creates a hidden runtime only when dry_run is false.",
                 "--dry-run or dry_run=true",
                 "Returns acknowledgement, runtime readiness, profile policy, and would-start status without creating X11 runtime state.",
+            ),
+            rule(
+                "profile-open-preview",
+                "dry_run",
+                &["workspace open-profile", "workspace_open_profile"],
+                "Opening a profile starts the workspace and may run setup/startup apps only when dry_run is false.",
+                "--dry-run or dry_run=true",
+                "Returns start, setup, and startup declarations for approval without creating a workspace or spawning app processes.",
             ),
             rule(
                 "workspace-launch-preview",

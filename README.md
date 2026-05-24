@@ -60,6 +60,7 @@ cargo run -- profile delete --dry-run project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --dry-run --profile project-dev
 cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-unenforced-policy --profile project-dev
+cargo run -- workspace open-profile --dry-run --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window
 cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
@@ -201,6 +202,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   optionally waits for setup first with `--setup`, and then launches declared
   startup apps only when setup succeeds, returning the workspace start, setup,
   and startup results plus a top-level `ready` flag in one response.
+  `--dry-run` returns the start preview plus declared setup and startup commands
+  for approval without creating a workspace or spawning apps. Setup/startup
+  command entries are declarations; daemon-attached launch previews are available
+  only after a workspace is running.
   `--setup-timeout-ms` overrides the default setup wait timeout.
   `--setup-kill-on-timeout` terminates a timed-out setup command process group.
   `--startup-wait-window` waits for each startup app's first visible window.
@@ -425,6 +430,8 @@ removed without deleting it.
 `workspace_start` accepts `dry_run=true` to preview hidden-workspace
 acknowledgement, runtime readiness, profile policy acknowledgement, strict
 policy blocks, and whether a new workspace would be created.
+`workspace_open_profile` accepts `dry_run=true` to preview the profile-backed
+start, setup, and startup plan without creating a workspace.
 `workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
 profile policy acknowledgement, isolation labels, blockers, and whether an app
 would be launched without spawning it. This requires a running workspace daemon.

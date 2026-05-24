@@ -294,7 +294,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_open_profile",
-        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. Set startup_wait_window=true to wait for each startup app's first visible window, or startup_screenshot_window=true to also capture each first startup window.",
+        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. Set dry_run=true to preview the start/profile/setup/startup plan without creating a workspace or spawning apps; setup/startup launch previews still require a live daemon and are reported as declarations here. Set startup_wait_window=true to wait for each startup app's first visible window, or startup_screenshot_window=true to also capture each first startup window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -308,17 +308,32 @@ impl AgentWorkspaceLinux {
     ) -> Json<ProfileWorkspaceOpenResult> {
         Json(
             match params.into_options().and_then(|(options, profile_id)| {
+                if params.dry_run {
+                    return profile::preview_open_profile_workspace(
+                        options,
+                        &profile_id,
+                        params.into_open_options(),
+                    )
+                    .map(|preview| (None, Some(preview)));
+                }
                 profile::open_profile_workspace(options, &profile_id, params.into_open_options())
+                    .map(|open| (Some(open), None))
             }) {
-                Ok(open) => ProfileWorkspaceOpenResult {
+                Ok((open, preview)) => ProfileWorkspaceOpenResult {
                     ok: true,
-                    message: "profile workspace opened".to_string(),
-                    open: Some(open),
+                    message: if preview.is_some() {
+                        "profile workspace open dry run returned".to_string()
+                    } else {
+                        "profile workspace opened".to_string()
+                    },
+                    open,
+                    preview,
                 },
                 Err(error) => ProfileWorkspaceOpenResult {
                     ok: false,
                     message: error.to_string(),
                     open: None,
+                    preview: None,
                 },
             },
         )
@@ -1800,6 +1815,8 @@ struct ProfileWorkspaceOpenResult {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     open: Option<profile::ProfileWorkspaceOpen>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview: Option<profile::ProfileWorkspaceOpenPreview>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -1873,6 +1890,8 @@ struct WorkspaceOpenProfileParams {
     #[serde(default)]
     acknowledge_unenforced_policy: bool,
     #[serde(default)]
+    dry_run: bool,
+    #[serde(default)]
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
@@ -1923,7 +1942,7 @@ impl WorkspaceOpenProfileParams {
                 || self.setup_timeout_ms.is_some()
                 || self.setup_kill_on_timeout,
             setup: profile::ProfileSetupOptions {
-                dry_run: false,
+                dry_run: self.dry_run,
                 wait: self.run_setup
                     || self.setup_timeout_ms.is_some()
                     || self.setup_kill_on_timeout,
@@ -1932,7 +1951,7 @@ impl WorkspaceOpenProfileParams {
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
             },
             startup: profile::ProfileStartupOptions {
-                dry_run: false,
+                dry_run: self.dry_run,
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
                 wait_window: self.startup_wait_window
                     || self.startup_window_timeout_ms.is_some()
