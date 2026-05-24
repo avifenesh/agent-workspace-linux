@@ -111,8 +111,10 @@ Current gate status on 2026-05-25:
   a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
   discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`. `cargo test`
   currently passes 46 tests.
-- A still has known product gaps: host-localhost bridging for `local_only`,
-  network allowlist enforcement, and more varied real-project coverage.
+- A still has known product gaps: host-localhost bridging for `local_only` and
+  more varied real-project coverage. Broad network allowlists and egress proxy
+  filtering are out of scope for this pass; the product network model is
+  closed, local, or open.
 - B has a first Codex for Linux slice: the conversation surface can show a live
   active-workspace panel with screenshot, profile/policy/app metadata, Stop, and
   Revoke. The side-by-side dev app and the installed user-facing app have both
@@ -159,8 +161,8 @@ Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
   successful and failed app launches.
 - Validated: daemon-crash recovery removes manifest-recorded orphan app process
   groups and X11 runtime processes.
-- Keep network allowlist marked as declared intent until a real filtering
-  backend exists and is tested.
+- Keep the user-facing network model to closed, local, or open. Do not treat
+  broad host allowlists or egress proxy filtering as part of this gate.
 
 ### B. Embed Workspace Visibility In Conversation
 

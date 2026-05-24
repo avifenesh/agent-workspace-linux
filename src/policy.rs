@@ -156,7 +156,7 @@ impl AppliedWorkspacePolicy {
             }
             NetworkMode::Allowlist => {
                 format!(
-                    "network allowlist is declared for {} but no allowlist backend is active",
+                    "network allowlist is declared for {} but is outside the current closed/local/open product scope",
                     network.allow_hosts.join(", ")
                 )
             }
@@ -208,12 +208,8 @@ impl AppliedWorkspacePolicy {
                 );
             }
             NetworkMode::Allowlist => {
-                network_status.planned_backend = Some("egress_proxy_allowlist".to_string());
-                network_status.backend_requirements.extend(
-                    ["network_namespace", "egress_proxy", "domain_filter"].map(str::to_string),
-                );
                 network_status.limitations.push(
-                    "allow_hosts is recorded for UI intent, but traffic is not filtered to those hosts"
+                    "allow_hosts is recorded for advanced or legacy profile intent only; the current product network modes are closed, local, and open"
                         .to_string(),
                 );
                 network_status.limitations.push(

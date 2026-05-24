@@ -223,7 +223,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
                     "workspace start --profile",
                     "workspace launch --profile",
                 ],
-                "Host allowlists are saved as declared intent but are not enforced by the current X11 runtime.",
+                "Host allowlists are advanced/legacy declared intent and are outside the current closed/local/open product scope.",
                 "--ack-unenforced-policy or acknowledge_unenforced_policy=true",
                 "Records acceptance that allow_hosts is visible in policy status but launched apps still keep host network access.",
             ),

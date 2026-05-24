@@ -81,8 +81,10 @@ Remaining gaps from this pass:
 
 - `local_only` remains sandbox-local loopback. Host-localhost bridging is still
   a product/runtime gap.
-- Network allowlists remain declared intent until an egress-filter backend is
-  implemented and tested.
+- Network allowlists are no longer part of the current product gate. The
+  user-facing network model for this phase is closed, local, or open; any
+  `allowlist` profile data should be treated as advanced/legacy declared intent,
+  not a promised filtering backend.
 - Browser tasks that need logged-in sessions now have a starter
   `browser-session` profile and a first picker/copy/lock-warning flow. It still
   needs live dogfood against a real account profile before treating it as a
@@ -164,8 +166,9 @@ Findings:
   mounts easy instead of forcing users to hand-write JSON.
 - Existing limitation: `local_only` is a sandbox-local loopback namespace. It
   does not bridge host localhost services into the workspace.
-- Existing limitation: network allowlists remain declared intent until a real
-  filtering backend exists and is tested.
+- Current product boundary: do not expand the network gate into broad host
+  allowlists or egress proxies. The scoped user-facing model is closed, local,
+  or open; `allowlist` remains advanced/legacy declared intent if encountered.
 - Browser tasks that require logged-in sessions need an explicit browser
   profile/mount story. The Chrome smoke used a temporary isolated user data dir,
   not the user's authenticated browser profile.

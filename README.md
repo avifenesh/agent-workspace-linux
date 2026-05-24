@@ -297,10 +297,11 @@ exiting.
   If the saved profile sets `require_enforced_policy=true`, the runtime refuses
   to start or launch with unenforced policy instead of accepting that
   acknowledgement.
-  Network allowlists are different: `allow_hosts` is saved and shown as profile
-  intent, but host filtering is not active yet, so allowlist profiles always
-  require `--ack-unenforced-policy` and report the limitation in
-  `applied_policy.enforcement.network`.
+  The current product network model is intentionally limited to closed
+  (`disabled`), local (`local_only`), and open (`inherit_host`). Legacy or
+  advanced profiles may still contain `network.mode=allowlist`; those values are
+  saved as declared intent only, always require `--ack-unenforced-policy`, and
+  do not promise host filtering.
   It then chooses a free X11 display, creates an `xauth` file, starts `Xvfb`,
   starts a lightweight window manager, and binds a control socket under the
   runtime base. `XDG_RUNTIME_DIR` is preferred; if a desktop app or MCP launcher
