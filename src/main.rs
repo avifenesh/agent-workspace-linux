@@ -135,12 +135,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "windows" => {
-            let (id, include_hidden, title_contains, pid, app_id) =
+            let (id, include_hidden, title_contains, class_contains, pid, app_id) =
                 parse_windows_options(&args[1..])?;
             print_json(&workspace::list_windows(
                 &id,
                 include_hidden,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
             )?)
@@ -630,10 +631,18 @@ fn parse_id_option(args: &[String]) -> Result<String> {
 
 fn parse_windows_options(
     args: &[String],
-) -> Result<(String, bool, Option<String>, Option<u32>, Option<String>)> {
+) -> Result<(
+    String,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+)> {
     let mut id = workspace::default_workspace_id();
     let mut include_hidden = false;
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut index = 0;
@@ -651,6 +660,10 @@ fn parse_windows_options(
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
                 index += 2;
             }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
+                index += 2;
+            }
             "--pid" => {
                 pid = Some(
                     value_after(args, index, "--pid")?
@@ -666,7 +679,14 @@ fn parse_windows_options(
             flag => bail!("unknown workspace windows option '{flag}'"),
         }
     }
-    Ok((id, include_hidden, title_contains, pid, app_id))
+    Ok((
+        id,
+        include_hidden,
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+    ))
 }
 
 fn parse_no_options(args: &[String], command: &str) -> Result<()> {
@@ -2561,7 +2581,7 @@ Usage:
   agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
-  agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID]
+  agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]
   agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]

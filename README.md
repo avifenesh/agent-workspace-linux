@@ -55,6 +55,7 @@ cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
 cargo run -- workspace windows --all
 cargo run -- workspace windows --app app-12345
+cargo run -- workspace windows --class xterm
 cargo run -- workspace active-window
 cargo run -- workspace observe --screenshot --output /tmp/agent-observe.png
 cargo run -- workspace observe --all-windows
@@ -159,11 +160,11 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `workspace events`, `workspace setup`, and
   `workspace kill-app` inspect or act through the same daemon, scoped to the
   workspace display. `windows` lists visible windows by default; window records
-  include X11 id, title, pid, workspace `app_id` when process metadata links
-  the window to a launched app, geometry, and visibility. `--all` includes
-  minimized/hidden windows so they can be shown again by id. `windows` can also
-  filter the current list with `--title`, `--pid`, or `--app`. `active-window`
-  reports the current workspace-local focus,
+  include X11 id, title, `wm_class`, `wm_instance`, pid, workspace `app_id` when
+  process metadata links the window to a launched app, geometry, and visibility.
+  `--all` includes minimized/hidden windows so they can be shown again by id.
+  `windows` can also filter the current list with `--title`, `--class`,
+  `--pid`, or `--app`. `active-window` reports the current workspace-local focus,
   and `observe` returns status, windows, active window, and optionally a root
   screenshot in one IPC call. `observe --all-windows` uses the same
   hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
@@ -226,6 +227,6 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
 `workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` can filter
-by title, pid, or app id and accepts `include_hidden=true` to return
+by title, class, pid, or app id and accepts `include_hidden=true` to return
 minimized/hidden windows as well as visible windows. `workspace_observe` also
 accepts `include_hidden=true`.

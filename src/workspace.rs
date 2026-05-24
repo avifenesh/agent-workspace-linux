@@ -244,6 +244,10 @@ pub struct LaunchSpec {
 pub struct WorkspaceWindow {
     pub id: String,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wm_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wm_instance: Option<String>,
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_id: Option<String>,
@@ -331,6 +335,7 @@ pub enum IpcRequest {
         #[serde(default)]
         include_hidden: bool,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
     },
@@ -824,16 +829,18 @@ pub fn list_windows(
     id: &str,
     include_hidden: bool,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_match_options(&title_contains, pid, &app_id, false)?;
+    validate_window_list_filters(&title_contains, &class_contains, pid, &app_id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::ListWindows {
             include_hidden,
             title_contains,
+            class_contains,
             pid,
             app_id,
         },
@@ -1828,19 +1835,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::ListWindows {
             include_hidden,
             title_contains,
+            class_contains,
             pid,
             app_id,
         } => {
             let criteria = WindowMatchCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
             };
-            match validate_window_match_options(
+            match validate_window_list_filters(
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
-                false,
             )
             .and_then(|()| refresh_apps(state))
             .and_then(|()| list_matching_workspace_windows(state, include_hidden, &criteria))
@@ -1853,6 +1862,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             "count": windows.len(),
                             "include_hidden": include_hidden,
                             "title_contains": criteria.title_contains.as_deref(),
+                            "class_contains": criteria.class_contains.as_deref(),
                             "pid": criteria.pid,
                             "app_id": criteria.app_id.as_deref(),
                         }),
@@ -3693,6 +3703,7 @@ fn observe_workspace(
 
 struct WindowMatchCriteria {
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
 }
@@ -3730,6 +3741,7 @@ fn matching_workspace_windows(
 ) -> Result<Vec<WorkspaceWindow>> {
     let match_criteria = WindowMatchCriteria {
         title_contains: criteria.title_contains.clone(),
+        class_contains: None,
         pid: criteria.pid,
         app_id: criteria.app_id.clone(),
     };
@@ -3756,6 +3768,17 @@ fn list_matching_workspace_windows(
                 .title_contains
                 .as_ref()
                 .is_none_or(|title| window.title.contains(title))
+        })
+        .filter(|window| {
+            criteria.class_contains.as_ref().is_none_or(|class| {
+                window
+                    .wm_class
+                    .as_ref()
+                    .is_some_and(|wm_class| contains_ascii_case_insensitive(wm_class, class))
+                    || window.wm_instance.as_ref().is_some_and(|wm_instance| {
+                        contains_ascii_case_insensitive(wm_instance, class)
+                    })
+            })
         })
         .filter(|window| {
             if let Some(pid) = criteria.pid {
@@ -4176,6 +4199,7 @@ fn window_info_with_visibility(
         .unwrap_or_default()
         .trim()
         .to_string();
+    let (wm_instance, wm_class) = window_class_from_xprop(status, id);
     let pid = workspace_command(status, "xdotool")
         .args(["getwindowpid", id])
         .output()
@@ -4193,6 +4217,8 @@ fn window_info_with_visibility(
     Ok(WorkspaceWindow {
         id: id.to_string(),
         title,
+        wm_class,
+        wm_instance,
         pid,
         app_id: pid.and_then(|pid| workspace_app_id_for_pid(status, pid)),
         visible,
@@ -4219,6 +4245,33 @@ fn window_pid_from_xprop(status: &WorkspaceStatus, id: &str) -> Option<u32> {
     let text = String::from_utf8(output.stdout).ok()?;
     text.rsplit_once('=')
         .and_then(|(_, value)| value.trim().parse::<u32>().ok())
+}
+
+fn window_class_from_xprop(status: &WorkspaceStatus, id: &str) -> (Option<String>, Option<String>) {
+    let output = workspace_command(status, "xprop")
+        .args(["-id", id, "WM_CLASS"])
+        .output();
+    let Some(stdout) = output
+        .ok()
+        .and_then(|output| output.status.success().then_some(output.stdout))
+    else {
+        return (None, None);
+    };
+    let Some(text) = String::from_utf8(stdout).ok() else {
+        return (None, None);
+    };
+    let Some((_, values)) = text.split_once('=') else {
+        return (None, None);
+    };
+    let mut parts = values.split(',').map(parse_xprop_string);
+    let instance = parts.next().flatten();
+    let class = parts.next().flatten();
+    (instance, class)
+}
+
+fn parse_xprop_string(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"').trim();
+    (!trimmed.is_empty() && trimmed != "not found.").then(|| trimmed.to_string())
 }
 
 fn parse_window_geometry(text: &str) -> Result<WindowGeometry> {
@@ -5072,6 +5125,22 @@ fn validate_window_match_options(
     Ok(())
 }
 
+fn validate_window_list_filters(
+    title_contains: &Option<String>,
+    class_contains: &Option<String>,
+    pid: Option<u32>,
+    app_id: &Option<String>,
+) -> Result<()> {
+    validate_window_match_options(title_contains, pid, app_id, false)?;
+    if class_contains
+        .as_ref()
+        .is_some_and(|class| class.trim().is_empty())
+    {
+        bail!("window class filter cannot be empty");
+    }
+    Ok(())
+}
+
 fn validate_window_target_options(
     window_id: &Option<String>,
     title_contains: &Option<String>,
@@ -5086,6 +5155,12 @@ fn validate_window_target_options(
         bail!("window target accepts either a window id or match filters, not both");
     }
     Ok(())
+}
+
+fn contains_ascii_case_insensitive(value: &str, needle: &str) -> bool {
+    value
+        .to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
 }
 
 fn validate_relative_click_coordinates(x: i32, y: i32) -> Result<()> {
