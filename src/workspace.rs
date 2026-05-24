@@ -1451,6 +1451,12 @@ fn cleanup_stale_process_pid(
     if pid == 0 || !process_is_alive(pid) {
         return;
     }
+    if process_is_zombie(pid) {
+        actions.push(format!(
+            "skipped {label} pid {pid}: process is already defunct"
+        ));
+        return;
+    }
     if !process_matches_any_name(pid, expected_names) {
         actions.push(format!(
             "skipped {label} pid {pid}: process identity did not match {}",
@@ -1547,6 +1553,20 @@ fn process_matches_any_name(pid: u32, expected_names: &[&str]) -> bool {
         let name = *name;
         comm.trim() == name || cmdline.contains(name)
     })
+}
+
+fn process_is_zombie(pid: u32) -> bool {
+    linux_process_state(pid) == Some('Z')
+}
+
+fn linux_process_state(pid: u32) -> Option<char> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    process_state_from_proc_stat(&stat)
+}
+
+fn process_state_from_proc_stat(stat: &str) -> Option<char> {
+    let after_comm = stat.rsplit_once(") ")?.1;
+    after_comm.split_whitespace().next()?.chars().next()
 }
 
 fn linux_process_group_id(pid: u32) -> Option<u32> {
@@ -8483,6 +8503,13 @@ mod tests {
         let status = "Name:\tagent-workspace-linux\nUid:\t1000\t1001\t1002\t1003\n";
 
         assert_eq!(parse_effective_uid_from_proc_status(status), Some(1001));
+    }
+
+    #[test]
+    fn parses_zombie_state_from_proc_stat_with_spaced_name() {
+        let stat = "1234 (agent workspace) Z 1 1234 1234 0 -1 4194560 0 0 0 0";
+
+        assert_eq!(process_state_from_proc_stat(stat), Some('Z'));
     }
 
     fn daemon_state_for_test(name: &str) -> DaemonState {

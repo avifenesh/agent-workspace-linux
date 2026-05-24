@@ -65,10 +65,10 @@ Findings:
   `Failed to create stream fd: No such file or directory` messages while still
   exiting 0 and producing the expected marker. This is low-priority runtime
   noise to investigate after the core gates.
-- Cleanup saw the stopped daemon pid as a defunct `[agent-workspace]` process
-  and skipped killing it because the process identity check did not match the
-  full binary name. It still removed the stale runtime directory. This did not
-  block cleanup, but the messaging could be made friendlier.
+- Fixed after this pass: cleanup now detects defunct helper PIDs from
+  `/proc/<pid>/stat` before checking process names, so a stopped daemon that
+  remains as a zombie is reported as already defunct instead of as an identity
+  mismatch. The stale runtime directory removal behavior is unchanged.
 
 ## 2026-05-24 MCP Pass
 
