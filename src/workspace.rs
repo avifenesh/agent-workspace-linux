@@ -17,6 +17,7 @@ const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
+const EVENT_LOG_FILE: &str = "events.jsonl";
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DoctorReport {
@@ -198,6 +199,15 @@ pub struct WorkspaceAppLog {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceEvent {
+    pub sequence: u64,
+    pub timestamp_unix: u64,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub detail: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcRequest {
@@ -236,6 +246,9 @@ pub enum IpcRequest {
         stream: String,
         tail_bytes: Option<u64>,
     },
+    ReadEvents {
+        tail: Option<usize>,
+    },
     KillApp {
         app_id: String,
     },
@@ -253,6 +266,8 @@ pub struct IpcResponse {
     pub screenshot: Option<WorkspaceScreenshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_log: Option<WorkspaceAppLog>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<Vec<WorkspaceEvent>>,
 }
 
 pub fn default_workspace_id() -> String {
@@ -322,6 +337,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             windows: None,
             screenshot: None,
             app_log: None,
+            events: None,
         }),
         WorkspaceStartPlan::Start(daemon_options) => {
             spawn_detached_daemon(&daemon_options)?;
@@ -542,6 +558,11 @@ pub fn read_app_log(
     )
 }
 
+pub fn read_events(id: &str, tail: Option<usize>) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::ReadEvents { tail })
+}
+
 pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     if app_id.trim().is_empty() {
@@ -567,6 +588,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
 
     let listener = UnixListener::bind(&options.socket_path)
         .with_context(|| format!("failed to bind {}", options.socket_path.display()))?;
+    let event_path = options.runtime_dir.join(EVENT_LOG_FILE);
     let mut state = DaemonState {
         status: WorkspaceStatus {
             id,
@@ -584,7 +606,16 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
             apps: Vec::new(),
         },
         apps: Vec::new(),
+        event_path,
+        next_event_sequence: 1,
     };
+    let start_detail = serde_json::json!({
+        "display": &state.status.display,
+        "width": state.status.width,
+        "height": state.status.height,
+        "profile_id": state.status.profile_id.as_deref(),
+    });
+    record_event(&mut state, "workspace_start", start_detail)?;
 
     eprintln!(
         "agent workspace daemon listening on {} for display {}",
@@ -719,9 +750,71 @@ fn write_applied_policy_file(
     Ok(policy_path)
 }
 
+fn record_event(
+    state: &mut DaemonState,
+    kind: &str,
+    detail: serde_json::Value,
+) -> Result<WorkspaceEvent> {
+    let event = WorkspaceEvent {
+        sequence: state.next_event_sequence,
+        timestamp_unix: unix_now(),
+        kind: kind.to_string(),
+        detail,
+    };
+    state.next_event_sequence += 1;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&state.event_path)
+        .with_context(|| format!("failed to open {}", state.event_path.display()))?;
+    serde_json::to_writer(&mut file, &event).context("failed to serialize workspace event")?;
+    file.write_all(b"\n")
+        .with_context(|| format!("failed to write {}", state.event_path.display()))?;
+    Ok(event)
+}
+
+fn read_event_log(path: &Path, tail: Option<usize>) -> Result<Vec<WorkspaceEvent>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut events = Vec::new();
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        events.push(
+            serde_json::from_str(line)
+                .with_context(|| format!("failed to parse event in {}", path.display()))?,
+        );
+    }
+    if let Some(tail) = tail {
+        let start = events.len().saturating_sub(tail);
+        Ok(events.split_off(start))
+    } else {
+        Ok(events)
+    }
+}
+
+fn response_with_status(
+    ok: bool,
+    message: impl Into<String>,
+    status: &WorkspaceStatus,
+) -> IpcResponse {
+    IpcResponse {
+        ok,
+        message: message.into(),
+        status: Some(status.clone()),
+        windows: None,
+        screenshot: None,
+        app_log: None,
+        events: None,
+    }
+}
+
 struct DaemonState {
     status: WorkspaceStatus,
     apps: Vec<AppProcess>,
+    event_path: PathBuf,
+    next_event_sequence: u64,
 }
 
 struct AppProcess {
@@ -741,14 +834,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
 
     let (response, should_stop) = match request {
         IpcRequest::Status => (
-            IpcResponse {
-                ok: true,
-                message: "workspace is running".to_string(),
-                status: Some(state.status.clone()),
-                windows: None,
-                screenshot: None,
-                app_log: None,
-            },
+            response_with_status(true, "workspace is running", &state.status),
             false,
         ),
         IpcRequest::LaunchApp {
@@ -756,277 +842,224 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             profile_id,
             cwd,
             env,
-        } => {
-            match spawn_app(
-                state,
-                LaunchSpec {
-                    command,
-                    profile_id,
-                    cwd,
-                    env,
-                },
-            ) {
-                Ok(()) => (
-                    IpcResponse {
-                        ok: true,
-                        message: "app launched in workspace".to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
+        } => match spawn_app(
+            state,
+            LaunchSpec {
+                command,
+                profile_id,
+                cwd,
+                env,
+            },
+        ) {
+            Ok(app) => {
+                record_event(
+                    state,
+                    "app_launch",
+                    serde_json::json!({
+                        "app_id": &app.id,
+                        "pid": app.pid,
+                        "command": &app.command,
+                        "profile_id": app.profile_id.as_deref(),
+                        "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
+                    }),
+                )?;
+                (
+                    response_with_status(true, "app launched in workspace", &state.status),
                     false,
-                ),
-                Err(error) => (
-                    IpcResponse {
-                        ok: false,
-                        message: error.to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
-                    false,
-                ),
+                )
             }
-        }
-        IpcRequest::ListWindows => match list_workspace_windows(&state.status) {
-            Ok(windows) => (
-                IpcResponse {
-                    ok: true,
-                    message: "workspace windows listed".to_string(),
-                    status: Some(state.status.clone()),
-                    windows: Some(windows),
-                    screenshot: None,
-                    app_log: None,
-                },
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
                 false,
             ),
+        },
+        IpcRequest::ListWindows => match list_workspace_windows(&state.status) {
+            Ok(windows) => {
+                record_event(
+                    state,
+                    "list_windows",
+                    serde_json::json!({ "count": windows.len() }),
+                )?;
+                let mut response =
+                    response_with_status(true, "workspace windows listed", &state.status);
+                response.windows = Some(windows);
+                (response, false)
+            }
             Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
+                response_with_status(false, error.to_string(), &state.status),
                 false,
             ),
         },
         IpcRequest::Screenshot { output_path } => {
             match capture_workspace_screenshot(&state.status, output_path) {
-                Ok(screenshot) => (
-                    IpcResponse {
-                        ok: true,
-                        message: "workspace screenshot captured".to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: Some(screenshot),
-                        app_log: None,
-                    },
-                    false,
-                ),
+                Ok(screenshot) => {
+                    record_event(
+                        state,
+                        "screenshot",
+                        serde_json::json!({ "path": screenshot.path.display().to_string() }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace screenshot captured", &state.status);
+                    response.screenshot = Some(screenshot);
+                    (response, false)
+                }
                 Err(error) => (
-                    IpcResponse {
-                        ok: false,
-                        message: error.to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
+                    response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
             }
         }
         IpcRequest::FocusWindow { window_id } => {
             match focus_workspace_window(&state.status, &window_id) {
-                Ok(()) => (
-                    IpcResponse {
-                        ok: true,
-                        message: "workspace window focused".to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
-                    false,
-                ),
+                Ok(()) => {
+                    record_event(
+                        state,
+                        "focus_window",
+                        serde_json::json!({ "window_id": &window_id }),
+                    )?;
+                    (
+                        response_with_status(true, "workspace window focused", &state.status),
+                        false,
+                    )
+                }
                 Err(error) => (
-                    IpcResponse {
-                        ok: false,
-                        message: error.to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
+                    response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
             }
         }
         IpcRequest::CloseWindow { window_id } => {
             match close_workspace_window(&state.status, &window_id) {
-                Ok(()) => (
-                    IpcResponse {
-                        ok: true,
-                        message: "workspace window close requested".to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
-                    false,
-                ),
+                Ok(()) => {
+                    record_event(
+                        state,
+                        "close_window",
+                        serde_json::json!({ "window_id": &window_id }),
+                    )?;
+                    (
+                        response_with_status(
+                            true,
+                            "workspace window close requested",
+                            &state.status,
+                        ),
+                        false,
+                    )
+                }
                 Err(error) => (
-                    IpcResponse {
-                        ok: false,
-                        message: error.to_string(),
-                        status: Some(state.status.clone()),
-                        windows: None,
-                        screenshot: None,
-                        app_log: None,
-                    },
+                    response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
             }
         }
         IpcRequest::Click { x, y } => match click_workspace(&state.status, x, y) {
-            Ok(()) => (
-                IpcResponse {
-                    ok: true,
-                    message: "workspace click sent".to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
-                false,
-            ),
+            Ok(()) => {
+                record_event(state, "click", serde_json::json!({ "x": x, "y": y }))?;
+                (
+                    response_with_status(true, "workspace click sent", &state.status),
+                    false,
+                )
+            }
             Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
+                response_with_status(false, error.to_string(), &state.status),
                 false,
             ),
         },
-        IpcRequest::Key { key } => match key_workspace(&state.status, key) {
-            Ok(()) => (
-                IpcResponse {
-                    ok: true,
-                    message: "workspace key sent".to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
-                false,
-            ),
-            Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
-                false,
-            ),
-        },
-        IpcRequest::TypeText { text } => match type_workspace_text(&state.status, text) {
-            Ok(()) => (
-                IpcResponse {
-                    ok: true,
-                    message: "workspace text typed".to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
-                false,
-            ),
-            Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
-                false,
-            ),
-        },
+        IpcRequest::Key { key } => {
+            let logged_key = key.trim().to_string();
+            match key_workspace(&state.status, key) {
+                Ok(()) => {
+                    record_event(state, "key", serde_json::json!({ "key": logged_key }))?;
+                    (
+                        response_with_status(true, "workspace key sent", &state.status),
+                        false,
+                    )
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
+        IpcRequest::TypeText { text } => {
+            let char_count = text.chars().count();
+            match type_workspace_text(&state.status, text) {
+                Ok(()) => {
+                    record_event(
+                        state,
+                        "type_text",
+                        serde_json::json!({ "char_count": char_count }),
+                    )?;
+                    (
+                        response_with_status(true, "workspace text typed", &state.status),
+                        false,
+                    )
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
         IpcRequest::ReadAppLog {
             app_id,
             stream,
             tail_bytes,
         } => match read_workspace_app_log(state, &app_id, &stream, tail_bytes) {
-            Ok(app_log) => (
-                IpcResponse {
-                    ok: true,
-                    message: "workspace app log read".to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: Some(app_log),
-                },
+            Ok(app_log) => {
+                record_event(
+                    state,
+                    "read_app_log",
+                    serde_json::json!({
+                        "app_id": &app_log.app_id,
+                        "stream": &app_log.stream,
+                        "tail_bytes": tail_bytes,
+                        "bytes_read": app_log.bytes_read,
+                        "truncated": app_log.truncated,
+                    }),
+                )?;
+                let mut response =
+                    response_with_status(true, "workspace app log read", &state.status);
+                response.app_log = Some(app_log);
+                (response, false)
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
                 false,
             ),
+        },
+        IpcRequest::ReadEvents { tail } => match read_event_log(&state.event_path, tail) {
+            Ok(events) => {
+                let mut response =
+                    response_with_status(true, "workspace events returned", &state.status);
+                response.events = Some(events);
+                (response, false)
+            }
             Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
+                response_with_status(false, error.to_string(), &state.status),
                 false,
             ),
         },
         IpcRequest::KillApp { app_id } => match kill_workspace_app(state, &app_id) {
-            Ok(message) => (
-                IpcResponse {
-                    ok: true,
-                    message,
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
-                false,
-            ),
+            Ok(message) => {
+                record_event(
+                    state,
+                    "kill_app",
+                    serde_json::json!({ "target": &app_id, "message": &message }),
+                )?;
+                (response_with_status(true, message, &state.status), false)
+            }
             Err(error) => (
-                IpcResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    status: Some(state.status.clone()),
-                    windows: None,
-                    screenshot: None,
-                    app_log: None,
-                },
+                response_with_status(false, error.to_string(), &state.status),
                 false,
             ),
         },
-        IpcRequest::Stop => (
-            IpcResponse {
-                ok: true,
-                message: "workspace stopping".to_string(),
-                status: Some(state.status.clone()),
-                windows: None,
-                screenshot: None,
-                app_log: None,
-            },
-            true,
-        ),
+        IpcRequest::Stop => {
+            record_event(state, "workspace_stop", serde_json::json!({}))?;
+            (
+                response_with_status(true, "workspace stopping", &state.status),
+                true,
+            )
+        }
     };
 
     serde_json::to_writer(&mut stream, &response)?;
@@ -1034,7 +1067,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     Ok(should_stop)
 }
 
-fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
+fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> {
     validate_launch_spec(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
     let mut child_command = Command::new(&spec.command[0]);
@@ -1077,8 +1110,11 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
         exit_status: None,
     };
     state.status.apps.push(info.clone());
-    state.apps.push(AppProcess { info, child });
-    Ok(())
+    state.apps.push(AppProcess {
+        info: info.clone(),
+        child,
+    });
+    Ok(info)
 }
 
 struct AppLogPaths {

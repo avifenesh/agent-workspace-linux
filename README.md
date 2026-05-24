@@ -50,6 +50,7 @@ cargo run -- workspace click 100 120
 cargo run -- workspace key Return
 cargo run -- workspace type "hello from the agent workspace"
 cargo run -- workspace logs --stream stdout app-12345
+cargo run -- workspace events --tail 20
 cargo run -- workspace setup --profile project-dev
 cargo run -- workspace kill-app app-12345
 cargo run -- workspace stop
@@ -87,8 +88,11 @@ socket daemon:
   launches also report the profile id on the app entry.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
-  `workspace logs`, `workspace setup`, and `workspace kill-app` inspect or act
-  through the same daemon, scoped to the workspace display.
+  `workspace logs`, `workspace events`, `workspace setup`, and
+  `workspace kill-app` inspect or act through the same daemon, scoped to the
+  workspace display.
+- `workspace events` reads a workspace-local JSONL event log for IPC actions.
+  Typed text is logged as metadata such as character count, not raw text.
 - `workspace setup --profile` launches the profile's setup commands as ordinary
   workspace apps; their status and logs are available through the same app
   status/log tools.
@@ -103,5 +107,5 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_status`, `workspace_launch_app`, `workspace_list_windows`,
 `workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
 `workspace_click`, `workspace_key`, `workspace_type_text`,
-`workspace_read_app_log`, `workspace_run_profile_setup`, `workspace_kill_app`,
-and `workspace_stop`.
+`workspace_read_app_log`, `workspace_events`, `workspace_run_profile_setup`,
+`workspace_kill_app`, and `workspace_stop`.

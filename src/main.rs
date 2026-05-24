@@ -76,7 +76,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, list, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, kill-app, stop"
+            "missing workspace command. Expected: start, list, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, events, kill-app, stop"
         );
     };
     match command {
@@ -138,6 +138,10 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             let (id, app_id, stream, tail_bytes) = parse_logs_options(&args[1..])?;
             print_json(&workspace::read_app_log(&id, app_id, stream, tail_bytes)?)
         }
+        "events" => {
+            let (id, tail) = parse_events_options(&args[1..])?;
+            print_json(&workspace::read_events(&id, tail)?)
+        }
         "setup" => {
             let (id, profile_id) = parse_workspace_setup_options(&args[1..])?;
             print_json(&profile::launch_profile_setup(&id, &profile_id)?)
@@ -153,7 +157,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         unknown => {
             bail!(
-                "unknown workspace command '{unknown}'. Expected: start, list, cleanup, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, setup, kill-app, stop"
+                "unknown workspace command '{unknown}'. Expected: start, list, cleanup, status, launch, windows, screenshot, focus-window, close-window, click, key, type, logs, events, setup, kill-app, stop"
             )
         }
     }
@@ -440,6 +444,30 @@ fn parse_logs_options(args: &[String]) -> Result<(String, String, String, Option
     bail!("workspace logs requires an app id")
 }
 
+fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut tail = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--tail" => {
+                tail = Some(
+                    value_after(args, index, "--tail")?
+                        .parse()
+                        .context("--tail must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            flag => bail!("unknown workspace events option '{flag}'"),
+        }
+    }
+    Ok((id, tail))
+}
+
 fn parse_workspace_setup_options(args: &[String]) -> Result<(String, String)> {
     let mut id = workspace::default_workspace_id();
     let mut profile_id = None;
@@ -578,6 +606,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|put|delete\n  agent-workspace-linux workspace start [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|put|delete\n  agent-workspace-linux workspace start [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

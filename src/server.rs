@@ -196,6 +196,7 @@ impl AgentWorkspaceLinux {
                 windows: None,
                 screenshot: None,
                 app_log: None,
+                events: None,
             },
             Err(error) => error_response(error.to_string(), None),
         })
@@ -456,6 +457,26 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_events",
+        description = "Read the workspace-local IPC event log. Sensitive typed text is recorded only as metadata such as character count.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_events(
+        &self,
+        Parameters(params): Parameters<WorkspaceEventsParams>,
+    ) -> Json<IpcResponse> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(result_response(workspace::read_events(&id, params.tail)))
+    }
+
+    #[tool(
         name = "workspace_run_profile_setup",
         description = "Launch setup commands declared by a saved profile inside an already running isolated workspace. Commands are launched as workspace apps and their stdout/stderr logs are available through workspace_read_app_log.",
         annotations(
@@ -534,7 +555,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles. workspace_status reports the applied profile policy snapshot and enforcement state; mount and restricted-network policies are currently declared but not enforced by the X11 runtime. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, and workspace_read_app_log to inspect the workspace before acting. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness. Use profile_list/profile_get/profile_put/profile_delete to manage saved environment profiles. workspace_status reports the applied profile policy snapshot and enforcement state; mount and restricted-network policies are currently declared but not enforced by the X11 runtime. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_start before launching apps. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_click, workspace_key, and workspace_type_text run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_screenshot, workspace_list_windows, workspace_read_app_log, and workspace_events to inspect the workspace before acting. workspace_events records IPC activity without storing raw typed text. workspace_close_window and workspace_kill_app terminate only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -700,6 +721,14 @@ struct WorkspaceReadAppLogParams {
     tail_bytes: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceEventsParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    tail: Option<usize>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 struct WorkspaceSetupParams {
     #[serde(default)]
@@ -729,5 +758,6 @@ fn error_response(message: String, status: Option<WorkspaceStatus>) -> IpcRespon
         windows: None,
         screenshot: None,
         app_log: None,
+        events: None,
     }
 }
