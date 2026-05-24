@@ -80,7 +80,8 @@ socket daemon:
   `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
   environment overrides. With `--profile`, profile cwd/env are applied unless
   explicit flags override them. Each launched app gets workspace-local
-  stdout/stderr log files reported in `workspace status`.
+  stdout/stderr log files reported in `workspace status`. Profile-backed
+  launches also report the profile id on the app entry.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   `workspace logs`, `workspace setup`, and `workspace kill-app` inspect or act
@@ -88,7 +89,9 @@ socket daemon:
 - `workspace setup --profile` launches the profile's setup commands as ordinary
   workspace apps; their status and logs are available through the same app
   status/log tools.
-- `workspace status` and `workspace stop` talk to the same socket.
+- `workspace status` reports the workspace profile id, launched apps, and app
+  profile ids when a profile shaped the workspace or app. `workspace status`
+  and `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,

@@ -220,6 +220,7 @@ pub fn apply_profile_to_start_options(
     height_explicit: bool,
 ) -> Result<WorkspaceProfile> {
     let profile = get_profile(profile_id)?;
+    options.profile_id = Some(profile.id.clone());
     if !width_explicit {
         if let Some(width) = profile.width {
             options.width = width;
@@ -239,6 +240,7 @@ pub fn apply_profile_to_launch_spec(
     cwd_explicit: bool,
 ) -> Result<WorkspaceProfile> {
     let profile = get_profile(profile_id)?;
+    spec.profile_id = Some(profile.id.clone());
     if !cwd_explicit {
         if let Some(cwd) = profile.cwd.clone() {
             spec.cwd = Some(cwd);
@@ -260,6 +262,7 @@ pub fn setup_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
             }
             Ok(LaunchSpec {
                 command: setup.command.clone(),
+                profile_id: Some(profile.id.clone()),
                 cwd: setup.cwd.clone().or_else(|| profile.cwd.clone()),
                 env: merged_env(profile.env.clone(), setup.env.clone()),
             })

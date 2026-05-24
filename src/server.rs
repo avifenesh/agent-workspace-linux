@@ -641,6 +641,7 @@ impl WorkspaceLaunchParams {
         let cwd_explicit = self.cwd.is_some();
         let mut spec = LaunchSpec {
             command: self.command,
+            profile_id: None,
             cwd: self.cwd,
             env: self.env,
         };

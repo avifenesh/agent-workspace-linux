@@ -308,7 +308,12 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 if command.is_empty() {
                     bail!("workspace launch requires a command after --");
                 }
-                let mut spec = LaunchSpec { command, cwd, env };
+                let mut spec = LaunchSpec {
+                    command,
+                    profile_id: None,
+                    cwd,
+                    env,
+                };
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
@@ -319,7 +324,12 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 if command.is_empty() {
                     bail!("workspace launch requires a command");
                 }
-                let mut spec = LaunchSpec { command, cwd, env };
+                let mut spec = LaunchSpec {
+                    command,
+                    profile_id: None,
+                    cwd,
+                    env,
+                };
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
@@ -469,6 +479,7 @@ fn parse_id_and_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut id = None;
+    let mut profile_id = None;
     let mut display = None;
     let mut width = None;
     let mut height = None;
@@ -481,6 +492,10 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
         match args[index].as_str() {
             "--id" => {
                 id = Some(value_after(&args, index, "--id")?.to_string());
+                index += 2;
+            }
+            "--profile" => {
+                profile_id = Some(value_after(&args, index, "--profile")?.to_string());
                 index += 2;
             }
             "--display" => {
@@ -521,6 +536,7 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
 
     Ok(DaemonOptions {
         id: id.context("daemon missing --id")?,
+        profile_id,
         display: display.context("daemon missing --display")?,
         width: width.context("daemon missing --width")?,
         height: height.context("daemon missing --height")?,

@@ -44,6 +44,7 @@ pub struct Check {
 #[derive(Debug, Clone)]
 pub struct WorkspaceStartOptions {
     pub id: String,
+    pub profile_id: Option<String>,
     pub width: u32,
     pub height: u32,
 }
@@ -52,6 +53,7 @@ impl Default for WorkspaceStartOptions {
     fn default() -> Self {
         Self {
             id: DEFAULT_WORKSPACE_ID.to_string(),
+            profile_id: None,
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
         }
@@ -61,6 +63,7 @@ impl Default for WorkspaceStartOptions {
 #[derive(Debug, Clone)]
 pub struct DaemonOptions {
     pub id: String,
+    pub profile_id: Option<String>,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -72,6 +75,8 @@ pub struct DaemonOptions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceStatus {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     pub ready: bool,
     pub display: String,
     pub width: u32,
@@ -118,6 +123,8 @@ pub struct WorkspaceCleanupEntry {
 pub struct WorkspaceApp {
     pub id: String,
     pub pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     pub command: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
@@ -141,6 +148,8 @@ pub struct EnvVar {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LaunchSpec {
     pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -188,6 +197,8 @@ pub enum IpcRequest {
     Status,
     LaunchApp {
         command: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<PathBuf>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -429,6 +440,7 @@ pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
         &workspace_socket_path(&id),
         IpcRequest::LaunchApp {
             command: spec.command,
+            profile_id: spec.profile_id,
             cwd: spec.cwd,
             env: spec.env,
         },
@@ -551,6 +563,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
     let mut state = DaemonState {
         status: WorkspaceStatus {
             id,
+            profile_id: options.profile_id,
             ready: true,
             display: options.display,
             width: options.width,
@@ -635,6 +648,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
 
     Ok(WorkspaceStartPlan::Start(DaemonOptions {
         id,
+        profile_id: options.profile_id,
         display,
         width: options.width,
         height: options.height,
@@ -649,11 +663,11 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     let stderr_path = options.runtime_dir.join("daemon.err.log");
     let exe = env::current_exe().context("failed to resolve current executable")?;
     let mut daemon = Command::new("setsid");
+    daemon.arg(exe).arg("daemon").arg("--id").arg(&options.id);
+    if let Some(profile_id) = &options.profile_id {
+        daemon.arg("--profile").arg(profile_id);
+    }
     daemon
-        .arg(exe)
-        .arg("daemon")
-        .arg("--id")
-        .arg(&options.id)
         .arg("--display")
         .arg(&options.display)
         .arg("--width")
@@ -712,8 +726,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             },
             false,
         ),
-        IpcRequest::LaunchApp { command, cwd, env } => {
-            match spawn_app(state, LaunchSpec { command, cwd, env }) {
+        IpcRequest::LaunchApp {
+            command,
+            profile_id,
+            cwd,
+            env,
+        } => {
+            match spawn_app(
+                state,
+                LaunchSpec {
+                    command,
+                    profile_id,
+                    cwd,
+                    env,
+                },
+            ) {
                 Ok(()) => (
                     IpcResponse {
                         ok: true,
@@ -1014,6 +1041,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<()> {
     let info = WorkspaceApp {
         id: format!("app-{pid}"),
         pid,
+        profile_id: spec.profile_id,
         command: spec.command,
         cwd: spec.cwd,
         env: spec.env,
