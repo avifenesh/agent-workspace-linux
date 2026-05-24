@@ -123,9 +123,13 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace setup --profile` launches the profile's setup commands as ordinary
   workspace apps; with `--wait`, commands are supervised in sequence and the
   result reports whether they completed and exited successfully. Their status
-  and logs are available through the same app status/log tools.
+  and logs are available through the same app status/log tools. If setup uses a
+  profile with policy that remains unenforced, it requires
+  `--ack-unenforced-policy`.
 - `workspace launch-profile-apps --profile` launches the profile's declared
   startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
+  If startup apps use a profile with policy that remains unenforced, they
+  require `--ack-unenforced-policy`.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
   hidden-workspace acknowledgement, unenforced-policy acknowledgement, applied

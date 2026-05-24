@@ -627,6 +627,7 @@ impl AgentWorkspaceLinux {
                 profile::ProfileSetupOptions {
                     wait: params.wait || params.timeout_ms.is_some(),
                     timeout_ms: params.timeout_ms,
+                    acknowledge_unenforced_policy: params.acknowledge_unenforced_policy,
                 },
             ) {
                 Ok(run) => ProfileSetupResult {
@@ -671,6 +672,9 @@ impl AgentWorkspaceLinux {
                     .id
                     .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
                 &params.profile,
+                profile::ProfileStartupOptions {
+                    acknowledge_unenforced_policy: params.acknowledge_unenforced_policy,
+                },
             ) {
                 Ok(run) => ProfileStartupResult {
                     ok: true,
@@ -1002,6 +1006,8 @@ struct WorkspaceSetupParams {
     wait: bool,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    #[serde(default)]
+    acknowledge_unenforced_policy: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -1009,6 +1015,8 @@ struct WorkspaceProfileLaunchParams {
     #[serde(default)]
     id: Option<String>,
     profile: String,
+    #[serde(default)]
+    acknowledge_unenforced_policy: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

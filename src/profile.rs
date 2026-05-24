@@ -113,6 +113,12 @@ pub struct ProfileStartupRun {
 pub struct ProfileSetupOptions {
     pub wait: bool,
     pub timeout_ms: Option<u64>,
+    pub acknowledge_unenforced_policy: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProfileStartupOptions {
+    pub acknowledge_unenforced_policy: bool,
 }
 
 pub fn profiles_path() -> PathBuf {
@@ -421,12 +427,19 @@ pub fn launch_profile_setup(
     profile_id: &str,
     options: ProfileSetupOptions,
 ) -> Result<ProfileSetupRun> {
-    let specs = setup_launch_specs(profile_id)?;
+    let mut specs = setup_launch_specs(profile_id)?;
     let mut launched = Vec::new();
     let mut waited = Vec::new();
     let mut app_ids = Vec::new();
+    for spec in &mut specs {
+        spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
+    }
     for spec in specs {
         let launch = workspace::launch_app_with_spec(workspace_id, spec)?;
+        if !launch.ok {
+            launched.push(launch);
+            break;
+        }
         if options.wait {
             let app_id = launched_app_id(&launch)
                 .context("profile setup launch did not return an app id")?;
@@ -436,9 +449,11 @@ pub fn launch_profile_setup(
         }
         launched.push(launch);
     }
-    let completed = options
-        .wait
-        .then(|| waited.iter().all(|response| response.ok));
+    let completed = options.wait.then(|| {
+        launched.iter().all(|response| response.ok)
+            && waited.iter().all(|response| response.ok)
+            && waited.len() == launched.len()
+    });
     let succeeded = options.wait.then(|| {
         completed.unwrap_or(false)
             && waited
@@ -461,9 +476,13 @@ pub fn launch_profile_setup(
 pub fn launch_profile_startup_apps(
     workspace_id: &str,
     profile_id: &str,
+    options: ProfileStartupOptions,
 ) -> Result<ProfileStartupRun> {
-    let specs = startup_app_launch_specs(profile_id)?;
+    let mut specs = startup_app_launch_specs(profile_id)?;
     let mut launched = Vec::new();
+    for spec in &mut specs {
+        spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
+    }
     for spec in specs {
         launched.push(workspace::launch_app_with_spec(workspace_id, spec)?);
     }
