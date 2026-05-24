@@ -272,6 +272,10 @@ pub struct WorkspaceApp {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_signal: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -4261,6 +4265,8 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         exit_status: None,
         exit_code: None,
         exit_signal: None,
+        stopped_at_unix: None,
+        runtime_seconds: None,
     };
     state.status.apps.push(info.clone());
     state.apps.push(AppProcess {
@@ -5960,6 +5966,7 @@ fn response_app<'a>(response: &'a IpcResponse, app_id: &str) -> Option<&'a Works
 }
 
 fn apply_app_exit_status(app: &mut WorkspaceApp, status: ExitStatus) {
+    mark_app_stopped(app);
     app.running = false;
     app.exit_status = Some(status.to_string());
     app.exit_code = status.code();
@@ -5967,10 +5974,17 @@ fn apply_app_exit_status(app: &mut WorkspaceApp, status: ExitStatus) {
 }
 
 fn mark_app_exit_error(app: &mut WorkspaceApp, error: impl ToString) {
+    mark_app_stopped(app);
     app.running = false;
     app.exit_status = Some(error.to_string());
     app.exit_code = None;
     app.exit_signal = None;
+}
+
+fn mark_app_stopped(app: &mut WorkspaceApp) {
+    let stopped_at_unix = unix_now();
+    app.stopped_at_unix = Some(stopped_at_unix);
+    app.runtime_seconds = Some(stopped_at_unix.saturating_sub(app.started_at_unix));
 }
 
 fn app_exit_event_detail(app: &WorkspaceApp) -> serde_json::Value {
@@ -5984,6 +5998,8 @@ fn app_exit_event_detail(app: &WorkspaceApp) -> serde_json::Value {
         "exit_status": app.exit_status.as_deref(),
         "exit_code": app.exit_code,
         "exit_signal": app.exit_signal,
+        "stopped_at_unix": app.stopped_at_unix,
+        "runtime_seconds": app.runtime_seconds,
     })
 }
 

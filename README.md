@@ -180,7 +180,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   the launched app. App action responses such as
   `launch`, `logs`, `wait-app`, and `kill-app` include the directly affected
   app in the top-level `apps` field. Completed apps report both a human
-  `exit_status` string and structured `exit_code`/`exit_signal` fields.
+  `exit_status` string and structured `exit_code`/`exit_signal` fields, plus
+  `stopped_at_unix` and `runtime_seconds` timing metadata.
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
   completion fields in one response. It accepts the same `--name`, `--cwd`,
