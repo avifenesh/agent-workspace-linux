@@ -10,6 +10,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const bin =
   process.env.AGENT_WORKSPACE_BIN ||
   path.join(repoRoot, "target", "debug", "agent-workspace-linux");
+const stopViaMcp = process.env.AGENT_WORKSPACE_MCP_STOP !== "0";
 
 if (!fs.existsSync(bin)) {
   throw new Error(`agent-workspace-linux binary not found at ${bin}; run cargo build first`);
@@ -66,7 +67,7 @@ child.stdout.on("data", (chunk) => {
     try {
       message = JSON.parse(line);
     } catch (error) {
-      fail(`invalid JSON-RPC line from MCP server: ${line}`);
+      abort(`invalid JSON-RPC line from MCP server: ${line}`);
     }
     const slot = pending.get(message.id);
     if (!slot) continue;
@@ -93,6 +94,10 @@ child.on("exit", (code, signal) => {
 });
 
 function fail(message) {
+  throw new Error(message);
+}
+
+function abort(message) {
   try {
     child.kill("SIGTERM");
   } catch {
@@ -258,12 +263,20 @@ async function main() {
       "workspace_status status should still expose full app history",
     );
   } finally {
-    childProcess.spawnSync(bin, ["workspace", "stop", "--id", workspaceId], {
-      cwd: repoRoot,
-      env: childEnv,
-      stdio: "ignore",
-      timeout: 15000,
-    });
+    if (stopViaMcp) {
+      const stopped = await callTool("workspace_stop", { id: workspaceId }, 15000);
+      assert(
+        stopped.ok === true && stopped.status?.ready === false,
+        `workspace_stop did not stop the smoke workspace: ${JSON.stringify(stopped)}`,
+      );
+    } else {
+      childProcess.spawnSync(bin, ["workspace", "stop", "--id", workspaceId], {
+        cwd: repoRoot,
+        env: childEnv,
+        stdio: "ignore",
+        timeout: 15000,
+      });
+    }
   }
 
   child.stdin.end();
