@@ -217,9 +217,10 @@ scripts/integration_smoke.sh
 
 The smoke uses temporary config/runtime directories, imports disposable profiles,
 checks pre-daemon approval previews, starts a real local-only workspace, verifies
-loopback-only network enforcement, checks session tracking, verifies that a
-workspace app can trigger workspace shutdown even if its stop client disappears
-before the response, and stops the workspace before exiting.
+loopback-only and disabled-network enforcement, checks read-write/read-only
+mount enforcement, checks session tracking, verifies that a workspace app can
+trigger workspace shutdown even if its stop client disappears before the
+response, and stops the workspace before exiting.
 
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.

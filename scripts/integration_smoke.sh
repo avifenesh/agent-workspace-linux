@@ -147,6 +147,68 @@ WORKSPACE_IDS=()
 run_awl workspace manifest --id "$LOCAL_ID" > "$SMOKE_DIR/local-stopped-manifest.json"
 assert_json '.manifest.session_id == $sid and .manifest.ready == false and .manifest.stopped_at_unix != null' "$SMOKE_DIR/local-stopped-manifest.json" --arg sid "$SESSION_ID"
 
+echo "== disabled-network workspace =="
+DISABLED_PROFILE="$SMOKE_DIR/disabled-profile.json"
+jq -n '{
+  id: "disabled-network",
+  network: {mode:"disabled"},
+  require_enforced_policy: true
+}' > "$DISABLED_PROFILE"
+run_awl profile import --json "$DISABLED_PROFILE" > /dev/null
+DISABLED_ID="disabled-network-smoke-$$"
+WORKSPACE_IDS+=("$DISABLED_ID")
+run_awl workspace start --ack-hidden-workspace --profile disabled-network --id "$DISABLED_ID" --purpose "Disabled network smoke" > "$SMOKE_DIR/disabled-start.json"
+run_awl workspace status --id "$DISABLED_ID" > "$SMOKE_DIR/disabled-status.json"
+assert_json '.applied_policy.enforcement.network.enforced == true and .applied_policy.enforcement.network.backend == "bubblewrap_unshare_net" and .user_acknowledged_unenforced_policy == false' "$SMOKE_DIR/disabled-status.json"
+DISABLED_PROBE="$SMOKE_DIR/disabled_network_probe.py"
+cat > "$DISABLED_PROBE" <<'PY'
+import socket
+
+try:
+    socket.create_connection(("1.1.1.1", 80), timeout=2)
+except OSError:
+    print("direct-blocked")
+else:
+    raise SystemExit("direct network unexpectedly reachable")
+
+try:
+    socket.getaddrinfo("example.com", 80)
+except OSError:
+    print("dns-blocked")
+else:
+    raise SystemExit("dns unexpectedly resolved")
+PY
+run_awl workspace run --id "$DISABLED_ID" --timeout-ms 8000 --tail-bytes 4000 -- python3 "$DISABLED_PROBE" > "$SMOKE_DIR/disabled-run.json"
+assert_json '.succeeded == true and (.stdout.content | contains("direct-blocked")) and (.stdout.content | contains("dns-blocked")) and .launch.apps[0].network_isolation == "bubblewrap_unshare_net"' "$SMOKE_DIR/disabled-run.json"
+run_awl workspace stop --id "$DISABLED_ID" > /dev/null
+
+echo "== mount enforcement workspace =="
+MOUNT_RW_HOST="$SMOKE_DIR/mount-rw"
+MOUNT_RO_HOST="$SMOKE_DIR/mount-ro"
+mkdir -p "$MOUNT_RW_HOST" "$MOUNT_RO_HOST"
+printf 'seed\n' > "$MOUNT_RO_HOST/seed.txt"
+MOUNT_PROFILE="$SMOKE_DIR/mount-profile.json"
+jq -n --arg rw "$MOUNT_RW_HOST" --arg ro "$MOUNT_RO_HOST" '{
+  id: "mount-policy",
+  cwd: "/workspace/rw",
+  require_enforced_policy: true,
+  mounts: [
+    {host_path: $rw, workspace_path: "/workspace/rw", mode: "read_write"},
+    {host_path: $ro, workspace_path: "/workspace/ro", mode: "read_only"}
+  ]
+}' > "$MOUNT_PROFILE"
+run_awl profile import --json "$MOUNT_PROFILE" > /dev/null
+MOUNT_ID="mount-policy-smoke-$$"
+WORKSPACE_IDS+=("$MOUNT_ID")
+run_awl workspace start --ack-hidden-workspace --profile mount-policy --id "$MOUNT_ID" --purpose "Mount policy smoke" > "$SMOKE_DIR/mount-start.json"
+run_awl workspace status --id "$MOUNT_ID" > "$SMOKE_DIR/mount-status.json"
+assert_json '.applied_policy.enforcement.mounts.enforced == true and .applied_policy.enforcement.mounts.backend == "bubblewrap_mount_namespace" and .user_acknowledged_unenforced_policy == false' "$SMOKE_DIR/mount-status.json"
+run_awl workspace run --id "$MOUNT_ID" --timeout-ms 8000 --tail-bytes 4000 -- bash -lc 'set -eu; test "$(cat /workspace/ro/seed.txt)" = "seed"; echo rw-ok > /workspace/rw/out.txt; if sh -c "echo blocked > /workspace/ro/nope.txt" 2>/tmp/ro-write.err; then echo ro-write-unexpected; exit 7; else echo ro-blocked; fi' > "$SMOKE_DIR/mount-run.json"
+assert_json '.succeeded == true and (.stdout.content | contains("ro-blocked")) and .launch.apps[0].mount_isolation == "bubblewrap_mount_namespace"' "$SMOKE_DIR/mount-run.json"
+grep -q '^rw-ok$' "$MOUNT_RW_HOST/out.txt"
+test ! -e "$MOUNT_RO_HOST/nope.txt"
+run_awl workspace stop --id "$MOUNT_ID" > /dev/null
+
 echo "== self-stop from workspace app =="
 SELF_STOP_ID="self-stop-smoke-$$"
 WORKSPACE_IDS+=("$SELF_STOP_ID")

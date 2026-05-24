@@ -67,5 +67,6 @@ Post-patch verification:
   could receive the response, the daemon still marked the workspace stopped and
   wrote `ready=false` plus `stopped_at_unix` to the manifest.
 - `scripts/integration_smoke.sh` now covers that self-stop lost-client case in
-  addition to doctor, profile import/export, open-profile dry-run, local-only
-  network enforcement, session tracking, event history, and stopped manifests.
+  addition to doctor, profile import/export, open-profile dry-run,
+  `network.mode=local_only`, `network.mode=disabled`, read-write/read-only mount
+  enforcement, session tracking, event history, and stopped manifests.
