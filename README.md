@@ -27,6 +27,10 @@ display/input scoping, profile mounts and disabled-network profiles through
 bubblewrap when available, display size, launch cwd, and environment overrides
 today.
 
+For the current bubblewrap runtime, profile mount sources must use absolute host
+paths, and mount destinations must be non-overlapping absolute paths under
+`/workspace/`.
+
 ## Commands
 
 ```bash

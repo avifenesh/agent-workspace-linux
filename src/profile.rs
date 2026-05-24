@@ -5,9 +5,12 @@ use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
+
+const WORKSPACE_MOUNT_ROOT: &str = "/workspace";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceProfile {
@@ -163,14 +166,7 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
     for env_var in &profile.env {
         validate_env_var(env_var)?;
     }
-    for mount in &profile.mounts {
-        if mount.host_path.as_os_str().is_empty() {
-            bail!("profile mount host_path cannot be empty");
-        }
-        if mount.workspace_path.as_os_str().is_empty() {
-            bail!("profile mount workspace_path cannot be empty");
-        }
-    }
+    validate_mounts(&profile.mounts)?;
     if matches!(profile.network.mode, NetworkMode::Allowlist)
         && profile.network.allow_hosts.is_empty()
     {
@@ -183,6 +179,57 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
         for env_var in &setup.env {
             validate_env_var(env_var)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_mounts(mounts: &[ProfileMount]) -> Result<()> {
+    let mut workspace_paths: BTreeSet<PathBuf> = BTreeSet::new();
+    for mount in mounts {
+        validate_mount_path(&mount.host_path, "host_path")?;
+        validate_mount_path(&mount.workspace_path, "workspace_path")?;
+        if !mount.host_path.is_absolute() {
+            bail!(
+                "profile mount host_path {} must be absolute",
+                mount.host_path.display()
+            );
+        }
+        if !mount.workspace_path.starts_with(WORKSPACE_MOUNT_ROOT)
+            || mount.workspace_path == Path::new(WORKSPACE_MOUNT_ROOT)
+        {
+            bail!(
+                "profile mount workspace_path {} must be under {WORKSPACE_MOUNT_ROOT}/",
+                mount.workspace_path.display()
+            );
+        }
+        for existing in &workspace_paths {
+            if mount.workspace_path.starts_with(existing)
+                || existing.starts_with(&mount.workspace_path)
+            {
+                bail!(
+                    "profile mount workspace_path {} overlaps {}",
+                    mount.workspace_path.display(),
+                    existing.display()
+                );
+            }
+        }
+        workspace_paths.insert(mount.workspace_path.clone());
+    }
+    Ok(())
+}
+
+fn validate_mount_path(path: &Path, field: &str) -> Result<()> {
+    if path.as_os_str().is_empty() {
+        bail!("profile mount {field} cannot be empty");
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        bail!(
+            "profile mount {field} {} cannot contain '..'",
+            path.display()
+        );
     }
     Ok(())
 }
