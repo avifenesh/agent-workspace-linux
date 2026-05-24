@@ -5318,8 +5318,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         }
     };
 
-    serde_json::to_writer(&mut stream, &response)?;
-    stream.write_all(b"\n")?;
+    let write_response = (|| -> Result<()> {
+        serde_json::to_writer(&mut stream, &response)
+            .context("failed to write workspace IPC response")?;
+        stream
+            .write_all(b"\n")
+            .context("failed to finish workspace IPC response")?;
+        Ok(())
+    })();
+    if let Err(error) = write_response {
+        if should_stop {
+            eprintln!("workspace IPC stop response failed after shutdown was requested: {error}");
+            return Ok(true);
+        }
+        return Err(error.into());
+    }
     Ok(should_stop)
 }
 
@@ -7984,6 +7997,21 @@ mod tests {
         }
     }
 
+    fn daemon_state_for_test(name: &str) -> DaemonState {
+        let mut status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
+        status.id = name.to_string();
+        let runtime_dir = env::temp_dir().join(format!("{name}-{}", std::process::id()));
+        status.runtime_dir = runtime_dir.clone();
+        status.socket_path = runtime_dir.join("control.sock");
+        status.xauthority_path = runtime_dir.join("Xauthority");
+        DaemonState {
+            status,
+            apps: Vec::new(),
+            event_path: runtime_dir.join(EVENT_LOG_FILE),
+            next_event_sequence: 1,
+        }
+    }
+
     #[test]
     fn strips_linux_deleted_exe_suffix() {
         let path = Path::new("/home/me/.local/bin/agent-workspace-linux (deleted)");
@@ -8157,6 +8185,24 @@ mod tests {
         .expect_err("run preview should require a live workspace daemon");
 
         assert!(error.to_string().contains("daemon is required"));
+    }
+
+    #[test]
+    fn stop_request_still_stops_when_client_disappears_before_response() {
+        let name = "stop-broken-client";
+        let mut state = daemon_state_for_test(name);
+        fs::create_dir_all(&state.status.runtime_dir).expect("runtime dir");
+        let (server, mut client) = UnixStream::pair().expect("unix stream pair");
+
+        serde_json::to_writer(&mut client, &IpcRequest::Stop).expect("stop request");
+        client.write_all(b"\n").expect("stop newline");
+        drop(client);
+
+        let should_stop =
+            handle_stream(server, &mut state).expect("broken response should not cancel stop");
+
+        assert!(should_stop);
+        let _ = fs::remove_dir_all(&state.status.runtime_dir);
     }
 
     #[test]

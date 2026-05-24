@@ -59,5 +59,10 @@ Findings:
 
 Post-patch verification:
 
-- Local `cargo test` passes 23 tests, including coverage for active profile
+- Local `cargo test` passes 24 tests, including coverage for active profile
   cwd/env inheritance and explicit per-launch profile override.
+- The installed CLI was rebuilt with `./install.sh`. A regression dogfood
+  launched a workspace app that invoked `workspace stop` from inside its own
+  workspace process group. Even though that stop client was terminated before it
+  could receive the response, the daemon still marked the workspace stopped and
+  wrote `ready=false` plus `stopped_at_unix` to the manifest.
