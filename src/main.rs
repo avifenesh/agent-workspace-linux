@@ -715,6 +715,19 @@ fn parse_open_profile_options(
                 open_options.setup.kill_on_timeout = true;
                 index += 1;
             }
+            "--startup-wait-window" => {
+                open_options.startup.wait_window = true;
+                index += 1;
+            }
+            "--startup-window-timeout-ms" => {
+                open_options.startup.wait_window = true;
+                open_options.startup.window_timeout_ms = Some(
+                    value_after(args, index, "--startup-window-timeout-ms")?
+                        .parse()
+                        .context("--startup-window-timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
             flag => bail!("unknown workspace open-profile option '{flag}'"),
         }
     }
@@ -2873,6 +2886,19 @@ fn parse_profile_launch_options(
                 options.acknowledge_unenforced_policy = true;
                 index += 1;
             }
+            "--wait-window" => {
+                options.wait_window = true;
+                index += 1;
+            }
+            "--window-timeout-ms" => {
+                options.wait_window = true;
+                options.window_timeout_ms = Some(
+                    value_after(args, index, "--window-timeout-ms")?
+                        .parse()
+                        .context("--window-timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
             flag => bail!("unknown workspace launch-profile-apps option '{flag}'"),
         }
     }
@@ -3025,14 +3051,14 @@ Usage:
   agent-workspace-linux profile path|list|get|check|template|put|delete
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
-  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
+  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace list
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace ipc-info [--id ID]
   agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
-  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
+  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]

@@ -232,7 +232,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_open_profile",
-        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds.",
+        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. Set startup_wait_window=true to wait for each startup app's first visible window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1414,7 +1414,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_profile_apps",
-        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace.",
+        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set wait_window=true to wait for each startup app's first visible window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1434,6 +1434,8 @@ impl AgentWorkspaceLinux {
                 &params.profile,
                 profile::ProfileStartupOptions {
                     acknowledge_unenforced_policy: params.acknowledge_unenforced_policy,
+                    wait_window: params.wait_window,
+                    window_timeout_ms: params.window_timeout_ms,
                 },
             ) {
                 Ok(run) => ProfileStartupResult {
@@ -1645,6 +1647,10 @@ struct WorkspaceOpenProfileParams {
     setup_timeout_ms: Option<u64>,
     #[serde(default)]
     setup_kill_on_timeout: bool,
+    #[serde(default)]
+    startup_wait_window: bool,
+    #[serde(default)]
+    startup_window_timeout_ms: Option<u64>,
 }
 
 impl WorkspaceOpenProfileParams {
@@ -1689,6 +1695,8 @@ impl WorkspaceOpenProfileParams {
             },
             startup: profile::ProfileStartupOptions {
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
+                wait_window: self.startup_wait_window || self.startup_window_timeout_ms.is_some(),
+                window_timeout_ms: self.startup_window_timeout_ms,
             },
         }
     }
@@ -2220,6 +2228,10 @@ struct WorkspaceProfileLaunchParams {
     profile: String,
     #[serde(default)]
     acknowledge_unenforced_policy: bool,
+    #[serde(default)]
+    wait_window: bool,
+    #[serde(default)]
+    window_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
