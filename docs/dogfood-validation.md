@@ -96,3 +96,14 @@ Post-patch verification:
   `Return` navigated to `docs/dogfood-validation.md`, `workspace_observe`
   captured a screenshot/events snapshot, and `workspace_stop` terminated both
   the dev server and Chrome before stale cleanup removed the runtime directory.
+- MCP dogfood covered a real Codex desktop QA run through the MCP surface using
+  a temporary profile for `/home/avifenesh/projects/codex-desktop-linux`
+  mounted read-write at `/workspace/project`, `network.mode=disabled`, and
+  `require_enforced_policy=true`. `profile_check` and `workspace_open_profile
+  --dry-run` reported bubblewrap enforcement for mounts and disabled networking
+  with only the hidden-workspace acknowledgement required. Inside the hidden
+  workspace, a Python socket probe to `1.1.1.1:80` failed with `Network is
+  unreachable`, while `node --test linux-features/agent-workspace/test.js`
+  passed 9 tests. After `workspace_stop`, saved-manifest log reads and events
+  still reported the passed test output and app history; stale cleanup removed
+  the runtime and the temporary profile was deleted.
