@@ -308,10 +308,14 @@ pub struct WorkspaceRun {
     pub app_id: String,
     pub launch: IpcResponse,
     pub wait: IpcResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill: Option<IpcResponse>,
     pub stdout: WorkspaceAppLog,
     pub stderr: WorkspaceAppLog,
     pub completed: bool,
     pub succeeded: bool,
+    pub timed_out: bool,
+    pub killed_on_timeout: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1562,29 +1566,40 @@ pub fn run_app_with_spec(
     spec: LaunchSpec,
     timeout_ms: Option<u64>,
     tail_bytes: Option<u64>,
+    kill_on_timeout: bool,
 ) -> Result<WorkspaceRun> {
     let launch = launch_app_with_spec(id, spec)?;
     let app_id =
         response_last_app_id(&launch).context("workspace launch did not return an app id")?;
     let wait = wait_app(id, app_id.clone(), timeout_ms)?;
+    let completed = wait.ok;
+    let timed_out = !completed;
+    let kill = if timed_out && kill_on_timeout {
+        Some(kill_app(id, app_id.clone())?)
+    } else {
+        None
+    };
     let stdout = read_app_log(id, app_id.clone(), "stdout".to_string(), tail_bytes)?
         .app_log
         .context("workspace stdout log response did not include app_log")?;
     let stderr = read_app_log(id, app_id.clone(), "stderr".to_string(), tail_bytes)?
         .app_log
         .context("workspace stderr log response did not include app_log")?;
-    let exit_code = response_app(&wait, &app_id).and_then(|app| app.exit_code);
-    let exit_signal = response_app(&wait, &app_id).and_then(|app| app.exit_signal);
-    let completed = wait.ok;
+    let exit_source = kill.as_ref().unwrap_or(&wait);
+    let exit_code = response_app(exit_source, &app_id).and_then(|app| app.exit_code);
+    let exit_signal = response_app(exit_source, &app_id).and_then(|app| app.exit_signal);
     let succeeded = completed && exit_code == Some(0);
     Ok(WorkspaceRun {
         app_id,
         launch,
         wait,
+        kill,
         stdout,
         stderr,
         completed,
         succeeded,
+        timed_out,
+        killed_on_timeout: timed_out && kill_on_timeout,
         exit_code,
         exit_signal,
     })

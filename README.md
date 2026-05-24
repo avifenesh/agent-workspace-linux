@@ -49,7 +49,7 @@ cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
-cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 -- cargo test
+cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace apps
@@ -158,6 +158,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
   completion fields in one response. It also accepts `--name`.
+  `--kill-on-timeout` terminates the launched app process group if the timeout
+  elapses, while preserving stdout/stderr logs in the response.
 - `workspace apps` lists launched apps from the daemon IPC state without dumping
   the full workspace status. It can filter by `--app APP_ID_OR_PID_OR_NAME`,
   app `--name TEXT`, `--profile PROFILE`, `--running`, or `--stopped`.
@@ -252,6 +254,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 app id/pid/name, app name substring, profile id, or running/stopped state.
 `workspace_stop` accepts `timeout_ms` to control how long it waits for the
 daemon IPC socket to close after requesting shutdown.
+`workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app
+process group when its timeout elapses.
 `workspace_list_windows` and window-targeted tools can filter by title, class,
 pid, app id, or app name, with class matching `wm_class` and `wm_instance`.
 `workspace_list_windows` accepts `include_hidden=true` to return

@@ -121,9 +121,14 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::launch_app_with_spec(&id, spec)?)
         }
         "run" => {
-            let (id, spec, timeout_ms, tail_bytes) = parse_run_options(&args[1..])?;
+            let (id, spec, timeout_ms, tail_bytes, kill_on_timeout) =
+                parse_run_options(&args[1..])?;
             print_json(&workspace::run_app_with_spec(
-                &id, spec, timeout_ms, tail_bytes,
+                &id,
+                spec,
+                timeout_ms,
+                tail_bytes,
+                kill_on_timeout,
             )?)
         }
         "launch-profile-apps" => {
@@ -971,7 +976,9 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
     bail!("workspace launch requires a command")
 }
 
-fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>, Option<u64>)> {
+fn parse_run_options(
+    args: &[String],
+) -> Result<(String, LaunchSpec, Option<u64>, Option<u64>, bool)> {
     let mut id = workspace::default_workspace_id();
     let mut name = None;
     let mut profile_id = None;
@@ -980,6 +987,7 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
     let mut user_acknowledged_unenforced_policy = false;
     let mut timeout_ms = None;
     let mut tail_bytes = None;
+    let mut kill_on_timeout = false;
     let mut env = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -1025,6 +1033,10 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
                 );
                 index += 2;
             }
+            "--kill-on-timeout" => {
+                kill_on_timeout = true;
+                index += 1;
+            }
             "--" => {
                 let command = args[index + 1..].to_vec();
                 if command.is_empty() {
@@ -1042,7 +1054,7 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec, timeout_ms, tail_bytes));
+                return Ok((id, spec, timeout_ms, tail_bytes, kill_on_timeout));
             }
             _ => {
                 let command = args[index..].to_vec();
@@ -1061,7 +1073,7 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec, timeout_ms, tail_bytes));
+                return Ok((id, spec, timeout_ms, tail_bytes, kill_on_timeout));
             }
         }
     }
@@ -2880,7 +2892,7 @@ Usage:
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
-  agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
+  agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
