@@ -112,6 +112,7 @@ cargo run -- workspace events --since 42
 cargo run -- workspace observe --events-since 42 --events-tail 20
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
 cargo run -- workspace kill-app app-12345
+cargo run -- workspace stop --dry-run
 cargo run -- workspace stop --timeout-ms 30000
 cargo run -- mcp
 ```
@@ -306,9 +307,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   candidates discovered at start time, which parts are currently enforced, and
   the last event sequence for incremental event polling. `workspace status` and
   `workspace stop` talk to the same socket; use `workspace manifest` for saved
-  disk state after shutdown. `workspace stop` waits for the daemon IPC socket to
-  close before returning; `--timeout-ms` overrides the default 30000ms wait. Its
-  response includes apps terminated by the workspace shutdown.
+  disk state after shutdown. `workspace stop --dry-run` previews running apps
+  without stopping the workspace. `workspace stop` waits for the daemon IPC
+  socket to close before returning; `--timeout-ms` overrides the default 30000ms
+  wait. Its response includes apps terminated by the workspace shutdown.
 - `workspace ipc-info` reports daemon IPC protocol metadata for the workspace,
   including protocol version, Unix socket path, framing, and encoding. Each
   workspace runtime directory is created with user-only permissions before the
@@ -345,8 +347,9 @@ running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
 directory candidates without deleting them.
-`workspace_stop` accepts `timeout_ms` to control how long it waits for the
-daemon IPC socket to close after requesting shutdown.
+`workspace_stop` accepts `dry_run=true` to preview currently running apps
+without stopping the workspace. It accepts `timeout_ms` to control how long it
+waits for the daemon IPC socket to close after requesting shutdown.
 `workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app
 process group when its timeout elapses.
 `workspace_wait_app` accepts `kill_on_timeout=true` for the same timeout cleanup

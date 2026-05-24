@@ -585,8 +585,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::kill_app(&id, app_id)?)
         }
         "stop" => {
-            let (id, timeout_ms) = parse_stop_options(&args[1..])?;
-            print_json(&workspace::stop_workspace(&id, timeout_ms)?)
+            let (id, timeout_ms, dry_run) = parse_stop_options(&args[1..])?;
+            print_json(&workspace::stop_workspace(&id, timeout_ms, dry_run)?)
         }
         unknown => {
             bail!(
@@ -2871,9 +2871,10 @@ fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>, Optio
     Ok((id, tail, since_sequence))
 }
 
-fn parse_stop_options(args: &[String]) -> Result<(String, Option<u64>)> {
+fn parse_stop_options(args: &[String]) -> Result<(String, Option<u64>, bool)> {
     let mut id = workspace::default_workspace_id();
     let mut timeout_ms = None;
+    let mut dry_run = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -2889,10 +2890,14 @@ fn parse_stop_options(args: &[String]) -> Result<(String, Option<u64>)> {
                 );
                 index += 2;
             }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
             flag => bail!("unknown workspace stop option '{flag}'"),
         }
     }
-    Ok((id, timeout_ms))
+    Ok((id, timeout_ms, dry_run))
 }
 
 fn parse_workspace_setup_options(
@@ -3212,6 +3217,6 @@ Usage:
   agent-workspace-linux workspace events [--id ID] [--tail N] [--since SEQUENCE]
   agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME
-  agent-workspace-linux workspace stop [--id ID] [--timeout-ms N]"#
+  agent-workspace-linux workspace stop [--id ID] [--timeout-ms N] [--dry-run]"#
     );
 }

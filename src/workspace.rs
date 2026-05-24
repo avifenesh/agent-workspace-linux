@@ -2059,9 +2059,23 @@ pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
     request(&workspace_socket_path(&id), IpcRequest::KillApp { app_id })
 }
 
-pub fn stop_workspace(id: &str, timeout_ms: Option<u64>) -> Result<IpcResponse> {
+pub fn stop_workspace(id: &str, timeout_ms: Option<u64>, dry_run: bool) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     let socket_path = workspace_socket_path(&id);
+    if dry_run {
+        let mut response = request(
+            &socket_path,
+            IpcRequest::ListApps {
+                app_id: None,
+                name_contains: None,
+                command_contains: None,
+                profile_id: None,
+                running: Some(true),
+            },
+        )?;
+        response.message = "workspace stop dry run".to_string();
+        return Ok(response);
+    }
     let mut response = request(&socket_path, IpcRequest::Stop)?;
     if response.ok {
         wait_for_socket_removed(
