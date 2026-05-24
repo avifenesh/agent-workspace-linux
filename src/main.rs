@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -241,6 +241,35 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 height,
                 timeout_ms,
             )?)
+        }
+        "raise-window" => {
+            let (id, window_id, title_contains, pid, app_id, timeout_ms) =
+                parse_targeted_window_action_options(&args[1..], "workspace raise-window")?;
+            print_json(&workspace::raise_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            )?)
+        }
+        "minimize-window" => {
+            let (id, window_id, title_contains, pid, app_id, timeout_ms) =
+                parse_targeted_window_action_options(&args[1..], "workspace minimize-window")?;
+            print_json(&workspace::minimize_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            )?)
+        }
+        "show-window" => {
+            let (id, window_id) =
+                parse_one_arg_command(&args[1..], "workspace show-window requires a window id")?;
+            print_json(&workspace::show_window(&id, window_id)?)
         }
         "click" => {
             let (id, x, y, button, count) = parse_click_options(&args[1..])?;
@@ -420,7 +449,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1281,6 +1310,39 @@ fn parse_resize_window_options(args: &[String]) -> Result<ResizeWindowOptions> {
         height,
         timeout_ms,
     ))
+}
+
+type TargetedWindowActionOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    Option<u64>,
+);
+
+fn parse_targeted_window_action_options(
+    args: &[String],
+    command_name: &str,
+) -> Result<TargetedWindowActionOptions> {
+    let (id, title_contains, pid, app_id, timeout_ms, values) =
+        parse_window_target_values(args, command_name)?;
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let window_id = if has_match_filter {
+        if !values.is_empty() {
+            bail!("{command_name} with match filters does not accept a window id");
+        }
+        None
+    } else {
+        if values.len() != 1 {
+            bail!("{command_name} requires WINDOW_ID or match filters");
+        }
+        if timeout_ms.is_some() {
+            bail!("{command_name} accepts --timeout-ms only with match filters");
+        }
+        Some(values[0].clone())
+    };
+    Ok((id, window_id, title_contains, pid, app_id, timeout_ms))
 }
 
 fn parse_click_options(args: &[String]) -> Result<(String, i32, i32, Option<u8>, Option<u8>)> {
@@ -2455,6 +2517,11 @@ Usage:
   agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
   agent-workspace-linux workspace resize-window [--id ID] WINDOW_ID WIDTH HEIGHT
   agent-workspace-linux workspace resize-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] WIDTH HEIGHT
+  agent-workspace-linux workspace raise-window [--id ID] WINDOW_ID
+  agent-workspace-linux workspace raise-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace minimize-window [--id ID] WINDOW_ID
+  agent-workspace-linux workspace minimize-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace show-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace click [--id ID] [--button N] [--count N] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y

@@ -382,6 +382,23 @@ pub enum IpcRequest {
         height: u32,
         timeout_ms: u64,
     },
+    RaiseWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: u64,
+    },
+    MinimizeWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        timeout_ms: u64,
+    },
+    ShowWindow {
+        window_id: String,
+    },
     Click {
         x: i32,
         y: i32,
@@ -965,6 +982,59 @@ pub fn resize_window(
             height,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
+    )
+}
+
+pub fn raise_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::RaiseWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn minimize_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::MinimizeWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn show_window(id: &str, window_id: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let window_id = sanitize_x11_id(&window_id, "window id")?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ShowWindow { window_id },
     )
 }
 
@@ -2208,6 +2278,149 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         false,
                     ),
                 },
+            }
+        }
+        IpcRequest::RaiseWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            ) {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => {
+                    match raise_workspace_window_target(state, window_id.as_deref(), &criteria) {
+                        Ok(Some(window)) => {
+                            record_event(
+                                state,
+                                "raise_window",
+                                serde_json::json!({
+                                    "window_id": &window.id,
+                                    "title_contains": criteria.title_contains.as_deref(),
+                                    "pid": criteria.pid,
+                                    "app_id": criteria.app_id.as_deref(),
+                                    "timeout_ms": criteria.timeout_ms,
+                                }),
+                            )?;
+                            let mut response = response_with_status(
+                                true,
+                                "workspace window raised",
+                                &state.status,
+                            );
+                            response.windows = Some(vec![window]);
+                            (response, false)
+                        }
+                        Ok(None) => {
+                            let mut response = response_with_status(
+                                false,
+                                "workspace window not found before timeout",
+                                &state.status,
+                            );
+                            response.windows = Some(Vec::new());
+                            (response, false)
+                        }
+                        Err(error) => (
+                            response_with_status(false, error.to_string(), &state.status),
+                            false,
+                        ),
+                    }
+                }
+            }
+        }
+        IpcRequest::MinimizeWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            ) {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => {
+                    match minimize_workspace_window_target(state, window_id.as_deref(), &criteria) {
+                        Ok(Some(window)) => {
+                            record_event(
+                                state,
+                                "minimize_window",
+                                serde_json::json!({
+                                    "window_id": &window.id,
+                                    "title_contains": criteria.title_contains.as_deref(),
+                                    "pid": criteria.pid,
+                                    "app_id": criteria.app_id.as_deref(),
+                                    "timeout_ms": criteria.timeout_ms,
+                                }),
+                            )?;
+                            let mut response = response_with_status(
+                                true,
+                                "workspace window minimized",
+                                &state.status,
+                            );
+                            response.windows = Some(vec![window]);
+                            (response, false)
+                        }
+                        Ok(None) => {
+                            let mut response = response_with_status(
+                                false,
+                                "workspace window not found before timeout",
+                                &state.status,
+                            );
+                            response.windows = Some(Vec::new());
+                            (response, false)
+                        }
+                        Err(error) => (
+                            response_with_status(false, error.to_string(), &state.status),
+                            false,
+                        ),
+                    }
+                }
+            }
+        }
+        IpcRequest::ShowWindow { window_id } => {
+            match show_workspace_window(&state.status, &window_id) {
+                Ok(window) => {
+                    record_event(
+                        state,
+                        "show_window",
+                        serde_json::json!({ "window_id": &window.id }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace window shown", &state.status);
+                    response.windows = Some(vec![window]);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
             }
         }
         IpcRequest::Click {
@@ -3518,6 +3731,32 @@ fn resize_workspace_window_target(
         .with_context(|| format!("failed to resize workspace window {}", window.id))
 }
 
+fn raise_workspace_window_target(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    raise_workspace_window(&state.status, &window.id)
+        .map(Some)
+        .with_context(|| format!("failed to raise workspace window {}", window.id))
+}
+
+fn minimize_workspace_window_target(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    minimize_workspace_window(&state.status, &window.id)
+        .with_context(|| format!("failed to minimize workspace window {}", window.id))?;
+    Ok(Some(window))
+}
+
 struct WindowClickResult {
     window: WorkspaceWindow,
     x: i32,
@@ -4037,6 +4276,36 @@ fn resize_workspace_window(
         .output()
         .context("failed to run xdotool windowsize")?;
     output_text(output, "xdotool windowsize")?;
+    window_info(status, &window_id)
+}
+
+fn raise_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<WorkspaceWindow> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    let output = workspace_command(status, "xdotool")
+        .args(["windowraise", &window_id])
+        .output()
+        .context("failed to run xdotool windowraise")?;
+    output_text(output, "xdotool windowraise")?;
+    window_info(status, &window_id)
+}
+
+fn minimize_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<()> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    let output = workspace_command(status, "xdotool")
+        .args(["windowminimize", "--sync", &window_id])
+        .output()
+        .context("failed to run xdotool windowminimize")?;
+    output_text(output, "xdotool windowminimize")?;
+    Ok(())
+}
+
+fn show_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<WorkspaceWindow> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    let output = workspace_command(status, "xdotool")
+        .args(["windowmap", "--sync", &window_id])
+        .output()
+        .context("failed to run xdotool windowmap")?;
+    output_text(output, "xdotool windowmap")?;
     window_info(status, &window_id)
 }
 

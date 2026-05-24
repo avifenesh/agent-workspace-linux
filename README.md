@@ -64,6 +64,9 @@ cargo run -- workspace close-window 4194316
 cargo run -- workspace close-window --title xterm --timeout-ms 10000
 cargo run -- workspace move-window --title xterm 80 60
 cargo run -- workspace resize-window --title xterm 800 500
+cargo run -- workspace raise-window --title xterm
+cargo run -- workspace minimize-window --title xterm
+cargo run -- workspace show-window 4194316
 cargo run -- workspace click 100 120
 cargo run -- workspace click --button 3 100 120
 cargo run -- workspace click-window --title xterm 24 32
@@ -142,8 +145,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace windows`, `workspace active-window`, `workspace observe`,
   `workspace wait-window`, `workspace screenshot`, `workspace screenshot-window`,
   `workspace focus-window`, `workspace close-window`, `workspace move-window`,
-  `workspace resize-window`, `workspace click`, `workspace click-window`,
-  `workspace move-pointer`,
+  `workspace resize-window`, `workspace raise-window`,
+  `workspace minimize-window`, `workspace show-window`, `workspace click`,
+  `workspace click-window`, `workspace move-pointer`,
   `workspace move-pointer-window`, `workspace drag`, `workspace drag-window`,
   `workspace scroll`, `workspace scroll-window`, `workspace key`,
   `workspace key-window`, `workspace type`, `workspace type-window`,
@@ -154,11 +158,13 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace display. `active-window` reports the current workspace-local focus,
   and `observe` returns status, visible windows, active window, and optionally a
   root screenshot in one IPC call. `focus-window`, `screenshot-window`,
-  `close-window`, `move-window`, `resize-window`, `key-window`, and
-  `type-window` can use either a raw X11 window id or the same title/pid/app
-  filters as `wait-window`; app filters match the launched process and its
-  child processes. `move-window` and `resize-window` update the returned window
-  geometry so screenshots and interactions can be staged predictably.
+  `close-window`, `move-window`, `resize-window`, `raise-window`,
+  `minimize-window`, `key-window`, and `type-window` can use either a raw X11
+  window id or the same title/pid/app filters as `wait-window`; app filters
+  match the launched process and its child processes. `move-window` and
+  `resize-window` update the returned window geometry so screenshots and
+  interactions can be staged predictably. `raise-window`, `minimize-window`,
+  and `show-window` manage visibility and stacking without terminating apps.
   `move-pointer` and
   `move-pointer-window` move the workspace pointer without clicking. `click` and
   `click-window` can set button/count for right-clicks and double-clicks.
@@ -202,7 +208,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
 `workspace_focus_matching_window`, `workspace_close_window`, `workspace_click`,
 `workspace_close_matching_window`, `workspace_move_window`,
-`workspace_resize_window`, `workspace_click_window`,
+`workspace_resize_window`, `workspace_raise_window`,
+`workspace_minimize_window`, `workspace_show_window`, `workspace_click_window`,
 `workspace_move_pointer`, `workspace_move_pointer_window`, `workspace_drag`,
 `workspace_drag_window`, `workspace_scroll`, `workspace_scroll_window`,
 `workspace_key`, `workspace_key_window`, `workspace_type_text`,
