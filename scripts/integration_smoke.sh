@@ -149,6 +149,42 @@ run_awl workspace open-profile --dry-run --ack-hidden-workspace --profile open-p
 assert_json '.would_open == true and .setup.command_count == 1 and .startup.app_count == 1 and .approval.approved == true' "$SMOKE_DIR/open-ack.json"
 test ! -d "$RUNTIME_DIR/agent-workspace-linux/$OPEN_ID"
 
+echo "== open-profile setup and startup =="
+OPEN_REAL_PROFILE="$SMOKE_DIR/open-real-profile.json"
+jq -n '{
+  id: "open-real",
+  width: 900,
+  height: 650,
+  cwd: "/tmp",
+  setup_commands: [
+    {
+      name: "setup-marker",
+      command: ["bash", "-lc", "printf setup-ok > \"$AGENT_WORKSPACE_RUNTIME_DIR/setup-marker.txt\""]
+    }
+  ],
+  startup_apps: [
+    {
+      name: "open-profile-message",
+      command: ["xmessage", "-buttons", "OK:0", "-default", "OK", "Open profile smoke"]
+    }
+  ]
+}' > "$OPEN_REAL_PROFILE"
+run_awl profile import --json "$OPEN_REAL_PROFILE" > /dev/null
+OPEN_REAL_ID="open-real-smoke-$$"
+WORKSPACE_IDS+=("$OPEN_REAL_ID")
+run_awl workspace open-profile --ack-hidden-workspace --profile open-real --id "$OPEN_REAL_ID" --purpose "Open profile smoke" --setup --setup-timeout-ms 10000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window --startup-window-timeout-ms 10000 > "$SMOKE_DIR/open-real.json"
+assert_json '.ready == true and .setup_succeeded == true and .startup_launched == true and .setup.succeeded == true and .startup.launched[0].ok == true and (.startup.launched[0].screenshot.bytes > 0)' "$SMOKE_DIR/open-real.json"
+test "$(cat "$RUNTIME_DIR/agent-workspace-linux/$OPEN_REAL_ID/setup-marker.txt")" = "setup-ok"
+OPEN_REAL_APP_ID="$(jq -r '.startup.launched[0].apps[0].id' "$SMOKE_DIR/open-real.json")"
+OPEN_REAL_WINDOW_ID="$(jq -r '.startup.launched[0].windows[0].id' "$SMOKE_DIR/open-real.json")"
+run_awl workspace apps --id "$OPEN_REAL_ID" --app "$OPEN_REAL_APP_ID" > "$SMOKE_DIR/open-real-apps.json"
+assert_json '.apps[0].name == "open-profile-message" and .apps[0].running == true and .apps[0].profile_id == "open-real"' "$SMOKE_DIR/open-real-apps.json"
+run_awl workspace key-window --id "$OPEN_REAL_ID" "$OPEN_REAL_WINDOW_ID" Return > "$SMOKE_DIR/open-real-key.json"
+run_awl workspace wait-app --id "$OPEN_REAL_ID" --timeout-ms 5000 "$OPEN_REAL_APP_ID" > "$SMOKE_DIR/open-real-wait.json"
+assert_json '.ok == true and .apps[0].running == false and .apps[0].exit_code == 0' "$SMOKE_DIR/open-real-wait.json"
+run_awl workspace stop --id "$OPEN_REAL_ID" > "$SMOKE_DIR/open-real-stop.json"
+assert_json '.ok == true and .status.ready == false' "$SMOKE_DIR/open-real-stop.json"
+
 echo "== local-only workspace =="
 LOCAL_PROFILE="$SMOKE_DIR/local-profile.json"
 jq -n '{
