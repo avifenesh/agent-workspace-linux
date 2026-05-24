@@ -413,7 +413,9 @@ exiting.
   and process group id so forked GUI child windows can still be associated with
   the launched app. App action responses such as
   `launch`, `logs`, `wait-app`, and `kill-app` include the directly affected
-  app in the top-level `apps` field. Completed apps report both a human
+  app in the top-level `apps` field without embedding the full historical app
+  list in the nested status. Use `workspace status`, `workspace observe`, or
+  `workspace apps` when the full app list is needed. Completed apps report both a human
   `exit_status` string and structured `exit_code`/`exit_signal` fields, plus
   `stopped_at_unix` and `runtime_seconds` timing metadata.
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for

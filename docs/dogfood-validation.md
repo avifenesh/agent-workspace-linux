@@ -81,9 +81,19 @@ Remaining gaps from this pass:
 - Hard permission enforcement in Codex for Linux should still wait until the UI
   approval boundary is wired so agents cannot call the same workspace tools
   outside the user-approved path.
-- MCP app-action responses still include large full-status payloads with long
-  stopped-app history. They are correct but too noisy for agent context and for
-  any UI that wants concise action feedback.
+- Direct MCP `workspace_stop` from the temporary stdio smoke harness caused the
+  harness process to receive `SIGTERM` before the stop response was read. The
+  same workspace cleanup succeeded through the CLI in the same temp runtime, so
+  stop/revoke needs one more MCP-specific dogfood pass before hard permission
+  enforcement.
+
+Addressed in this pass:
+
+- MCP and CLI app-action responses no longer embed long stopped-app history in
+  nested `status.apps`. They keep the directly affected app in top-level
+  `apps`, while explicit `workspace_status`, `workspace_observe`, and
+  `workspace_list_apps` remain the full inspection surfaces. This is covered by
+  unit tests, integration smoke, and the stdio MCP smoke.
 
 Previous environment:
 

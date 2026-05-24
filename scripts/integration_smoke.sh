@@ -312,6 +312,7 @@ else:
 PY
 run_awl workspace run --id "$LOCAL_ID" --timeout-ms 8000 --tail-bytes 4000 -- python3 "$NETWORK_PROBE" > "$SMOKE_DIR/local-run.json"
 assert_json '.succeeded == true and (.stdout.content | contains("loopback-ok")) and (.stdout.content | contains("external-blocked")) and .launch.apps[0].network_isolation == "bubblewrap_loopback_only"' "$SMOKE_DIR/local-run.json"
+assert_json '(.launch.status.apps | length) == 0 and (.wait.status.apps | length) == 0 and (.launch.apps | length) == 1 and (.wait.apps | length) == 1' "$SMOKE_DIR/local-run.json"
 run_awl workspace env --id "$LOCAL_ID" > "$SMOKE_DIR/local-env.json"
 assert_json '.environment.session_id == $sid and (.environment.variables[] | select(.name == "AGENT_WORKSPACE_SESSION_ID" and .value == $sid))' "$SMOKE_DIR/local-env.json" --arg sid "$SESSION_ID"
 run_awl workspace events --id "$LOCAL_ID" --tail 20 > "$SMOKE_DIR/local-events.json"
@@ -355,6 +356,7 @@ else:
 PY
 run_awl workspace run --id "$DISABLED_ID" --timeout-ms 8000 --tail-bytes 4000 -- python3 "$DISABLED_PROBE" > "$SMOKE_DIR/disabled-run.json"
 assert_json '.succeeded == true and (.stdout.content | contains("direct-blocked")) and (.stdout.content | contains("dns-blocked")) and .launch.apps[0].network_isolation == "bubblewrap_unshare_net"' "$SMOKE_DIR/disabled-run.json"
+assert_json '(.launch.status.apps | length) == 0 and (.wait.status.apps | length) == 0 and (.launch.apps | length) == 1 and (.wait.apps | length) == 1' "$SMOKE_DIR/disabled-run.json"
 if [[ -n "$BROWSER_BIN" ]]; then
   run_awl workspace launch --id "$DISABLED_ID" --name disabled-network-browser --wait-window --screenshot-window --window-timeout-ms 20000 -- "$BROWSER_BIN" "--user-data-dir=$SMOKE_DIR/disabled-browser-profile" --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check --new-window https://example.com > "$SMOKE_DIR/disabled-browser-launch.json"
   assert_json '.ok == true and (.screenshot.bytes > 0) and .apps[0].network_isolation == "bubblewrap_unshare_net" and .windows[0].wm_class == "Google-chrome"' "$SMOKE_DIR/disabled-browser-launch.json"

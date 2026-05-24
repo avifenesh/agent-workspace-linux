@@ -33,13 +33,15 @@ fs.writeFileSync(
   )}\n`,
 );
 
+const childEnv = {
+  ...process.env,
+  XDG_CONFIG_HOME: configDir,
+  XDG_RUNTIME_DIR: runtimeDir,
+};
+
 const child = childProcess.spawn(bin, ["mcp", "--permissions", permissionsPath], {
   cwd: repoRoot,
-  env: {
-    ...process.env,
-    XDG_CONFIG_HOME: configDir,
-    XDG_RUNTIME_DIR: runtimeDir,
-  },
+  env: childEnv,
   stdio: ["pipe", "pipe", "pipe"],
 });
 
@@ -78,10 +80,14 @@ child.stdout.on("data", (chunk) => {
   }
 });
 
-child.on("exit", (code) => {
+child.on("exit", (code, signal) => {
   for (const slot of pending.values()) {
     clearTimeout(slot.timer);
-    slot.reject(new Error(`MCP server exited before response, code=${code}, stderr=${stderr}`));
+    slot.reject(
+      new Error(
+        `MCP server exited before ${slot.method} response, code=${code}, signal=${signal}, stderr=${stderr}`,
+      ),
+    );
   }
   pending.clear();
 });
@@ -95,15 +101,15 @@ function fail(message) {
   throw new Error(message);
 }
 
-function request(method, params, timeoutMs = 5000) {
+function request(method, params, timeoutMs = 5000, label = method) {
   const id = nextId++;
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error(`timed out waiting for ${method}`));
+      reject(new Error(`timed out waiting for ${label}`));
     }, timeoutMs);
-    pending.set(id, { resolve, reject, timer });
+    pending.set(id, { resolve, reject, timer, method: label });
   });
 }
 
@@ -111,11 +117,11 @@ function notify(method, params) {
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
 }
 
-async function callTool(name, args) {
+async function callTool(name, args, timeoutMs) {
   const result = await request("tools/call", {
     name,
     arguments: args || {},
-  });
+  }, timeoutMs, `tools/call ${name}`);
   if (result.isError) {
     throw new Error(`tool ${name} returned MCP error: ${JSON.stringify(result)}`);
   }
@@ -179,7 +185,7 @@ async function main() {
   );
 
   const allowed = await callTool("profile_put", {
-    dry_run: true,
+    dry_run: false,
     profile: {
       id: "allowed",
       network: { mode: "disabled" },
@@ -188,8 +194,77 @@ async function main() {
       startup_apps: [{ command: ["sh", "-lc", "true"] }],
     },
   });
-  assert(allowed.ok === true, "profile_put dry-run should allow narrowed profile");
-  assert(allowed.saved === false && allowed.would_create === true, "profile_put dry-run shape changed");
+  assert(allowed.ok === true, "profile_put should allow narrowed profile");
+  assert(allowed.saved === true && allowed.created === true, "profile_put save shape changed");
+
+  const workspaceId = `mcp-smoke-${process.pid}`;
+  const started = await callTool(
+    "workspace_start",
+    {
+      id: workspaceId,
+      profile: "allowed",
+      acknowledge_hidden_workspace: true,
+      purpose: "MCP compact response smoke",
+    },
+    15000,
+  );
+  assert(started.ok === true, "workspace_start should create the smoke workspace");
+
+  try {
+    const run = await callTool(
+      "workspace_run_app",
+      {
+        id: workspaceId,
+        name: "mcp-compact-probe",
+        profile: "allowed",
+        command: ["sh", "-lc", "echo mcp-run-ok"],
+        timeout_ms: 5000,
+        tail_bytes: 2000,
+      },
+      15000,
+    );
+    assert(
+      run.ok === true && run.run?.succeeded === true,
+      `workspace_run_app did not succeed: ${JSON.stringify(run)}`,
+    );
+    assert(
+      run.run?.stdout?.content?.includes("mcp-run-ok"),
+      "workspace_run_app stdout did not include expected output",
+    );
+    assert(
+      Array.isArray(run.run?.launch?.apps) && run.run.launch.apps.length === 1,
+      "workspace_run_app launch did not include the affected app",
+    );
+    assert(
+      Array.isArray(run.run?.wait?.apps) && run.run.wait.apps.length === 1,
+      "workspace_run_app wait did not include the affected app",
+    );
+    assert(
+      Array.isArray(run.run?.launch?.status?.apps) && run.run.launch.status.apps.length === 0,
+      "workspace_run_app launch status should not include full app history",
+    );
+    assert(
+      Array.isArray(run.run?.wait?.status?.apps) && run.run.wait.status.apps.length === 0,
+      "workspace_run_app wait status should not include full app history",
+    );
+
+    const status = await callTool("workspace_status", { id: workspaceId }, 5000);
+    assert(
+      Array.isArray(status.apps) && status.apps.length >= 1,
+      "workspace_status should still expose full app history",
+    );
+    assert(
+      Array.isArray(status.status?.apps) && status.status.apps.length >= 1,
+      "workspace_status status should still expose full app history",
+    );
+  } finally {
+    childProcess.spawnSync(bin, ["workspace", "stop", "--id", workspaceId], {
+      cwd: repoRoot,
+      env: childEnv,
+      stdio: "ignore",
+      timeout: 15000,
+    });
+  }
 
   child.stdin.end();
   await new Promise((resolve, reject) => {

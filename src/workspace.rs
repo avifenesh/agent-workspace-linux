@@ -3359,7 +3359,7 @@ fn response_with_status(
     IpcResponse {
         ok,
         message: message.into(),
-        status: Some(status.clone()),
+        status: Some(compact_status(status)),
         start_preview: None,
         launch_preview: None,
         ipc: None,
@@ -3373,6 +3373,12 @@ fn response_with_status(
         clipboard: None,
         events: None,
     }
+}
+
+fn compact_status(status: &WorkspaceStatus) -> WorkspaceStatus {
+    let mut status = status.clone();
+    status.apps.clear();
+    status
 }
 
 fn attach_active_window_best_effort(response: &mut IpcResponse, status: &WorkspaceStatus) {
@@ -3481,6 +3487,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         }
         IpcRequest::Status => {
             let mut response = response_with_status(true, "workspace is running", &state.status);
+            response.status = Some(state.status.clone());
             response.apps = Some(state.status.apps.clone());
             (response, false)
         }
@@ -8406,6 +8413,60 @@ mod tests {
             event_path: runtime_dir.join(EVENT_LOG_FILE),
             next_event_sequence: 1,
         }
+    }
+
+    fn workspace_app_for_test(id: &str) -> WorkspaceApp {
+        WorkspaceApp {
+            id: id.to_string(),
+            name: Some("probe".to_string()),
+            pid: 4242,
+            process_group_id: Some(4242),
+            profile_id: Some("qa".to_string()),
+            mount_isolation: "host".to_string(),
+            network_isolation: "host".to_string(),
+            command: vec!["/bin/true".to_string()],
+            cwd: None,
+            env: Vec::new(),
+            stdout_path: None,
+            stderr_path: None,
+            started_at_unix: 1,
+            running: false,
+            exit_status: Some("exit status: 0".to_string()),
+            exit_code: Some(0),
+            exit_signal: None,
+            stopped_at_unix: Some(2),
+            runtime_seconds: Some(1),
+        }
+    }
+
+    #[test]
+    fn action_responses_use_compact_status_without_app_history() {
+        let mut status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
+        status.apps = vec![
+            workspace_app_for_test("app-old-1"),
+            workspace_app_for_test("app-old-2"),
+        ];
+
+        let response = response_with_status(true, "ok", &status);
+
+        assert!(response.status.expect("compact status").apps.is_empty());
+        assert!(response.apps.is_none());
+    }
+
+    #[test]
+    fn explicit_status_response_preserves_full_app_history() {
+        let mut status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
+        status.apps = vec![
+            workspace_app_for_test("app-old-1"),
+            workspace_app_for_test("app-old-2"),
+        ];
+
+        let mut response = response_with_status(true, "workspace is running", &status);
+        response.status = Some(status.clone());
+        response.apps = Some(status.apps.clone());
+
+        assert_eq!(response.apps.as_ref().expect("top-level apps").len(), 2);
+        assert_eq!(response.status.expect("full status").apps.len(), 2);
     }
 
     #[test]
