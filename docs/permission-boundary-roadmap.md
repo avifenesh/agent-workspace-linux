@@ -109,8 +109,10 @@ Current gate status on 2026-05-25:
   commands, screenshots, window targeting, input, clipboard, app logs, events,
   manifests, stop, stale cleanup, daemon-crash recovery, self-stop from inside
   a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
-  discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`. `cargo test`
-  currently passes 53 tests.
+  discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`. A
+  Codex-spawned MCP pass on this repository also revalidated project-dev
+  mounts, Rust toolchain access, GUI input, events, Chrome, and current network
+  enforcement. `cargo test` currently passes 54 tests.
 - A still has known product gaps: host-localhost bridging for `local_only` and
   more varied real-project coverage. Broad network allowlists and egress proxy
   filtering are out of scope for this pass; the product network model is
@@ -122,9 +124,12 @@ Current gate status on 2026-05-25:
   renderer URLs, the live panel appears in the conversation view, and it hides
   on Settings pages where the dedicated Agent Workspaces controls are shown. The
   installed app was verified through Chrome DevTools Protocol with real MCP
-  bridge calls, a live screenshot, and Refresh interaction. B still needs the
-  final UI approval boundary and a richer live viewer before it should become a
-  hard trust boundary.
+  bridge calls, a live screenshot, and Refresh interaction. A later installed
+  app dogfood pass verified the polished viewer with Refresh/Details/Stop/
+  Revoke controls, a Details tray for active window/running app/hidden display,
+  and an embedded Stop action that stops the workspace from inside the app. B
+  still needs the final UI approval boundary before it should become a hard
+  trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, PID-less arbitrary app window targeting, and
   recovery/inspection flows work at the primitive level.
