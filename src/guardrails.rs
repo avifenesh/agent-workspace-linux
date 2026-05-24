@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 10,
+        version: 11,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -71,7 +71,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 &["workspace launch", "workspace_launch_app"],
                 "Workspace launch spawns a process only when dry_run is false.",
                 "--dry-run or dry_run=true",
-                "Returns command, cwd/env, profile policy, acknowledgement, isolation, and would-launch status without creating an app record.",
+                "Requires a running workspace daemon, then returns command, cwd/env, profile policy, acknowledgement, isolation, and would-launch status without creating an app record.",
             ),
             rule(
                 "workspace-run-preview",
@@ -79,7 +79,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 &["workspace run", "workspace_run_app"],
                 "Workspace run launches and waits for a process only when dry_run is false.",
                 "--dry-run or dry_run=true",
-                "Returns launch preview plus timeout, log-tail, and kill-on-timeout options without spawning a process.",
+                "Requires a running workspace daemon, then returns launch preview plus timeout, log-tail, and kill-on-timeout options without spawning a process.",
             ),
             rule(
                 "profile-startup-launch-preview",
@@ -90,7 +90,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 ],
                 "Profile startup apps are launched only when dry_run is false.",
                 "--dry-run or dry_run=true",
-                "Returns one launch preview per declared startup app without spawning processes.",
+                "Requires a running workspace daemon, then returns one launch preview per declared startup app without spawning processes.",
             ),
             rule(
                 "profile-setup-launch-preview",
@@ -98,7 +98,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 &["workspace setup", "workspace_run_profile_setup"],
                 "Profile setup commands are launched only when dry_run is false.",
                 "--dry-run or dry_run=true",
-                "Returns one launch preview per declared setup command without spawning processes.",
+                "Requires a running workspace daemon, then returns one launch preview per declared setup command without spawning processes.",
             ),
             rule(
                 "profile-put-preview",

@@ -1347,6 +1347,8 @@ pub fn preview_launch_app(
     let missing_unenforced_policy_ack =
         requires_unenforced_policy_ack && !spec.user_acknowledged_unenforced_policy;
 
+    let running_status = status_workspace(&id)
+        .with_context(|| format!("workspace {id:?} daemon is required for launch dry run"))?;
     let mut blockers = Vec::new();
     if blocks_unenforced_policy {
         blockers.push(
@@ -1360,40 +1362,26 @@ pub fn preview_launch_app(
         );
     }
 
-    let mut workspace_running = false;
-    let mut status = None;
-    let mut applied_policy = launch_policy.clone();
+    let workspace_running = true;
+    let applied_policy = spec
+        .applied_policy
+        .clone()
+        .or_else(|| running_status.applied_policy.clone());
     let (mut mount_isolation, mut network_isolation) =
         launch_isolation_labels_for_policy(applied_policy.as_ref());
-
-    match status_workspace(&id) {
-        Ok(running_status) => {
-            workspace_running = true;
-            applied_policy = spec
-                .applied_policy
-                .clone()
-                .or_else(|| running_status.applied_policy.clone());
-            (mount_isolation, network_isolation) =
-                launch_isolation_labels_for_policy(applied_policy.as_ref());
-            if !blocks_unenforced_policy && !missing_unenforced_policy_ack {
-                match bubblewrap_sandbox_for_launch(
-                    &running_status,
-                    applied_policy.as_ref(),
-                    spec.cwd.as_deref(),
-                ) {
-                    Ok(sandbox) => {
-                        (mount_isolation, network_isolation) =
-                            launch_isolation_labels_from_sandbox(sandbox.as_ref());
-                    }
-                    Err(error) => {
-                        blockers.push(format!("launch isolation validation failed: {error}"));
-                    }
-                }
+    if !blocks_unenforced_policy && !missing_unenforced_policy_ack {
+        match bubblewrap_sandbox_for_launch(
+            &running_status,
+            applied_policy.as_ref(),
+            spec.cwd.as_deref(),
+        ) {
+            Ok(sandbox) => {
+                (mount_isolation, network_isolation) =
+                    launch_isolation_labels_from_sandbox(sandbox.as_ref());
             }
-            status = Some(running_status);
-        }
-        Err(error) => {
-            blockers.push(format!("workspace is not running: {error}"));
+            Err(error) => {
+                blockers.push(format!("launch isolation validation failed: {error}"));
+            }
         }
     }
 
@@ -1410,7 +1398,7 @@ pub fn preview_launch_app(
     Ok(IpcResponse {
         ok: true,
         message: "workspace launch dry run returned".to_string(),
-        status,
+        status: Some(running_status),
         start_preview: None,
         launch_preview: Some(WorkspaceLaunchPreview {
             id,
@@ -7719,9 +7707,9 @@ mod tests {
     }
 
     #[test]
-    fn launch_preview_for_stopped_workspace_does_not_spawn() {
+    fn launch_preview_requires_running_workspace_daemon() {
         let id = format!("launch-preview-stopped-{}", std::process::id());
-        let response = preview_launch_app(
+        let error = preview_launch_app(
             &id,
             LaunchSpec {
                 command: vec!["/bin/true".to_string()],
@@ -7739,76 +7727,15 @@ mod tests {
             Some(123),
             true,
         )
-        .expect("launch preview should return a structured response");
+        .expect_err("launch preview should require a live workspace daemon");
 
-        assert!(response.ok);
-        assert!(response.status.is_none());
-        let preview = response
-            .launch_preview
-            .expect("dry run should include launch preview");
-        assert_eq!(preview.id, id);
-        assert_eq!(preview.command, vec!["/bin/true".to_string()]);
-        assert_eq!(preview.name.as_deref(), Some("probe"));
-        assert!(preview.wait_window);
-        assert_eq!(preview.window_timeout_ms, Some(123));
-        assert!(preview.screenshot_window);
-        assert_eq!(preview.mount_isolation, "host");
-        assert_eq!(preview.network_isolation, "host");
-        assert!(!preview.workspace_running);
-        assert!(!preview.ok_to_launch);
-        assert!(!preview.would_launch);
-        assert!(preview
-            .blockers
-            .iter()
-            .any(|blocker| blocker.contains("workspace is not running")));
+        assert!(error.to_string().contains("daemon is required"));
     }
 
     #[test]
-    fn launch_preview_reports_missing_unenforced_policy_ack() {
-        let id = format!("launch-preview-ack-{}", std::process::id());
-        let launch_policy = policy(
-            NetworkPolicy {
-                mode: NetworkMode::LocalOnly,
-                allow_hosts: vec!["localhost:3000".to_string()],
-            },
-            true,
-            true,
-        );
-        let response = preview_launch_app(
-            &id,
-            LaunchSpec {
-                command: vec!["/bin/true".to_string()],
-                name: None,
-                profile_id: Some("local-only".to_string()),
-                applied_policy: Some(launch_policy),
-                user_acknowledged_unenforced_policy: false,
-                cwd: None,
-                env: Vec::new(),
-            },
-            false,
-            None,
-            false,
-        )
-        .expect("launch preview should return acknowledgement fields");
-
-        let preview = response
-            .launch_preview
-            .expect("dry run should include launch preview");
-        assert!(preview.can_acknowledge_unenforced_policy);
-        assert!(preview.requires_unenforced_policy_ack);
-        assert!(preview.missing_unenforced_policy_ack);
-        assert!(!preview.blocks_unenforced_policy);
-        assert_eq!(preview.network_isolation, "host");
-        assert!(preview
-            .blockers
-            .iter()
-            .any(|blocker| blocker.contains("requires acknowledgement")));
-    }
-
-    #[test]
-    fn run_preview_wraps_launch_preview_without_logs() {
+    fn run_preview_requires_running_workspace_daemon() {
         let id = format!("run-preview-stopped-{}", std::process::id());
-        let preview = preview_run_app_with_spec(
+        let error = preview_run_app_with_spec(
             &id,
             LaunchSpec {
                 command: vec!["/bin/true".to_string()],
@@ -7823,19 +7750,24 @@ mod tests {
             Some(1024),
             true,
         )
-        .expect("run preview should return structured launch preview");
+        .expect_err("run preview should require a live workspace daemon");
 
-        assert_eq!(preview.workspace_id, id);
-        assert_eq!(preview.timeout_ms, Some(456));
-        assert_eq!(preview.effective_timeout_ms, 456);
-        assert_eq!(preview.tail_bytes, Some(1024));
-        assert!(preview.kill_on_timeout);
-        assert!(!preview.would_run);
-        let launch_preview = preview
-            .launch
-            .launch_preview
-            .expect("run dry run should include nested launch preview");
-        assert_eq!(launch_preview.name.as_deref(), Some("run-probe"));
-        assert!(!launch_preview.would_launch);
+        assert!(error.to_string().contains("daemon is required"));
+    }
+
+    #[test]
+    fn local_only_launch_policy_requires_acknowledgement() {
+        let launch_policy = policy(
+            NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string()],
+            },
+            true,
+            true,
+        );
+
+        assert!(launch_policy.can_acknowledge_unenforced_policy());
+        assert!(launch_policy.has_requested_unenforced_policy());
+        assert!(!launch_policy.blocks_requested_unenforced_policy());
     }
 }

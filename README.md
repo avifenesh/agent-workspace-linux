@@ -229,7 +229,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace launch --dry-run` previews the command, cwd/env overrides, launch
   profile policy, acknowledgement requirements, mount/network isolation labels,
   and whether the app would launch without spawning a process or adding an app
-  record.
+  record. It requires a running workspace daemon; use `workspace start --dry-run`
+  for the pre-daemon start preview.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   attachment environment: `DISPLAY`, `XAUTHORITY`, `AGENT_WORKSPACE_ID`,
   `AGENT_WORKSPACE_RUNTIME_DIR`, and `AGENT_WORKSPACE_SOCKET`. It can also set
@@ -261,7 +262,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--env`, `--profile`, and `--ack-unenforced-policy` launch shaping flags as
   `workspace launch`.
   `--dry-run` returns the launch preview plus timeout, log-tail, and
-  kill-on-timeout options without spawning the app.
+  kill-on-timeout options without spawning the app. It requires a running
+  workspace daemon.
   `--kill-on-timeout` terminates the launched app process group if the timeout
   elapses, while preserving stdout/stderr logs in the response.
 - `workspace apps` lists launched apps from the daemon IPC state without dumping
@@ -347,14 +349,14 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   result reports whether they completed and exited successfully. Their status
   and logs are available through the same app status/log tools. If setup uses a
   profile with policy that remains unenforced, it requires
-  `--ack-unenforced-policy`. `--dry-run` returns one launch preview per setup
-  command without spawning any app processes. `--kill-on-timeout` terminates a
-  timed-out setup command process group and records the kill response in the setup
-  result.
+  `--ack-unenforced-policy`. `--dry-run` requires a running workspace daemon and
+  returns one launch preview per setup command without spawning any app
+  processes. `--kill-on-timeout` terminates a timed-out setup command process
+  group and records the kill response in the setup result.
 - `workspace launch-profile-apps --profile` launches the profile's declared
   startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
-  `--dry-run` returns one launch preview per startup app without spawning any app
-  processes.
+  `--dry-run` requires a running workspace daemon and returns one launch preview
+  per startup app without spawning any app processes.
   Profile setup commands and startup apps may include `name` fields, and those
   names become stable app targets after launch. If startup apps use a profile
   with policy that remains unenforced, they require `--ack-unenforced-policy`.
@@ -425,13 +427,16 @@ acknowledgement, runtime readiness, profile policy acknowledgement, strict
 policy blocks, and whether a new workspace would be created.
 `workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
 profile policy acknowledgement, isolation labels, blockers, and whether an app
-would be launched without spawning it.
+would be launched without spawning it. This requires a running workspace daemon.
 `workspace_run_app` accepts `dry_run=true` to preview the launch plus timeout,
-log-tail, and kill-on-timeout options without spawning the command.
+log-tail, and kill-on-timeout options without spawning the command. This requires
+a running workspace daemon.
 `workspace_launch_profile_apps` accepts `dry_run=true` to return one launch
 preview per startup app declared by the profile without spawning any of them.
+This requires a running workspace daemon.
 `workspace_run_profile_setup` accepts `dry_run=true` to return one launch preview
-per setup command declared by the profile without spawning any of them.
+per setup command declared by the profile without spawning any of them. This
+requires a running workspace daemon.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime

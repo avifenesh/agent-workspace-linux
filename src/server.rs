@@ -504,7 +504,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_app",
-        description = "Launch an optionally named app inside an isolated agent workspace. Set dry_run=true to preview the command, cwd/env, profile policy, acknowledgement requirements, and mount/network isolation without spawning a process. The command runs with the workspace attachment environment, including DISPLAY, XAUTHORITY, AGENT_WORKSPACE_ID, AGENT_WORKSPACE_RUNTIME_DIR, and AGENT_WORKSPACE_SOCKET. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. Set screenshot_window=true to also capture the first visible launched-app window; this implies waiting for a window. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
+        description = "Launch an optionally named app inside an isolated agent workspace. Set dry_run=true to preview against a running workspace daemon, returning the command, cwd/env, profile policy, acknowledgement requirements, and mount/network isolation without spawning a process. The command runs with the workspace attachment environment, including DISPLAY, XAUTHORITY, AGENT_WORKSPACE_ID, AGENT_WORKSPACE_RUNTIME_DIR, and AGENT_WORKSPACE_SOCKET. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. Set screenshot_window=true to also capture the first visible launched-app window; this implies waiting for a window. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -548,7 +548,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_run_app",
-        description = "Launch an optionally named app inside an isolated agent workspace, wait for it to exit or time out, optionally kill it on timeout, and return stdout/stderr logs in one response. Set dry_run=true to preview the launch and run options without spawning a process. The command uses the same workspace attachment environment, optional cwd/env overrides, and optional launch profile policy as workspace_launch_app.",
+        description = "Launch an optionally named app inside an isolated agent workspace, wait for it to exit or time out, optionally kill it on timeout, and return stdout/stderr logs in one response. Set dry_run=true to preview the launch and run options against a running workspace daemon without spawning a process. The command uses the same workspace attachment environment, optional cwd/env overrides, and optional launch profile policy as workspace_launch_app.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1554,7 +1554,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_run_profile_setup",
-        description = "Launch setup commands declared by a saved profile inside an already running isolated workspace. Set dry_run=true to preview each setup launch without spawning processes. Set wait=true or timeout_ms to supervise setup in sequence and report completion/success; set kill_on_timeout=true to terminate timed-out setup commands.",
+        description = "Launch setup commands declared by a saved profile inside an already running isolated workspace. Set dry_run=true to preview each setup launch against the running workspace daemon without spawning processes. Set wait=true or timeout_ms to supervise setup in sequence and report completion/success; set kill_on_timeout=true to terminate timed-out setup commands.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1606,7 +1606,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_profile_apps",
-        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set dry_run=true to preview each startup launch without spawning processes. Set wait_window=true to wait for each startup app's first visible window, or screenshot_window=true to also capture each first startup window.",
+        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set dry_run=true to preview each startup launch against the running workspace daemon without spawning processes. Set wait_window=true to wait for each startup app's first visible window, or screenshot_window=true to also capture each first startup window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
