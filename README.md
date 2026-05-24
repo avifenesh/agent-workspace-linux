@@ -96,7 +96,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   environment overrides. With `--profile`, profile cwd/env are applied unless
   explicit flags override them. Each launched app gets workspace-local
   stdout/stderr log files reported in `workspace status`. Profile-backed
-  launches also report the profile id on the app entry.
+  launches also report the profile id and effective mount/network isolation on
+  the app entry.
 - `workspace windows`, `workspace screenshot`, `workspace focus-window`,
   `workspace close-window`, `workspace click`, `workspace key`, `workspace type`,
   `workspace logs`, `workspace events`, `workspace setup`, and

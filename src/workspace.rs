@@ -145,6 +145,8 @@ pub struct WorkspaceApp {
     pub pid: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+    pub mount_isolation: String,
+    pub network_isolation: String,
     pub command: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
@@ -901,8 +903,6 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             },
         ) {
             Ok(app) => {
-                let network_isolation = uses_bubblewrap_network_isolation(&state.status);
-                let mount_isolation = uses_bubblewrap_mount_isolation(&state.status);
                 record_event(
                     state,
                     "app_launch",
@@ -912,8 +912,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "command": &app.command,
                         "profile_id": app.profile_id.as_deref(),
                         "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
-                        "network_isolation": if network_isolation { "bubblewrap_unshare_net" } else { "host" },
-                        "mount_isolation": if mount_isolation { "bubblewrap_mount_namespace" } else { "host" },
+                        "network_isolation": &app.network_isolation,
+                        "mount_isolation": &app.mount_isolation,
                     }),
                 )?;
                 (
@@ -1124,6 +1124,14 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
     validate_launch_spec(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
     let sandbox = bubblewrap_sandbox_for_launch(&state.status, spec.cwd.as_deref())?;
+    let mount_isolation = sandbox
+        .as_ref()
+        .map(|sandbox| sandbox.mount_isolation.clone())
+        .unwrap_or_else(|| "host".to_string());
+    let network_isolation = sandbox
+        .as_ref()
+        .map(|sandbox| sandbox.network_isolation.clone())
+        .unwrap_or_else(|| "host".to_string());
     let mut child_command = if let Some(sandbox) = &sandbox {
         let mut command = Command::new("bwrap");
         command
@@ -1167,6 +1175,8 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         id: format!("app-{pid}"),
         pid,
         profile_id: spec.profile_id,
+        mount_isolation,
+        network_isolation,
         command: spec.command,
         cwd: spec.cwd,
         env: spec.env,
@@ -1186,6 +1196,8 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
 
 struct BubblewrapSandbox {
     args: Vec<String>,
+    mount_isolation: String,
+    network_isolation: String,
 }
 
 fn bubblewrap_sandbox_for_launch(
@@ -1201,6 +1213,12 @@ fn bubblewrap_sandbox_for_launch(
     if mounts {
         Ok(Some(BubblewrapSandbox {
             args: restricted_mount_namespace_args(status, cwd, network)?,
+            mount_isolation: "bubblewrap_mount_namespace".to_string(),
+            network_isolation: if network {
+                "bubblewrap_unshare_net".to_string()
+            } else {
+                "host".to_string()
+            },
         }))
     } else {
         let mut args = vec!["--dev-bind".to_string(), "/".to_string(), "/".to_string()];
@@ -1211,7 +1229,15 @@ fn bubblewrap_sandbox_for_launch(
             args.push("--chdir".to_string());
             args.push(cwd.display().to_string());
         }
-        Ok(Some(BubblewrapSandbox { args }))
+        Ok(Some(BubblewrapSandbox {
+            args,
+            mount_isolation: "host".to_string(),
+            network_isolation: if network {
+                "bubblewrap_unshare_net".to_string()
+            } else {
+                "host".to_string()
+            },
+        }))
     }
 }
 
