@@ -1,3 +1,4 @@
+mod guardrails;
 mod policy;
 mod profile;
 mod server;
@@ -17,6 +18,7 @@ async fn main() -> Result<()> {
             let report = workspace::doctor_report();
             print_json(&report)
         }
+        Some("guardrails") => print_json(&guardrails::guardrail_summary()),
         Some("mcp") => server::serve_mcp().await,
         Some("profile") => {
             args.remove(0);
@@ -36,7 +38,7 @@ async fn main() -> Result<()> {
         }
         Some(command) => {
             bail!(
-                "unknown command '{command}'. Expected one of: doctor, mcp, profile, workspace, --help"
+                "unknown command '{command}'. Expected one of: doctor, guardrails, mcp, profile, workspace, --help"
             )
         }
     }
@@ -3233,6 +3235,7 @@ fn print_help() {
 
 Usage:
   agent-workspace-linux doctor
+  agent-workspace-linux guardrails
   agent-workspace-linux mcp
   agent-workspace-linux profile path|list|get|check|template|put|delete
   agent-workspace-linux profile put --json PATH [--replace] [--dry-run]

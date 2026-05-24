@@ -35,6 +35,7 @@ paths, and mount destinations must be non-overlapping absolute paths under
 
 ```bash
 cargo run -- doctor
+cargo run -- guardrails
 cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
@@ -338,7 +339,7 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--shell` prints shell-safe `export` lines for manual attachment.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
-`profile_path`, `profile_list`, `profile_get`, `profile_check`,
+`workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_manifest`, `workspace_artifacts`,
@@ -361,6 +362,9 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 app id/pid/name, app name substring, command substring, profile id, or
 running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
+`workspace_guardrails` returns a machine-readable summary of acknowledgement,
+dry-run, explicit override, timeout-termination, and workspace-scope rules for
+approval UI flows.
 `profile_put` accepts `dry_run=true` to preview whether a profile would be
 created, replaced, or rejected. It rejects existing profile ids by default; set
 `replace=true` only when intentionally overwriting a saved environment profile.
