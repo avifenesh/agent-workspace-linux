@@ -1528,7 +1528,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_stop",
-        description = "Stop an isolated agent workspace, terminate apps launched inside it, and wait for the daemon IPC socket to close. Defaults to a 30000ms wait; set timeout_ms to override.",
+        description = "Stop an isolated agent workspace, terminate apps launched inside it, return the apps stopped by the shutdown, and wait for the daemon IPC socket to close. Defaults to a 30000ms wait; set timeout_ms to override.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,

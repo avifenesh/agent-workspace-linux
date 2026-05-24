@@ -1888,11 +1888,9 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     }
 
     eprintln!("agent workspace daemon stopping");
+    let _ = terminate_running_workspace_apps(&mut state);
     state.status.ready = false;
     write_workspace_manifest(&state.status, Some(unix_now()))?;
-    for app in &mut state.apps {
-        let _ = terminate_app_process(&app.info.id, &mut app.child);
-    }
     if let Some(wm) = &mut window_manager {
         let _ = wm.kill();
         let _ = wm.wait();
@@ -4197,11 +4195,18 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             ),
         },
         IpcRequest::Stop => {
-            record_event(state, "workspace_stop", serde_json::json!({}))?;
-            (
-                response_with_status(true, "workspace stopping", &state.status),
-                true,
-            )
+            let stopped_apps = terminate_running_workspace_apps(state)?;
+            record_event(
+                state,
+                "workspace_stop",
+                serde_json::json!({
+                    "stopped_app_count": stopped_apps.len(),
+                    "app_ids": stopped_apps.iter().map(|app| app.id.as_str()).collect::<Vec<_>>(),
+                }),
+            )?;
+            let mut response = response_with_status(true, "workspace stopping", &state.status);
+            response.apps = Some(stopped_apps);
+            (response, true)
         }
     };
 
@@ -5899,6 +5904,26 @@ fn kill_workspace_app(
         record_event(state, "app_exit", detail)?;
     }
     Ok((message, app_info, killed))
+}
+
+fn terminate_running_workspace_apps(state: &mut DaemonState) -> Result<Vec<WorkspaceApp>> {
+    let mut stopped_apps = Vec::new();
+    let mut exit_events = Vec::new();
+    for app in &mut state.apps {
+        if app.info.running {
+            match terminate_app_process(&app.info.id, &mut app.child) {
+                Ok(status) => apply_app_exit_status(&mut app.info, status),
+                Err(error) => mark_app_exit_error(&mut app.info, error),
+            }
+            exit_events.push(app_exit_event_detail(&app.info));
+            stopped_apps.push(app.info.clone());
+        }
+    }
+    state.status.apps = state.apps.iter().map(|app| app.info.clone()).collect();
+    for detail in exit_events {
+        record_event(state, "app_exit", detail)?;
+    }
+    Ok(stopped_apps)
 }
 
 fn resolve_workspace_app<'a>(apps: &'a [WorkspaceApp], app_id: &str) -> Result<&'a WorkspaceApp> {
