@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     env, fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
-    os::unix::process::ExitStatusExt,
+    os::unix::process::{CommandExt, ExitStatusExt},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     str::FromStr,
@@ -27,8 +27,16 @@ const DEFAULT_PASTE_KEY: &str = "ctrl+v";
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
+const APP_TERMINATE_GRACE_MS: u64 = 1_000;
+const SIGTERM: i32 = 15;
+const SIGKILL: i32 = 9;
+const ESRCH: i32 = 3;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
+
+unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1674,8 +1682,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
 
     eprintln!("agent workspace daemon stopping");
     for app in &mut state.apps {
-        let _ = app.child.kill();
-        let _ = app.child.wait();
+        let _ = terminate_app_process(&app.info.id, &mut app.child);
     }
     if let Some(wm) = &mut window_manager {
         let _ = wm.kill();
@@ -3622,6 +3629,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
     for env_var in &spec.env {
         child_command.env(&env_var.name, &env_var.value);
     }
+    child_command.process_group(0);
     let child = child_command
         .spawn()
         .with_context(|| format!("failed to launch {}", launch_description(&spec.command)))?;
@@ -5084,6 +5092,55 @@ fn read_log_content(path: &Path, tail_bytes: Option<u64>) -> Result<(String, u64
     Ok((content, (total - start) as u64, start > 0))
 }
 
+fn terminate_app_process(app_id: &str, child: &mut Child) -> Result<ExitStatus> {
+    if let Some(status) = child
+        .try_wait()
+        .with_context(|| format!("failed to check workspace app {app_id} status"))?
+    {
+        return Ok(status);
+    }
+
+    let pgid = child.id();
+    signal_process_group(pgid, SIGTERM)
+        .with_context(|| format!("failed to terminate workspace app {app_id} process group"))?;
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .with_context(|| format!("failed to check workspace app {app_id} status"))?
+        {
+            return Ok(status);
+        }
+        if started.elapsed() >= Duration::from_millis(APP_TERMINATE_GRACE_MS) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    signal_process_group(pgid, SIGKILL)
+        .with_context(|| format!("failed to kill workspace app {app_id} process group"))?;
+    let _ = child.kill();
+    child
+        .wait()
+        .with_context(|| format!("failed to wait for workspace app {app_id}"))
+}
+
+fn signal_process_group(pgid: u32, signal: i32) -> Result<()> {
+    if pgid > i32::MAX as u32 {
+        bail!("process group id {pgid} is too large to signal");
+    }
+    let target = -(pgid as i32);
+    let result = unsafe { kill(target, signal) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(ESRCH) {
+        return Ok(());
+    }
+    Err(error).with_context(|| format!("failed to signal process group {pgid}"))
+}
+
 fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
@@ -5113,13 +5170,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
                 Some(app_exit_event_detail(&app.info)),
             )
         } else {
-            app.child
-                .kill()
-                .with_context(|| format!("failed to kill workspace app {}", app.info.id))?;
-            let status = app
-                .child
-                .wait()
-                .with_context(|| format!("failed to wait for workspace app {}", app.info.id))?;
+            let status = terminate_app_process(&app.info.id, &mut app.child)?;
             apply_app_exit_status(&mut app.info, status);
             (
                 format!("workspace app {} killed", app.info.id),
