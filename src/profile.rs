@@ -242,7 +242,7 @@ pub fn check_profile(id: &str) -> Result<ProfileCheck> {
     })
 }
 
-pub fn put_profile(profile: WorkspaceProfile) -> Result<WorkspaceProfile> {
+pub fn put_profile(profile: WorkspaceProfile, replace: bool) -> Result<WorkspaceProfile> {
     validate_profile(&profile)?;
     let path = profiles_path();
     let mut store = read_store(&path)?;
@@ -251,6 +251,12 @@ pub fn put_profile(profile: WorkspaceProfile) -> Result<WorkspaceProfile> {
         .iter_mut()
         .find(|existing| existing.id == profile.id)
     {
+        if !replace {
+            bail!(
+                "profile {:?} already exists; pass --replace or set replace=true to overwrite it",
+                profile.id
+            );
+        }
         *existing = profile.clone();
     } else {
         store.profiles.push(profile.clone());

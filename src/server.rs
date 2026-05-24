@@ -163,7 +163,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "profile_put",
-        description = "Create or replace an agent workspace profile. Mounts, network, and setup commands are persisted as declared intent and surfaced in workspace status; display size, cwd, and env are currently applied by the X11 runtime.",
+        description = "Create an agent workspace profile. Existing profile ids are rejected unless replace=true is set explicitly. Mounts, network, and setup commands are persisted as declared intent and surfaced in workspace status; display size, cwd, and env are currently applied by the X11 runtime.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -175,7 +175,7 @@ impl AgentWorkspaceLinux {
         &self,
         Parameters(params): Parameters<ProfilePutParams>,
     ) -> Json<ProfileGetResult> {
-        Json(match profile::put_profile(params.profile) {
+        Json(match profile::put_profile(params.profile, params.replace) {
             Ok(profile) => ProfileGetResult {
                 ok: true,
                 message: "profile saved".to_string(),
@@ -1635,6 +1635,8 @@ struct ProfileDeleteParams {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 struct ProfilePutParams {
     profile: WorkspaceProfile,
+    #[serde(default)]
+    replace: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
