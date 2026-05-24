@@ -4922,14 +4922,37 @@ struct BubblewrapSandbox {
     network_isolation: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchNetworkPlan {
+    Host,
+    BubblewrapUnshareNet,
+}
+
+impl LaunchNetworkPlan {
+    fn uses_bubblewrap(self) -> bool {
+        matches!(self, Self::BubblewrapUnshareNet)
+    }
+
+    fn unshare_net(self) -> bool {
+        matches!(self, Self::BubblewrapUnshareNet)
+    }
+
+    fn isolation_label(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::BubblewrapUnshareNet => "bubblewrap_unshare_net",
+        }
+    }
+}
+
 fn bubblewrap_sandbox_for_launch(
     status: &WorkspaceStatus,
     policy: Option<&AppliedWorkspacePolicy>,
     cwd: Option<&Path>,
 ) -> Result<Option<BubblewrapSandbox>> {
-    let network = uses_bubblewrap_network_isolation(policy);
+    let network = launch_network_plan(policy);
     let mounts = uses_bubblewrap_mount_isolation(policy);
-    if !network && !mounts {
+    if !network.uses_bubblewrap() && !mounts {
         return Ok(None);
     }
 
@@ -4937,15 +4960,11 @@ fn bubblewrap_sandbox_for_launch(
         Ok(Some(BubblewrapSandbox {
             args: restricted_mount_namespace_args(status, policy, cwd, network)?,
             mount_isolation: "bubblewrap_mount_namespace".to_string(),
-            network_isolation: if network {
-                "bubblewrap_unshare_net".to_string()
-            } else {
-                "host".to_string()
-            },
+            network_isolation: network.isolation_label().to_string(),
         }))
     } else {
         let mut args = vec!["--dev-bind".to_string(), "/".to_string(), "/".to_string()];
-        if network {
+        if network.unshare_net() {
             args.push("--unshare-net".to_string());
         }
         if let Some(cwd) = cwd {
@@ -4955,21 +4974,21 @@ fn bubblewrap_sandbox_for_launch(
         Ok(Some(BubblewrapSandbox {
             args,
             mount_isolation: "host".to_string(),
-            network_isolation: if network {
-                "bubblewrap_unshare_net".to_string()
-            } else {
-                "host".to_string()
-            },
+            network_isolation: network.isolation_label().to_string(),
         }))
     }
 }
 
-fn uses_bubblewrap_network_isolation(policy: Option<&AppliedWorkspacePolicy>) -> bool {
-    policy.is_some_and(|policy| {
+fn launch_network_plan(policy: Option<&AppliedWorkspacePolicy>) -> LaunchNetworkPlan {
+    if policy.is_some_and(|policy| {
         matches!(policy.network.mode, NetworkMode::Disabled)
             && policy.enforcement.network.enforced
             && policy.runtime_capabilities.bubblewrap.ok
-    })
+    }) {
+        LaunchNetworkPlan::BubblewrapUnshareNet
+    } else {
+        LaunchNetworkPlan::Host
+    }
 }
 
 fn uses_bubblewrap_mount_isolation(policy: Option<&AppliedWorkspacePolicy>) -> bool {
@@ -4984,7 +5003,7 @@ fn restricted_mount_namespace_args(
     status: &WorkspaceStatus,
     policy: Option<&AppliedWorkspacePolicy>,
     cwd: Option<&Path>,
-    network: bool,
+    network: LaunchNetworkPlan,
 ) -> Result<Vec<String>> {
     let policy = policy.context("mount namespace requested without an applied policy")?;
     let mut args = Vec::new();
@@ -5049,7 +5068,7 @@ fn restricted_mount_namespace_args(
         args.push(mount.host_path.display().to_string());
         args.push(mount.workspace_path.display().to_string());
     }
-    if network {
+    if network.unshare_net() {
         args.push("--unshare-net".to_string());
     }
     args.push("--chdir".to_string());
@@ -7278,4 +7297,88 @@ fn unix_now_millis() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::NetworkPolicy;
+
+    fn tool(ok: bool, name: &str) -> PolicyToolCheck {
+        PolicyToolCheck {
+            ok,
+            detail: if ok {
+                format!("{name} available")
+            } else {
+                format!("{name} missing")
+            },
+        }
+    }
+
+    fn capabilities(
+        bubblewrap: bool,
+        firejail: bool,
+        unshare: bool,
+        slirp4netns: bool,
+    ) -> PolicyRuntimeCapabilities {
+        PolicyRuntimeCapabilities::from_tools(
+            tool(bubblewrap, "bubblewrap"),
+            tool(firejail, "firejail"),
+            tool(unshare, "unshare"),
+            tool(slirp4netns, "slirp4netns"),
+        )
+    }
+
+    fn policy(
+        network: NetworkPolicy,
+        bubblewrap: bool,
+        slirp4netns: bool,
+    ) -> AppliedWorkspacePolicy {
+        AppliedWorkspacePolicy::new_with_capabilities(
+            "qa".to_string(),
+            Vec::new(),
+            network,
+            false,
+            0,
+            capabilities(bubblewrap, false, false, slirp4netns),
+        )
+    }
+
+    #[test]
+    fn disabled_network_launch_plan_uses_bubblewrap_when_enforced() {
+        let policy = policy(
+            NetworkPolicy {
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
+            },
+            true,
+            false,
+        );
+
+        assert_eq!(
+            launch_network_plan(Some(&policy)),
+            LaunchNetworkPlan::BubblewrapUnshareNet
+        );
+    }
+
+    #[test]
+    fn local_only_network_launch_plan_stays_host_until_backend_exists() {
+        let policy = policy(
+            NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string()],
+            },
+            true,
+            true,
+        );
+
+        assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+    }
+
+    #[test]
+    fn inherit_host_network_launch_plan_stays_host() {
+        let policy = policy(NetworkPolicy::default(), true, true);
+
+        assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+    }
 }
