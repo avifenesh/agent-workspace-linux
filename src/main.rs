@@ -200,9 +200,35 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             let (id, key) = parse_one_arg_command(&args[1..], "workspace key requires a key")?;
             print_json(&workspace::key(&id, key)?)
         }
+        "key-window" => {
+            let (id, window_id, title_contains, pid, app_id, key, timeout_ms) =
+                parse_key_window_options(&args[1..])?;
+            print_json(&workspace::key_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                key,
+                timeout_ms,
+            )?)
+        }
         "type" => {
             let (id, text) = parse_text_command(&args[1..])?;
             print_json(&workspace::type_text(&id, text)?)
+        }
+        "type-window" => {
+            let (id, window_id, title_contains, pid, app_id, text, timeout_ms) =
+                parse_type_window_options(&args[1..])?;
+            print_json(&workspace::type_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                text,
+                timeout_ms,
+            )?)
         }
         "logs" => {
             let (id, app_id, stream, tail_bytes) = parse_logs_options(&args[1..])?;
@@ -232,7 +258,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, wait-window, screenshot, focus-window, close-window, click, click-window, key, type, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, wait-window, screenshot, focus-window, close-window, click, click-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -894,6 +920,133 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
     Ok((id, window_id, title_contains, pid, app_id, x, y, timeout_ms))
 }
 
+type WindowTargetValues = (
+    String,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    Option<u64>,
+    Vec<String>,
+);
+
+fn parse_window_target_values(args: &[String], command_name: &str) -> Result<WindowTargetValues> {
+    let mut id = workspace::default_workspace_id();
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
+    let mut timeout_ms = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => bail!("unknown {command_name} option '{value}'"),
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    Ok((id, title_contains, pid, app_id, timeout_ms, values))
+}
+
+type KeyWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    String,
+    Option<u64>,
+);
+
+fn parse_key_window_options(args: &[String]) -> Result<KeyWindowOptions> {
+    let (id, title_contains, pid, app_id, timeout_ms, values) =
+        parse_window_target_values(args, "workspace key-window")?;
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, key) = if has_match_filter {
+        if values.len() != 1 {
+            bail!("workspace key-window with match filters requires a key");
+        }
+        (None, values[0].clone())
+    } else {
+        if values.len() != 2 {
+            bail!("workspace key-window requires WINDOW_ID KEY or match filters with KEY");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace key-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), values[1].clone())
+    };
+    Ok((id, window_id, title_contains, pid, app_id, key, timeout_ms))
+}
+
+type TypeWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    String,
+    Option<u64>,
+);
+
+fn parse_type_window_options(args: &[String]) -> Result<TypeWindowOptions> {
+    let (id, title_contains, pid, app_id, timeout_ms, values) =
+        parse_window_target_values(args, "workspace type-window")?;
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, text_values) = if has_match_filter {
+        if values.is_empty() {
+            bail!("workspace type-window with match filters requires text");
+        }
+        (None, values)
+    } else {
+        if values.len() < 2 {
+            bail!("workspace type-window requires WINDOW_ID TEXT or match filters with TEXT");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace type-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), values[1..].to_vec())
+    };
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        pid,
+        app_id,
+        text_values.join(" "),
+        timeout_ms,
+    ))
+}
+
 fn parse_one_arg_command(args: &[String], missing_message: &str) -> Result<(String, String)> {
     let (id, values) = parse_id_and_args(args)?;
     if values.len() != 1 {
@@ -1209,6 +1362,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y\n  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y\n  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace key-window [--id ID] WINDOW_ID KEY\n  agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace type-window [--id ID] WINDOW_ID TEXT\n  agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }

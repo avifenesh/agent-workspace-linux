@@ -303,8 +303,24 @@ pub enum IpcRequest {
     Key {
         key: String,
     },
+    KeyWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        key: String,
+        timeout_ms: u64,
+    },
     TypeText {
         text: String,
+    },
+    TypeWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        text: String,
+        timeout_ms: u64,
     },
     ReadAppLog {
         app_id: String,
@@ -707,12 +723,66 @@ pub fn key(id: &str, key: String) -> Result<IpcResponse> {
     request(&workspace_socket_path(&id), IpcRequest::Key { key })
 }
 
+pub fn key_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    key: String,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    if key.trim().is_empty() {
+        bail!("key cannot be empty");
+    }
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::KeyWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            key,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
 pub fn type_text(id: &str, text: String) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     if text.is_empty() {
         bail!("text cannot be empty");
     }
     request(&workspace_socket_path(&id), IpcRequest::TypeText { text })
+}
+
+pub fn type_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    text: String,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    if text.is_empty() {
+        bail!("text cannot be empty");
+    }
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::TypeWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            text,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
 }
 
 pub fn read_app_log(
@@ -1414,6 +1484,72 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ),
             }
         }
+        IpcRequest::KeyWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            key,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            let logged_key = key.trim().to_string();
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| {
+                if logged_key.is_empty() {
+                    bail!("key cannot be empty");
+                }
+                Ok(())
+            }) {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match key_workspace_window(state, window_id.as_deref(), &criteria, key) {
+                    Ok(Some(window)) => {
+                        record_event(
+                            state,
+                            "key_window",
+                            serde_json::json!({
+                                "window_id": &window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "key": logged_key,
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response =
+                            response_with_status(true, "workspace window key sent", &state.status);
+                        response.windows = Some(vec![window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
         IpcRequest::TypeText { text } => {
             let char_count = text.chars().count();
             match type_workspace_text(&state.status, text) {
@@ -1432,6 +1568,77 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     response_with_status(false, error.to_string(), &state.status),
                     false,
                 ),
+            }
+        }
+        IpcRequest::TypeWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            text,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            let char_count = text.chars().count();
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| {
+                if text.is_empty() {
+                    bail!("text cannot be empty");
+                }
+                Ok(())
+            }) {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => {
+                    match type_workspace_window(state, window_id.as_deref(), &criteria, text) {
+                        Ok(Some(window)) => {
+                            record_event(
+                                state,
+                                "type_window",
+                                serde_json::json!({
+                                    "window_id": &window.id,
+                                    "title_contains": criteria.title_contains.as_deref(),
+                                    "pid": criteria.pid,
+                                    "app_id": criteria.app_id.as_deref(),
+                                    "char_count": char_count,
+                                    "timeout_ms": criteria.timeout_ms,
+                                }),
+                            )?;
+                            let mut response = response_with_status(
+                                true,
+                                "workspace window text typed",
+                                &state.status,
+                            );
+                            response.windows = Some(vec![window]);
+                            (response, false)
+                        }
+                        Ok(None) => {
+                            let mut response = response_with_status(
+                                false,
+                                "workspace window not found before timeout",
+                                &state.status,
+                            );
+                            response.windows = Some(Vec::new());
+                            (response, false)
+                        }
+                        Err(error) => (
+                            response_with_status(false, error.to_string(), &state.status),
+                            false,
+                        ),
+                    }
+                }
             }
         }
         IpcRequest::ReadAppLog {
@@ -1930,6 +2137,44 @@ fn click_workspace_window(
         x: absolute_x,
         y: absolute_y,
     }))
+}
+
+fn key_workspace_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    key: String,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = focus_workspace_window_target(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    key_workspace(&state.status, key)?;
+    Ok(Some(window))
+}
+
+fn type_workspace_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    text: String,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = focus_workspace_window_target(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    type_workspace_text(&state.status, text)?;
+    Ok(Some(window))
+}
+
+fn focus_workspace_window_target(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+) -> Result<Option<WorkspaceWindow>> {
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    focus_workspace_window(&state.status, &window.id)?;
+    Ok(Some(window))
 }
 
 fn resolve_workspace_window(
