@@ -158,18 +158,17 @@ the workspace runtime grows. It also reports optional policy backend candidates
 such as bubblewrap, firejail, unshare, and slirp4netns without treating them as
 active enforcement. The workspace commands use a small local Unix socket daemon:
 
-## MCP install
+## Install
 
-Build a release binary and place it somewhere stable:
+Use the installer to build the release binary, install it to
+`~/.local/bin/agent-workspace-linux`, and register the MCP server in
+`~/.codex/config.toml`:
 
 ```bash
-cargo build --release
-install -Dm755 target/release/agent-workspace-linux ~/.local/bin/agent-workspace-linux
-agent-workspace-linux doctor
+./install.sh
 ```
 
-For Codex config TOML, add an MCP server entry like this, using the absolute
-path where you installed the binary:
+The installer writes this Codex MCP entry automatically and is safe to rerun:
 
 ```toml
 [mcp_servers.agent-workspace-linux]
@@ -177,7 +176,14 @@ command = "/home/YOU/.local/bin/agent-workspace-linux"
 args = ["mcp"]
 ```
 
-For MCP hosts that read `.mcp.json`, the equivalent shape is:
+After installation, restart Codex or reload MCP servers so the `workspace_*`
+tools become available. Run a preview without writing files with:
+
+```bash
+./install.sh --dry-run
+```
+
+For MCP hosts that read `.mcp.json`, the equivalent manual shape is:
 
 ```json
 {
