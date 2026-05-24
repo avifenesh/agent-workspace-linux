@@ -420,6 +420,8 @@ pub enum IpcRequest {
         wait_window: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_timeout_ms: Option<u64>,
+        #[serde(default)]
+        screenshot_window: bool,
     },
     ListApps {
         app_id: Option<String>,
@@ -912,7 +914,7 @@ pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> 
 }
 
 pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
-    launch_app_with_options(id, spec, false, None)
+    launch_app_with_options(id, spec, false, None, false)
 }
 
 pub fn launch_app_with_options(
@@ -920,6 +922,7 @@ pub fn launch_app_with_options(
     spec: LaunchSpec,
     wait_window: bool,
     window_timeout_ms: Option<u64>,
+    screenshot_window: bool,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     validate_launch_spec(&spec)?;
@@ -936,6 +939,7 @@ pub fn launch_app_with_options(
             env: spec.env,
             wait_window,
             window_timeout_ms,
+            screenshot_window,
         },
     )
 }
@@ -2176,6 +2180,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             env,
             wait_window,
             window_timeout_ms,
+            screenshot_window,
         } => match spawn_app(
             state,
             LaunchSpec {
@@ -2205,9 +2210,10 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "mount_isolation": &app.mount_isolation,
                         "wait_window": wait_window,
                         "window_timeout_ms": window_timeout_ms,
+                        "screenshot_window": screenshot_window,
                     }),
                 )?;
-                if wait_window {
+                if wait_window || screenshot_window {
                     let timeout_ms = window_timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS);
                     let criteria = WindowWaitCriteria {
                         title_contains: None,
@@ -2219,32 +2225,65 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     match wait_workspace_window(state, &criteria) {
                         Ok(windows) => {
                             let found = !windows.is_empty();
-                            record_event(
-                                state,
-                                "launch_wait_window",
-                                serde_json::json!({
-                                    "app_id": &app_id,
-                                    "timeout_ms": timeout_ms,
-                                    "found": found,
-                                    "windows": windows.len(),
-                                }),
-                            )?;
-                            let message = if found {
-                                "app launched and window found in workspace"
-                            } else {
-                                "app launched but window not found before timeout"
-                            };
-                            let mut response = response_with_status(found, message, &state.status);
                             let response_app = state
                                 .status
                                 .apps
                                 .iter()
                                 .find(|candidate| candidate.id == app_id)
                                 .cloned()
-                                .unwrap_or(app);
-                            response.apps = Some(vec![response_app]);
-                            response.windows = Some(windows);
-                            (response, false)
+                                .unwrap_or_else(|| app.clone());
+                            let screenshot_result = if screenshot_window {
+                                windows
+                                    .first()
+                                    .map(|window| {
+                                        capture_workspace_window_screenshot(
+                                            &state.status,
+                                            window,
+                                            None,
+                                        )
+                                    })
+                                    .transpose()
+                            } else {
+                                Ok(None)
+                            };
+                            match screenshot_result {
+                                Ok(screenshot) => {
+                                    record_event(
+                                        state,
+                                        "launch_wait_window",
+                                        serde_json::json!({
+                                            "app_id": &app_id,
+                                            "timeout_ms": timeout_ms,
+                                            "found": found,
+                                            "windows": windows.len(),
+                                            "screenshot": screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
+                                        }),
+                                    )?;
+                                    let message = if screenshot.is_some() {
+                                        "app launched, window found, and screenshot captured"
+                                    } else if found {
+                                        "app launched and window found in workspace"
+                                    } else {
+                                        "app launched but window not found before timeout"
+                                    };
+                                    let mut response =
+                                        response_with_status(found, message, &state.status);
+                                    response.apps = Some(vec![response_app]);
+                                    response.windows = Some(windows);
+                                    response.screenshot = screenshot;
+                                    (response, false)
+                                }
+                                Err(error) => {
+                                    let mut response = response_with_status(
+                                        false,
+                                        error.to_string(),
+                                        &state.status,
+                                    );
+                                    response.apps = Some(vec![response_app]);
+                                    response.windows = Some(windows);
+                                    (response, false)
+                                }
+                            }
                         }
                         Err(error) => {
                             let mut response =

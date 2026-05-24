@@ -50,7 +50,7 @@ cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace ipc-info
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
-cargo run -- workspace launch --name terminal --wait-window --window-timeout-ms 10000 -- xterm
+cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev --wait-window --window-timeout-ms 10000
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
@@ -160,8 +160,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   environment overrides. `--name` gives the app a stable workspace-local name
   that can be used anywhere an app id is accepted, including logs, waits, kills,
   and window `--app` filters. `--wait-window` waits for the launched app's first
-  visible window and returns it in the same response. With `--profile`, profile
-  cwd/env are applied unless explicit flags override them, and profile
+  visible window and returns it in the same response. `--screenshot-window`
+  captures that first launched-app window in the same response, implying
+  `--wait-window`. With `--profile`, profile cwd/env are applied unless explicit
+  flags override them, and profile
   mounts/network policy apply to that launched app. If a launch profile requests
   policy that remains unenforced, the launch requires `--ack-unenforced-policy`.
   Each launched app gets

@@ -121,12 +121,14 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::cleanup_stale_workspaces(id)?)
         }
         "launch" => {
-            let (id, spec, wait_window, window_timeout_ms) = parse_launch_options(&args[1..])?;
+            let (id, spec, wait_window, window_timeout_ms, screenshot_window) =
+                parse_launch_options(&args[1..])?;
             print_json(&workspace::launch_app_with_options(
                 &id,
                 spec,
                 wait_window,
                 window_timeout_ms,
+                screenshot_window,
             )?)
         }
         "run" => {
@@ -967,7 +969,7 @@ fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {
     Ok(id)
 }
 
-type LaunchOptions = (String, LaunchSpec, bool, Option<u64>);
+type LaunchOptions = (String, LaunchSpec, bool, Option<u64>, bool);
 
 fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
     let mut id = workspace::default_workspace_id();
@@ -979,6 +981,7 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
     let mut env = Vec::new();
     let mut wait_window = false;
     let mut window_timeout_ms = None;
+    let mut screenshot_window = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -1020,6 +1023,11 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
                 );
                 index += 2;
             }
+            "--screenshot-window" => {
+                wait_window = true;
+                screenshot_window = true;
+                index += 1;
+            }
             "--" => {
                 let command = args[index + 1..].to_vec();
                 if command.is_empty() {
@@ -1037,7 +1045,7 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec, wait_window, window_timeout_ms));
+                return Ok((id, spec, wait_window, window_timeout_ms, screenshot_window));
             }
             _ => {
                 let command = args[index..].to_vec();
@@ -1056,7 +1064,7 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec, wait_window, window_timeout_ms));
+                return Ok((id, spec, wait_window, window_timeout_ms, screenshot_window));
             }
         }
     }
@@ -3060,7 +3068,7 @@ Usage:
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace ipc-info [--id ID]
-  agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] -- COMMAND [ARGS...]
+  agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] [--screenshot-window] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]

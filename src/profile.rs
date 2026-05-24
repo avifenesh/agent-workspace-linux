@@ -538,6 +538,7 @@ pub fn launch_profile_startup_apps(
             spec,
             options.wait_window,
             options.window_timeout_ms,
+            false,
         )?);
     }
     Ok(ProfileStartupRun {
