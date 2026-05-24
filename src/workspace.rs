@@ -9,7 +9,7 @@ use std::{
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
     os::unix::{
-        fs::PermissionsExt,
+        fs::{FileTypeExt, PermissionsExt},
         net::{UnixListener, UnixStream},
         process::{CommandExt, ExitStatusExt},
     },
@@ -234,6 +234,8 @@ pub struct WorkspaceArtifact {
     pub label: String,
     pub path: PathBuf,
     pub exists: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<u64>,
 }
@@ -2342,16 +2344,42 @@ fn push_workspace_artifact(
     if path.as_os_str().is_empty() || !seen.insert(path.clone()) {
         return;
     }
-    let metadata = fs::metadata(&path)
-        .ok()
-        .filter(|metadata| metadata.is_file());
+    let metadata = fs::symlink_metadata(&path).ok();
+    let file_type = metadata.as_ref().map(artifact_file_type);
+    let bytes = metadata
+        .as_ref()
+        .filter(|metadata| metadata.is_file())
+        .map(|metadata| metadata.len());
     files.push(WorkspaceArtifact {
         kind: kind.into(),
         label: label.into(),
         path,
         exists: metadata.is_some(),
-        bytes: metadata.map(|metadata| metadata.len()),
+        file_type,
+        bytes,
     });
+}
+
+fn artifact_file_type(metadata: &fs::Metadata) -> String {
+    let file_type = metadata.file_type();
+    if file_type.is_file() {
+        "file"
+    } else if file_type.is_dir() {
+        "directory"
+    } else if file_type.is_symlink() {
+        "symlink"
+    } else if file_type.is_socket() {
+        "socket"
+    } else if file_type.is_fifo() {
+        "fifo"
+    } else if file_type.is_block_device() {
+        "block_device"
+    } else if file_type.is_char_device() {
+        "char_device"
+    } else {
+        "other"
+    }
+    .to_string()
 }
 
 fn add_workspace_screenshot_artifacts(

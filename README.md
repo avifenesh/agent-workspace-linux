@@ -169,7 +169,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace artifacts` returns a read-only inventory of files in the runtime
   directory, including the manifest, control socket, Xauthority file, applied
   policy snapshot, event log, daemon logs, app logs, and any screenshots
-  captured into the workspace runtime directory.
+  captured into the workspace runtime directory. Each artifact reports whether
+  the path exists, its filesystem type, and byte size for regular files.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
