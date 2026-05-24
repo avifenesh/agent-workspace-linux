@@ -60,10 +60,14 @@ Findings:
 - Browser tasks that require logged-in sessions need an explicit browser
   profile/mount story. The Chrome smoke used a temporary isolated user data dir,
   not the user's authenticated browser profile.
+- Fixed while codifying the browser smoke: host Wayland environment variables
+  could make Chrome prefer the host Wayland session over the hidden X11 display.
+  Workspace launches now scrub inherited Wayland hints and set common toolkit
+  defaults toward X11.
 
 Post-patch verification:
 
-- Local `cargo test` passes 26 tests, including coverage for active profile
+- Local `cargo test` passes 27 tests, including coverage for active profile
   cwd/env inheritance and explicit per-launch profile override.
 - The installed CLI was rebuilt with `./install.sh`. A regression dogfood
   launched a workspace app that invoked `workspace stop` from inside its own
@@ -78,9 +82,10 @@ Post-patch verification:
   profile import/export, open-profile dry-run,
   `network.mode=local_only`, `network.mode=disabled`, read-write/read-only mount
   enforcement, session tracking, a real X11 window with screenshot, window
-  listing, clipboard, keyboard input, app wait, artifact inspection, event
-  history, stopped manifests, and daemon-crash recovery where stale cleanup
-  removes manifest-recorded orphan app and X11 runtime processes.
+  listing, clipboard, keyboard input, app wait, artifact inspection, browser
+  local-dev QA through Chrome when Chrome/Chromium is installed, event history,
+  stopped manifests, and daemon-crash recovery where stale cleanup removes
+  manifest-recorded orphan app and X11 runtime processes.
 - MCP dogfood covered the local-dev browser QA path: a hidden workspace launched
   `python3 -m http.server` from this repo, a workspace command fetched
   `README.md` over `127.0.0.1`, Chrome opened the served page with

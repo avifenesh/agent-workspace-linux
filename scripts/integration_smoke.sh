@@ -17,6 +17,11 @@ need xmessage
 
 cargo build --manifest-path "$ROOT_DIR/Cargo.toml" >/dev/null
 
+BROWSER_BIN="${BROWSER_BIN:-}"
+if [[ -z "$BROWSER_BIN" ]]; then
+  BROWSER_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+fi
+
 SMOKE_DIR="$(mktemp -d)"
 CONFIG_DIR="$SMOKE_DIR/config"
 RUNTIME_DIR="$SMOKE_DIR/runtime"
@@ -288,6 +293,52 @@ assert_json '.ok == true and .apps[0].running == false and .apps[0].exit_code ==
 run_awl workspace stop --id "$GUI_ID" > /dev/null
 run_awl workspace artifacts --id "$GUI_ID" --existing > "$SMOKE_DIR/gui-artifacts.json"
 assert_json '(.files[] | select(.kind == "manifest" and .exists == true)) and (.files[] | select(.kind == "event_log" and .exists == true and .bytes > 0)) and (.files[] | select(.kind == "app_log" and .exists == true)) and (.files[] | select(.kind == "screenshot" and .exists == true and .bytes > 0))' "$SMOKE_DIR/gui-artifacts.json"
+
+if [[ -n "$BROWSER_BIN" ]]; then
+  echo "== browser local-dev workspace =="
+  BROWSER_ID="browser-local-dev-smoke-$$"
+  BROWSER_PORT="$(python3 - <<'PY'
+import socket
+
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+  BROWSER_README_URL="http://127.0.0.1:${BROWSER_PORT}/README.md"
+  BROWSER_DOC_URL="http://127.0.0.1:${BROWSER_PORT}/docs/dogfood-validation.md"
+  WORKSPACE_IDS+=("$BROWSER_ID")
+  run_awl workspace start --ack-hidden-workspace --id "$BROWSER_ID" --purpose "Browser local-dev smoke" > "$SMOKE_DIR/browser-start.json"
+  run_awl workspace launch --id "$BROWSER_ID" --name dev-server --cwd "$ROOT_DIR" -- python3 -m http.server "$BROWSER_PORT" --bind 127.0.0.1 > "$SMOKE_DIR/browser-server.json"
+  run_awl workspace run --id "$BROWSER_ID" --name dev-server-probe --timeout-ms 10000 --tail-bytes 4000 -- python3 -c "import time, urllib.request
+url = '$BROWSER_README_URL'
+last = None
+for _ in range(30):
+    try:
+        print(urllib.request.urlopen(url, timeout=2).readline().decode().strip())
+        break
+    except Exception as exc:
+        last = exc
+        time.sleep(0.1)
+else:
+    raise SystemExit(last)" > "$SMOKE_DIR/browser-probe.json"
+  assert_json '.succeeded == true and (.stdout.content | contains("# agent-workspace-linux"))' "$SMOKE_DIR/browser-probe.json"
+  run_awl workspace launch --id "$BROWSER_ID" --name browser-local-dev --wait-window --screenshot-window --window-timeout-ms 15000 -- "$BROWSER_BIN" "--user-data-dir=$SMOKE_DIR/browser-profile" --no-first-run --no-default-browser-check --new-window "$BROWSER_README_URL" > "$SMOKE_DIR/browser-launch.json"
+  assert_json '.ok == true and (.screenshot.bytes > 0) and ((.windows | length) > 0) and .apps[0].running == true' "$SMOKE_DIR/browser-launch.json"
+  BROWSER_APP_ID="$(jq -r '.apps[0].id' "$SMOKE_DIR/browser-launch.json")"
+  run_awl workspace key-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --timeout-ms 5000 ctrl+l > "$SMOKE_DIR/browser-key-address.json"
+  run_awl workspace paste-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --timeout-ms 5000 "$BROWSER_DOC_URL" > "$SMOKE_DIR/browser-paste-address.json"
+  run_awl workspace key-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --timeout-ms 5000 Return > "$SMOKE_DIR/browser-key-return.json"
+  run_awl workspace wait-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --title docs/dogfood-validation.md --timeout-ms 10000 > "$SMOKE_DIR/browser-wait-doc-window.json"
+  assert_json '.ok == true and (.windows[0].title | contains("docs/dogfood-validation.md"))' "$SMOKE_DIR/browser-wait-doc-window.json"
+  run_awl workspace observe --id "$BROWSER_ID" --screenshot --events --events-tail 20 > "$SMOKE_DIR/browser-observe.json"
+  assert_json '(.screenshot.bytes > 0) and (.active_window.title | contains("docs/dogfood-validation.md"))' "$SMOKE_DIR/browser-observe.json"
+  run_awl workspace stop --id "$BROWSER_ID" > "$SMOKE_DIR/browser-stop.json"
+  assert_json '.ok == true and (.apps[] | select(.name == "dev-server" and .running == false)) and (.apps[] | select(.name == "browser-local-dev" and .running == false))' "$SMOKE_DIR/browser-stop.json"
+else
+  echo "== browser local-dev workspace skipped: Chrome/Chromium not found =="
+fi
 
 echo "== crashed-daemon stale cleanup =="
 CRASH_ID="crash-cleanup-smoke-$$"

@@ -323,10 +323,13 @@ exiting.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   attachment environment: `DISPLAY`, `XAUTHORITY`, `AGENT_WORKSPACE_ID`,
   `AGENT_WORKSPACE_SESSION_ID`, `AGENT_WORKSPACE_RUNTIME_DIR`, and
-  `AGENT_WORKSPACE_SOCKET`. It can also set a launch cwd and per-app environment
-  overrides. `--name` gives the app a stable workspace-local name that can be
-  used anywhere an app id is accepted, including logs, waits, kills, and window
-  `--app` filters. `--wait-window` waits for the launched app's first visible
+  `AGENT_WORKSPACE_SOCKET`. Launches also scrub inherited Wayland hints and set
+  common toolkit defaults toward X11 so GUI apps attach to the hidden X11
+  display instead of the host desktop session. It can also set a launch cwd and
+  per-app environment overrides. `--name` gives the app a stable
+  workspace-local name that can be used anywhere an app id is accepted,
+  including logs, waits, kills, and window `--app` filters. `--wait-window`
+  waits for the launched app's first visible
   window and returns it in the same
   response. `--screenshot-window`
   captures that first launched-app window in the same response, implying

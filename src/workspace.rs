@@ -5592,6 +5592,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
     for env_var in workspace_environment(&state.status).variables {
         child_command.env(env_var.name, env_var.value);
     }
+    configure_x11_workspace_process_environment(&mut child_command, &state.status);
     child_command
         .stdin(Stdio::null())
         .stdout(Stdio::from(
@@ -7513,11 +7514,24 @@ fn app_exit_event_detail(app: &WorkspaceApp) -> serde_json::Value {
 
 fn workspace_command(status: &WorkspaceStatus, program: &str) -> Command {
     let mut command = Command::new(program);
+    configure_x11_workspace_process_environment(&mut command, status);
+    command.stdin(Stdio::null());
+    command
+}
+
+fn configure_x11_workspace_process_environment(command: &mut Command, status: &WorkspaceStatus) {
     command
         .env("DISPLAY", &status.display)
         .env("XAUTHORITY", &status.xauthority_path)
-        .stdin(Stdio::null());
-    command
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("WAYLAND_SOCKET")
+        .env("XDG_SESSION_TYPE", "x11")
+        .env("GDK_BACKEND", "x11")
+        .env("QT_QPA_PLATFORM", "xcb")
+        .env("SDL_VIDEODRIVER", "x11")
+        .env("CLUTTER_BACKEND", "x11")
+        .env("MOZ_ENABLE_WAYLAND", "0")
+        .env("ELECTRON_OZONE_PLATFORM_HINT", "x11");
 }
 
 fn output_text(output: std::process::Output, description: &str) -> Result<String> {
@@ -8223,6 +8237,37 @@ mod tests {
             last_event_sequence: 0,
             apps: Vec::new(),
         }
+    }
+
+    #[test]
+    fn workspace_command_scrubs_host_wayland_hints() {
+        let status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
+        let command = workspace_command(&status, "true");
+        let envs = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().to_string(),
+                    value.map(|value| value.to_string_lossy().to_string()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(envs
+            .iter()
+            .any(|(name, value)| name == "WAYLAND_DISPLAY" && value.is_none()));
+        assert_eq!(
+            envs.iter()
+                .find_map(|(name, value)| (name == "DISPLAY").then_some(value.as_deref()))
+                .flatten(),
+            Some(":90")
+        );
+        assert_eq!(
+            envs.iter()
+                .find_map(|(name, value)| (name == "XDG_SESSION_TYPE").then_some(value.as_deref()))
+                .flatten(),
+            Some("x11")
+        );
     }
 
     fn daemon_state_for_test(name: &str) -> DaemonState {
