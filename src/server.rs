@@ -214,7 +214,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "profile_template",
-        description = "Generate a starter profile without saving it. The project-dev template mounts a project directory read-write at /workspace/project. The restricted-chrome template starts Chrome with network.mode=disabled, require_enforced_policy=true, an isolated user-data dir, and an explicit --no-sandbox startup command for bubblewrap network namespaces. The browser-session template requires user_data_dir, mounts that browser data directory read-write at /workspace/browser-user-data, inherits host network for authenticated web tasks, and visibly uses --no-sandbox because Chrome can abort inside the enforced mount namespace.",
+        description = "Generate a starter profile without saving it. The project-dev template mounts a project directory read-write at /workspace/project and, when detected, mounts Cargo bin/rustup toolchains read-only without mounting Cargo credentials. The restricted-chrome template starts Chrome with network.mode=disabled, require_enforced_policy=true, an isolated user-data dir, and an explicit --no-sandbox startup command for bubblewrap network namespaces. The browser-session template requires user_data_dir, mounts that browser data directory read-write at /workspace/browser-user-data, inherits host network for authenticated web tasks, and visibly uses --no-sandbox because Chrome can abort inside the enforced mount namespace.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,

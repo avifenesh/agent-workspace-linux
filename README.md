@@ -313,8 +313,12 @@ exiting.
 - `profile validate --json PATH` parses and validates a shared profile file
   without saving it, and returns the same policy, warning, and acknowledgement
   preflight shape used by `profile check`.
-- `profile template project-dev` creates a starter project QA profile. `profile
-  template restricted-chrome` creates a browser starter profile with
+- `profile template project-dev` creates a starter project QA profile. It
+  mounts the selected project read-write and, when detected, mounts Cargo's
+  `bin` shims plus rustup toolchains read-only. It deliberately uses a
+  throwaway `CARGO_HOME` inside the workspace instead of mounting Cargo
+  credentials or registry/cache state. `profile template restricted-chrome`
+  creates a browser starter profile with
   `network.mode=disabled`, `require_enforced_policy=true`, an isolated Chrome
   user-data dir, and an explicit `--no-sandbox` startup command. `profile
   template browser-session --user-data-dir PATH` creates an authenticated-browser

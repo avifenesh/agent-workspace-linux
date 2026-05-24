@@ -160,10 +160,11 @@ Findings:
   `env`. The runtime now snapshots profile cwd/env at workspace start and uses
   them as the default launch context unless a launch explicitly supplies another
   profile, cwd, or env override.
-- Expected product gap: build tools from user-local locations such as
-  `~/.cargo` are not visible inside a restricted mount namespace unless the
-  profile mounts them. The Codex app profile UI should make common toolchain
-  mounts easy instead of forcing users to hand-write JSON.
+- Addressed after this pass: the `project-dev` profile template now mounts
+  Cargo's `bin` shims and rustup toolchains read-only when detected, while
+  using a throwaway workspace `CARGO_HOME` so Cargo credentials and registry
+  cache state are not mounted by default. Other user-local toolchains still need
+  explicit mounts or future template support.
 - Existing limitation: `local_only` is a sandbox-local loopback namespace. It
   does not bridge host localhost services into the workspace.
 - Current product boundary: do not expand the network gate into broad host

@@ -12,6 +12,11 @@ use std::{
 };
 
 const WORKSPACE_MOUNT_ROOT: &str = "/workspace";
+const PROJECT_WORKSPACE_PATH: &str = "/workspace/project";
+const WORKSPACE_CARGO_BIN_PATH: &str = "/workspace/rust/cargo-bin";
+const WORKSPACE_RUSTUP_HOME: &str = "/workspace/rust/rustup";
+const WORKSPACE_CARGO_HOME: &str = "/tmp/agent-workspace-cargo";
+const DEFAULT_WORKSPACE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceProfile {
@@ -411,20 +416,28 @@ pub fn template_profile(
                 Some(path) => path,
                 None => env::current_dir().context("failed to resolve template host path")?,
             };
+            let rust_toolchain = project_dev_rust_toolchain();
+            let mut mounts = vec![ProfileMount {
+                host_path,
+                workspace_path: PathBuf::from(PROJECT_WORKSPACE_PATH),
+                mode: MountMode::ReadWrite,
+            }];
+            mounts.extend(rust_toolchain.mounts);
+            let mut description =
+                "Project QA profile with the selected project mounted read-write.".to_string();
+            if rust_toolchain.detected {
+                description.push_str(
+                    " Local Rust toolchain shims are mounted read-only without mounting Cargo credentials.",
+                );
+            }
             WorkspaceProfile {
                 id,
-                description: Some(
-                    "Project QA profile with the selected project mounted read-write.".to_string(),
-                ),
+                description: Some(description),
                 width: None,
                 height: None,
-                cwd: Some(PathBuf::from("/workspace/project")),
-                env: Vec::new(),
-                mounts: vec![ProfileMount {
-                    host_path,
-                    workspace_path: PathBuf::from("/workspace/project"),
-                    mode: MountMode::ReadWrite,
-                }],
+                cwd: Some(PathBuf::from(PROJECT_WORKSPACE_PATH)),
+                env: rust_toolchain.env,
+                mounts,
                 network: NetworkPolicy::default(),
                 require_enforced_policy: false,
                 setup_commands: Vec::new(),
@@ -520,6 +533,70 @@ pub fn template_profile(
     };
     validate_profile(&profile)?;
     Ok(profile)
+}
+
+struct ProjectDevRustToolchain {
+    mounts: Vec<ProfileMount>,
+    env: Vec<EnvVar>,
+    detected: bool,
+}
+
+fn project_dev_rust_toolchain() -> ProjectDevRustToolchain {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let cargo_home = env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".cargo")));
+    let rustup_home = env::var_os("RUSTUP_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".rustup")));
+    let base_path = env::var("PATH").unwrap_or_else(|_| DEFAULT_WORKSPACE_PATH.to_string());
+    project_dev_rust_toolchain_from_paths(cargo_home.as_deref(), rustup_home.as_deref(), &base_path)
+}
+
+fn project_dev_rust_toolchain_from_paths(
+    cargo_home: Option<&Path>,
+    rustup_home: Option<&Path>,
+    base_path: &str,
+) -> ProjectDevRustToolchain {
+    let mut mounts = Vec::new();
+    let mut env = Vec::new();
+
+    if let Some(cargo_bin) = cargo_home
+        .map(|path| path.join("bin"))
+        .filter(|path| path.is_dir())
+    {
+        mounts.push(ProfileMount {
+            host_path: cargo_bin,
+            workspace_path: PathBuf::from(WORKSPACE_CARGO_BIN_PATH),
+            mode: MountMode::ReadOnly,
+        });
+        env.push(EnvVar {
+            name: "CARGO_HOME".to_string(),
+            value: WORKSPACE_CARGO_HOME.to_string(),
+        });
+        env.push(EnvVar {
+            name: "PATH".to_string(),
+            value: format!("{WORKSPACE_CARGO_BIN_PATH}:{base_path}"),
+        });
+    }
+
+    if let Some(rustup_home) = rustup_home.filter(|path| path.is_dir()) {
+        mounts.push(ProfileMount {
+            host_path: rustup_home.to_path_buf(),
+            workspace_path: PathBuf::from(WORKSPACE_RUSTUP_HOME),
+            mode: MountMode::ReadOnly,
+        });
+        env.push(EnvVar {
+            name: "RUSTUP_HOME".to_string(),
+            value: WORKSPACE_RUSTUP_HOME.to_string(),
+        });
+    }
+
+    ProjectDevRustToolchain {
+        detected: !mounts.is_empty(),
+        mounts,
+        env,
+    }
 }
 
 pub fn check_profile(id: &str) -> Result<ProfileCheck> {
@@ -1564,6 +1641,64 @@ mod tests {
             NetworkMode::Disabled
         ));
         let _ = fs::remove_file(validation.json_path);
+    }
+
+    #[test]
+    fn project_dev_rust_toolchain_mounts_only_shims_and_toolchains() {
+        let temp_root = env::temp_dir().join(format!(
+            "agent-workspace-project-rust-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        let cargo_home = temp_root.join("cargo-home");
+        let cargo_bin = cargo_home.join("bin");
+        let rustup_home = temp_root.join("rustup-home");
+        fs::create_dir_all(&cargo_bin).expect("cargo bin dir");
+        fs::create_dir_all(&rustup_home).expect("rustup dir");
+        fs::write(cargo_home.join("credentials.toml"), "token = 'secret'\n")
+            .expect("cargo credentials marker");
+
+        let toolchain = project_dev_rust_toolchain_from_paths(
+            Some(&cargo_home),
+            Some(&rustup_home),
+            "/usr/bin:/bin",
+        );
+
+        assert!(toolchain.detected);
+        assert_eq!(toolchain.mounts.len(), 2);
+        assert!(toolchain.mounts.iter().any(|mount| {
+            mount.host_path == cargo_bin
+                && mount.workspace_path == PathBuf::from(WORKSPACE_CARGO_BIN_PATH)
+                && matches!(mount.mode, MountMode::ReadOnly)
+        }));
+        assert!(toolchain.mounts.iter().any(|mount| {
+            mount.host_path == rustup_home
+                && mount.workspace_path == PathBuf::from(WORKSPACE_RUSTUP_HOME)
+                && matches!(mount.mode, MountMode::ReadOnly)
+        }));
+        assert!(!toolchain
+            .mounts
+            .iter()
+            .any(|mount| mount.host_path == cargo_home));
+
+        let env_value = |name: &str| {
+            toolchain
+                .env
+                .iter()
+                .find(|env_var| env_var.name == name)
+                .map(|env_var| env_var.value.as_str())
+        };
+        assert_eq!(env_value("CARGO_HOME"), Some(WORKSPACE_CARGO_HOME));
+        assert_eq!(env_value("RUSTUP_HOME"), Some(WORKSPACE_RUSTUP_HOME));
+        assert_eq!(
+            env_value("PATH"),
+            Some(format!("{WORKSPACE_CARGO_BIN_PATH}:/usr/bin:/bin").as_str())
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove temp project rust dirs");
     }
 
     #[test]
