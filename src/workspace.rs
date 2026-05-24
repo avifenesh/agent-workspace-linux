@@ -2749,21 +2749,22 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             }
         }
         IpcRequest::CloseWindow { window_id } => {
-            match close_workspace_window(&state.status, &window_id) {
-                Ok(()) => {
+            match window_info(&state.status, &window_id).and_then(|window| {
+                close_workspace_window(&state.status, &window_id).map(|()| window)
+            }) {
+                Ok(window) => {
                     record_event(
                         state,
                         "close_window",
                         serde_json::json!({ "window_id": &window_id }),
                     )?;
-                    (
-                        response_with_status(
-                            true,
-                            "workspace window close requested",
-                            &state.status,
-                        ),
-                        false,
-                    )
+                    let mut response = response_with_status(
+                        true,
+                        "workspace window close requested",
+                        &state.status,
+                    );
+                    response.windows = Some(vec![window]);
+                    (response, false)
                 }
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),

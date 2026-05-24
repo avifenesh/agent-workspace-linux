@@ -709,7 +709,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_close_window",
-        description = "Request that a window inside an isolated agent workspace close by X11 window id.",
+        description = "Request that a window inside an isolated agent workspace close by X11 window id. Response includes the window record that was targeted for close.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,

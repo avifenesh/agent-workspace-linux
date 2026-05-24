@@ -225,7 +225,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   visibility state.
   `show-window` match filters also search minimized/hidden windows, so agents
   can restore an app by class, title, pid, or app id without first listing a raw
-  X11 id.
+  X11 id. `close-window` returns the targeted window record before close is
+  requested.
   `move-pointer` and
   `move-pointer-window` move the workspace pointer without clicking and return
   the resulting pointer coordinates. `click` and `click-window` can set
