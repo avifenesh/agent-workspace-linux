@@ -336,6 +336,8 @@ impl AgentWorkspaceLinux {
                     runtime_dir: std::path::PathBuf::new(),
                     socket_path: std::path::PathBuf::new(),
                     running: false,
+                    manifest: None,
+                    manifest_error: None,
                     status: None,
                     error: Some(error.to_string()),
                 }],

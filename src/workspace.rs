@@ -41,6 +41,7 @@ const PRIVATE_RUNTIME_DIR_MODE: u32 = 0o700;
 const PRIVATE_SOCKET_MODE: u32 = 0o600;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
+const WORKSPACE_MANIFEST_FILE: &str = "workspace.json";
 
 unsafe extern "C" {
     fn kill(pid: i32, sig: i32) -> i32;
@@ -198,8 +199,30 @@ pub struct WorkspaceListEntry {
     pub runtime_dir: PathBuf,
     pub socket_path: PathBuf,
     pub running: bool,
+    pub manifest: Option<WorkspaceManifest>,
+    pub manifest_error: Option<String>,
     pub status: Option<WorkspaceStatus>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceManifest {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub user_acknowledged_hidden_workspace: bool,
+    pub user_acknowledged_unenforced_policy: bool,
+    pub started_at_unix: u64,
+    pub display: String,
+    pub width: u32,
+    pub height: u32,
+    pub runtime_dir: PathBuf,
+    pub socket_path: PathBuf,
+    pub xauthority_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -800,6 +823,10 @@ pub fn list_workspaces() -> Result<WorkspaceList> {
         }
         let runtime_dir = entry.path();
         let socket_path = runtime_dir.join("control.sock");
+        let (manifest, manifest_error) = match read_workspace_manifest(&runtime_dir) {
+            Ok(manifest) => (manifest, None),
+            Err(error) => (None, Some(error.to_string())),
+        };
         let status_result = status_workspace(&id);
         let (running, status, error) = match status_result {
             Ok(status) => (true, Some(status), None),
@@ -810,6 +837,8 @@ pub fn list_workspaces() -> Result<WorkspaceList> {
             runtime_dir,
             socket_path,
             running,
+            manifest,
+            manifest_error,
             status,
             error,
         });
@@ -1769,6 +1798,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
         event_path,
         next_event_sequence: 1,
     };
+    write_workspace_manifest(&state.status)?;
     let start_detail = serde_json::json!({
         "display": &state.status.display,
         "width": state.status.width,
@@ -1945,6 +1975,45 @@ fn create_private_runtime_dir(path: &Path) -> Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_RUNTIME_DIR_MODE))
         .with_context(|| format!("failed to set private permissions on {}", path.display()))?;
     Ok(())
+}
+
+fn workspace_manifest(status: &WorkspaceStatus) -> WorkspaceManifest {
+    WorkspaceManifest {
+        id: status.id.clone(),
+        purpose: status.purpose.clone(),
+        profile_id: status.profile_id.clone(),
+        applied_policy: status.applied_policy.clone(),
+        user_acknowledged_hidden_workspace: status.user_acknowledged_hidden_workspace,
+        user_acknowledged_unenforced_policy: status.user_acknowledged_unenforced_policy,
+        started_at_unix: status.started_at_unix,
+        display: status.display.clone(),
+        width: status.width,
+        height: status.height,
+        runtime_dir: status.runtime_dir.clone(),
+        socket_path: status.socket_path.clone(),
+        xauthority_path: status.xauthority_path.clone(),
+    }
+}
+
+fn write_workspace_manifest(status: &WorkspaceStatus) -> Result<PathBuf> {
+    let manifest_path = status.runtime_dir.join(WORKSPACE_MANIFEST_FILE);
+    let content = serde_json::to_string_pretty(&workspace_manifest(status))
+        .context("failed to serialize workspace manifest")?;
+    fs::write(&manifest_path, format!("{content}\n"))
+        .with_context(|| format!("failed to write {}", manifest_path.display()))?;
+    Ok(manifest_path)
+}
+
+fn read_workspace_manifest(runtime_dir: &Path) -> Result<Option<WorkspaceManifest>> {
+    let manifest_path = runtime_dir.join(WORKSPACE_MANIFEST_FILE);
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let manifest = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+    Ok(Some(manifest))
 }
 
 fn record_event(
