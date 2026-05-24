@@ -847,7 +847,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_minimize_window",
-        description = "Minimize a visible window inside an isolated agent workspace, targeted by X11 id or title/class/pid/app filters.",
+        description = "Minimize a visible window inside an isolated agent workspace, targeted by X11 id or title/class/pid/app filters. Response includes the refreshed window record after minimization.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

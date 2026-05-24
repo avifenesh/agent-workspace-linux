@@ -4788,8 +4788,8 @@ fn minimize_workspace_window_target(
         return Ok(None);
     };
     minimize_workspace_window(&state.status, &window.id)
-        .with_context(|| format!("failed to minimize workspace window {}", window.id))?;
-    Ok(Some(window))
+        .map(Some)
+        .with_context(|| format!("failed to minimize workspace window {}", window.id))
 }
 
 fn show_workspace_window_target(
@@ -5424,14 +5424,14 @@ fn raise_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<W
     window_info(status, &window_id)
 }
 
-fn minimize_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<()> {
+fn minimize_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<WorkspaceWindow> {
     let window_id = sanitize_x11_id(window_id, "window id")?;
     let output = workspace_command(status, "xdotool")
         .args(["windowminimize", "--sync", &window_id])
         .output()
         .context("failed to run xdotool windowminimize")?;
     output_text(output, "xdotool windowminimize")?;
-    Ok(())
+    window_info(status, &window_id)
 }
 
 fn show_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<WorkspaceWindow> {

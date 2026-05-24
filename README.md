@@ -221,7 +221,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   interactions can be staged predictably. `focus-window` returns the focused
   target and settled active window when focus can be resolved. `raise-window`,
   `minimize-window`, and `show-window` manage visibility and stacking without
-  terminating apps.
+  terminating apps; `minimize-window` and `show-window` return refreshed
+  visibility state.
   `show-window` match filters also search minimized/hidden windows, so agents
   can restore an app by class, title, pid, or app id without first listing a raw
   X11 id.
