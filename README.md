@@ -34,6 +34,7 @@ cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
+cargo run -- profile check project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --ack-unenforced-policy --profile project-dev
 cargo run -- workspace start --ack-hidden-workspace --foreground
@@ -112,8 +113,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
-`profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,
-`workspace_start`, `workspace_list`, `workspace_cleanup_stale`,
+`profile_path`, `profile_list`, `profile_get`, `profile_check`, `profile_put`,
+`profile_delete`, `workspace_start`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_launch_app`, `workspace_list_windows`,
 `workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
 `workspace_click`, `workspace_key`, `workspace_type_text`,

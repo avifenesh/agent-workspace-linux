@@ -63,6 +63,16 @@ pub struct ProfileDeleteResult {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProfileCheck {
+    pub profile: WorkspaceProfile,
+    pub applied_policy: AppliedWorkspacePolicy,
+    pub requires_hidden_workspace_ack: bool,
+    pub requires_unenforced_policy_ack: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ProfileSetupRun {
     pub workspace_id: String,
     pub profile_id: String,
@@ -95,6 +105,20 @@ pub fn get_profile(id: &str) -> Result<WorkspaceProfile> {
         .into_iter()
         .find(|profile| profile.id == id)
         .ok_or_else(|| anyhow::anyhow!("profile {id:?} was not found"))
+}
+
+pub fn check_profile(id: &str) -> Result<ProfileCheck> {
+    let profile = get_profile(id)?;
+    let applied_policy = applied_policy(&profile);
+    let requires_unenforced_policy_ack = applied_policy.has_requested_unenforced_policy();
+    let warnings = policy_warnings(&applied_policy);
+    Ok(ProfileCheck {
+        profile,
+        applied_policy,
+        requires_hidden_workspace_ack: true,
+        requires_unenforced_policy_ack,
+        warnings,
+    })
 }
 
 pub fn put_profile(profile: WorkspaceProfile) -> Result<WorkspaceProfile> {
@@ -193,6 +217,17 @@ pub fn applied_policy(profile: &WorkspaceProfile) -> AppliedWorkspacePolicy {
         profile.setup_commands.len(),
         workspace::policy_runtime_capabilities(),
     )
+}
+
+fn policy_warnings(policy: &AppliedWorkspacePolicy) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if policy.enforcement.mounts.requested && !policy.enforcement.mounts.enforced {
+        warnings.push(policy.enforcement.mounts.detail.clone());
+    }
+    if policy.enforcement.network.requested && !policy.enforcement.network.enforced {
+        warnings.push(policy.enforcement.network.detail.clone());
+    }
+    warnings
 }
 
 pub fn apply_profile_to_launch_spec(
