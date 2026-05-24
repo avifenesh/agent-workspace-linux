@@ -682,8 +682,8 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
         WorkspaceStartPlan::AlreadyRunning(status) => Ok(IpcResponse {
             ok: true,
             message: format!("workspace {:?} is already running", status.id),
+            apps: Some(status.apps.clone()),
             status: Some(status),
-            apps: None,
             windows: None,
             active_window: None,
             screenshot: None,
@@ -1906,10 +1906,11 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     refresh_apps(state)?;
 
     let (response, should_stop) = match request {
-        IpcRequest::Status => (
-            response_with_status(true, "workspace is running", &state.status),
-            false,
-        ),
+        IpcRequest::Status => {
+            let mut response = response_with_status(true, "workspace is running", &state.status);
+            response.apps = Some(state.status.apps.clone());
+            (response, false)
+        }
         IpcRequest::LaunchApp {
             command,
             name,
@@ -3961,8 +3962,8 @@ fn observe_workspace(
     Ok(IpcResponse {
         ok: true,
         message: "workspace observed".to_string(),
+        apps: Some(state.status.apps.clone()),
         status: Some(state.status.clone()),
-        apps: None,
         windows: Some(windows),
         active_window,
         screenshot,
