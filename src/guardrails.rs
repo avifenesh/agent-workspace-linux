@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 12,
+        version: 13,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -111,7 +111,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
             rule(
                 "profile-put-preview",
                 "dry_run",
-                &["profile put", "profile_put"],
+                &["profile put", "profile import", "profile_put", "profile_import"],
                 "Profile save writes to the profile store only when dry_run is false.",
                 "--dry-run or dry_run=true",
                 "Returns whether the profile would be created, replaced, or rejected, including any existing profile.",
@@ -165,7 +165,7 @@ pub fn guardrail_summary() -> GuardrailSummary {
             rule(
                 "profile-replace",
                 "explicit_override",
-                &["profile put", "profile_put"],
+                &["profile put", "profile import", "profile_put", "profile_import"],
                 "Saving a profile with an existing id is rejected.",
                 "--replace or replace=true",
                 "Allows intentional overwrite of a saved environment profile.",

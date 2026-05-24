@@ -51,6 +51,7 @@ cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
 cargo run -- profile put --json ./profile.json --dry-run
 cargo run -- profile put --json ./profile.json
+cargo run -- profile import --json ./profile.json --dry-run
 cargo run -- profile put --json ./profile.json --dry-run --replace
 cargo run -- profile put --json ./profile.json --replace
 cargo run -- profile get project-dev
@@ -189,9 +190,12 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   profile and, when the id already exists, the existing saved profile.
   `profile put --json` creates a saved profile by id. If that id already exists,
   it fails unless `--replace` is passed explicitly.
+  `profile import --json` is the same file-based flow with a clearer verb for
+  file-picker import surfaces.
 - `profile export ID --output PATH` writes a saved profile as pretty JSON for
   file-picker/import flows. Existing output files are not overwritten unless
-  `--replace` is passed explicitly.
+  `--replace` is passed explicitly. If `PATH` is an existing directory, export
+  writes `<profile-id>.json` inside it; missing parent directories are created.
 - `profile delete --dry-run` returns the saved profile that would be removed
   without deleting it, so a UI can ask for confirmation with the full profile
   content visible.
@@ -396,7 +400,7 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`, `profile_check`,
-`profile_template`, `profile_put`, `profile_export`, `profile_delete`, `workspace_start`,
+`profile_template`, `profile_put`, `profile_import`, `profile_export`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_manifest`, `workspace_artifacts`,
 `workspace_ipc_info`, `workspace_env`, `workspace_launch_app`, `workspace_run_app`,
@@ -426,8 +430,11 @@ and acknowledgement fields.
 `profile_put` accepts `dry_run=true` to preview whether a profile would be
 created, replaced, or rejected. It rejects existing profile ids by default; set
 `replace=true` only when intentionally overwriting a saved environment profile.
+`profile_import` performs the same save/replace/dry-run flow from a local JSON
+file path, which is useful for file-picker import UI.
 `profile_export` returns a saved profile and can write it to `output_path`;
-existing files require `replace=true` before they are overwritten.
+existing files require `replace=true` before they are overwritten. Existing
+directory outputs are treated as export folders and receive `<profile-id>.json`.
 `profile_delete` accepts `dry_run=true` to return the profile that would be
 removed without deleting it.
 `workspace_start` accepts `dry_run=true` to preview hidden-workspace

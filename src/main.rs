@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
 
 fn handle_profile(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
-        bail!("missing profile command. Expected: path, list, get, check, template, put, export, delete");
+        bail!("missing profile command. Expected: path, list, get, check, template, put, import, export, delete");
     };
     match command {
         "path" => {
@@ -74,6 +74,10 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             let (profile, replace, dry_run) = parse_profile_put_options(&args[1..])?;
             print_json(&profile::put_profile(profile, replace, dry_run)?)
         }
+        "import" => {
+            let (json_path, replace, dry_run) = parse_profile_import_options(&args[1..])?;
+            print_json(&profile::import_profile(json_path, replace, dry_run)?)
+        }
         "export" => {
             let (id, output_path, replace) = parse_profile_export_options(&args[1..])?;
             print_json(&profile::export_profile(&id, output_path, replace)?)
@@ -83,7 +87,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             print_json(&profile::delete_profile(&id, dry_run)?)
         }
         unknown => {
-            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, export, delete")
+            bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, import, export, delete")
         }
     }
 }
@@ -1021,6 +1025,19 @@ fn parse_required_id_arg(args: &[String], missing_message: &str) -> Result<Strin
 }
 
 fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool, bool)> {
+    let (json_path, replace, dry_run) = parse_profile_json_file_options(args, "profile put")?;
+    let profile = profile::read_profile_json_file(&json_path)?;
+    Ok((profile, replace, dry_run))
+}
+
+fn parse_profile_import_options(args: &[String]) -> Result<(PathBuf, bool, bool)> {
+    parse_profile_json_file_options(args, "profile import")
+}
+
+fn parse_profile_json_file_options(
+    args: &[String],
+    command: &str,
+) -> Result<(PathBuf, bool, bool)> {
     let mut json_path = None;
     let mut replace = false;
     let mut dry_run = false;
@@ -1040,16 +1057,12 @@ fn parse_profile_put_options(args: &[String]) -> Result<(WorkspaceProfile, bool,
                 index += 1;
             }
             flag => {
-                bail!("unknown profile put option '{flag}'. Expected: --json PATH [--replace] [--dry-run]")
+                bail!("unknown {command} option '{flag}'. Expected: --json PATH [--replace] [--dry-run]")
             }
         }
     }
-    let json_path = json_path.context("profile put requires --json PATH")?;
-    let content = fs::read_to_string(&json_path)
-        .with_context(|| format!("failed to read {}", json_path.display()))?;
-    let profile = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse profile JSON from {}", json_path.display()))?;
-    Ok((profile, replace, dry_run))
+    let json_path = json_path.with_context(|| format!("{command} requires --json PATH"))?;
+    Ok((json_path, replace, dry_run))
 }
 
 fn parse_profile_template_options(
@@ -3385,8 +3398,9 @@ Usage:
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
   agent-workspace-linux mcp
-  agent-workspace-linux profile path|list|get|check|template|put|export|delete
+  agent-workspace-linux profile path|list|get|check|template|put|import|export|delete
   agent-workspace-linux profile put --json PATH [--replace] [--dry-run]
+  agent-workspace-linux profile import --json PATH [--replace] [--dry-run]
   agent-workspace-linux profile export ID [--output PATH] [--replace]
   agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]

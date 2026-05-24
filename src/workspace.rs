@@ -1478,9 +1478,7 @@ fn launch_approval_bundle(preview: &WorkspaceLaunchPreview) -> ApprovalBundle {
 }
 
 fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
-    if spec.command.is_empty() {
-        bail!("launch command cannot be empty");
-    }
+    validate_command(&spec.command, "launch")?;
     validate_optional_app_name(&spec.name)?;
     if let Some(cwd) = &spec.cwd {
         if !cwd_is_provided_by_bubblewrap_mount(cwd, spec.applied_policy.as_ref()) && !cwd.is_dir()
@@ -1490,6 +1488,21 @@ fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
     }
     for env_var in &spec.env {
         validate_env_var(env_var)?;
+    }
+    Ok(())
+}
+
+pub fn validate_command(command: &[String], subject: &str) -> Result<()> {
+    if command.is_empty() {
+        bail!("{subject} command cannot be empty");
+    }
+    if command[0].trim().is_empty() {
+        bail!("{subject} command program cannot be empty");
+    }
+    for arg in command {
+        if arg.contains('\0') {
+            bail!("{subject} command cannot contain NUL bytes");
+        }
     }
     Ok(())
 }

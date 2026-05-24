@@ -135,6 +135,24 @@ impl ProfilePutResult {
             existing_profile: None,
         }
     }
+
+    pub fn import_error(replace: bool, dry_run: bool, message: String) -> Self {
+        Self {
+            ok: false,
+            message,
+            id: "import".to_string(),
+            action: "error".to_string(),
+            saved: false,
+            created: false,
+            replaced: false,
+            would_create: false,
+            would_replace: false,
+            replace,
+            dry_run,
+            profile: None,
+            existing_profile: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -329,6 +347,13 @@ pub fn export_profile(
 ) -> Result<ProfileExportResult> {
     let profile = get_profile(id)?;
     let would_write = output_path.is_some();
+    let output_path = output_path.map(|path| {
+        if path.is_dir() {
+            path.join(format!("{}.json", profile.id))
+        } else {
+            path
+        }
+    });
     if let Some(path) = &output_path {
         if path.exists() && !replace {
             bail!(
@@ -338,6 +363,10 @@ pub fn export_profile(
         }
         let content = serde_json::to_string_pretty(&profile)
             .context("failed to serialize profile for export")?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
         fs::write(path, format!("{content}\n"))
             .with_context(|| format!("failed to write {}", path.display()))?;
     }
@@ -349,6 +378,22 @@ pub fn export_profile(
         output_path,
         profile,
     })
+}
+
+pub fn import_profile(
+    json_path: PathBuf,
+    replace: bool,
+    dry_run: bool,
+) -> Result<ProfilePutResult> {
+    let profile = read_profile_json_file(&json_path)?;
+    put_profile(profile, replace, dry_run)
+}
+
+pub fn read_profile_json_file(path: &Path) -> Result<WorkspaceProfile> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("failed to read profile JSON from {}", path.display()))?;
+    serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse profile JSON from {}", path.display()))
 }
 
 pub fn template_profile(
@@ -510,28 +555,21 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
     if matches!(profile.height, Some(0)) {
         bail!("profile height must be greater than zero");
     }
-    for env_var in &profile.env {
-        validate_env_var(env_var)?;
-    }
+    validate_optional_profile_cwd(&profile.cwd, "profile cwd")?;
+    validate_env_vars(&profile.env, "profile env")?;
     validate_mounts(&profile.mounts)?;
     validate_network_policy(&profile.network)?;
     for setup in &profile.setup_commands {
         workspace::validate_optional_app_name(&setup.name)?;
-        if setup.command.is_empty() {
-            bail!("profile setup command cannot be empty");
-        }
-        for env_var in &setup.env {
-            validate_env_var(env_var)?;
-        }
+        workspace::validate_command(&setup.command, "profile setup")?;
+        validate_optional_profile_cwd(&setup.cwd, "profile setup cwd")?;
+        validate_env_vars(&setup.env, "profile setup env")?;
     }
     for app in &profile.startup_apps {
         workspace::validate_optional_app_name(&app.name)?;
-        if app.command.is_empty() {
-            bail!("profile startup app command cannot be empty");
-        }
-        for env_var in &app.env {
-            validate_env_var(env_var)?;
-        }
+        workspace::validate_command(&app.command, "profile startup app")?;
+        validate_optional_profile_cwd(&app.cwd, "profile startup app cwd")?;
+        validate_env_vars(&app.env, "profile startup app env")?;
     }
     Ok(())
 }
@@ -653,6 +691,25 @@ fn validate_mount_path(path: &Path, field: &str) -> Result<()> {
             "profile mount {field} {} cannot contain '..'",
             path.display()
         );
+    }
+    Ok(())
+}
+
+fn validate_optional_profile_cwd(cwd: &Option<PathBuf>, field: &str) -> Result<()> {
+    let Some(cwd) = cwd else {
+        return Ok(());
+    };
+    if cwd.as_os_str().is_empty() {
+        bail!("{field} cannot be empty");
+    }
+    if !cwd.is_absolute() {
+        bail!("{field} {} must be absolute", cwd.display());
+    }
+    if cwd
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        bail!("{field} {} cannot contain '..'", cwd.display());
     }
     Ok(())
 }
@@ -1266,6 +1323,20 @@ fn validate_env_var(env_var: &EnvVar) -> Result<()> {
     Ok(())
 }
 
+fn validate_env_vars(env: &[EnvVar], subject: &str) -> Result<()> {
+    let mut names = BTreeSet::new();
+    for env_var in env {
+        validate_env_var(env_var)?;
+        if !names.insert(env_var.name.clone()) {
+            bail!(
+                "{subject} duplicates environment variable {:?}",
+                env_var.name
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1311,5 +1382,50 @@ mod tests {
         assert!(error
             .to_string()
             .contains("may only allow localhost or loopback"));
+    }
+
+    #[test]
+    fn profile_validation_rejects_duplicate_env_names() {
+        let mut profile = profile_with_network(NetworkPolicy::default());
+        profile.env = vec![
+            EnvVar {
+                name: "DUP".to_string(),
+                value: "one".to_string(),
+            },
+            EnvVar {
+                name: "DUP".to_string(),
+                value: "two".to_string(),
+            },
+        ];
+
+        let error = validate_profile(&profile).expect_err("duplicate env names should fail");
+        assert!(error
+            .to_string()
+            .contains("duplicates environment variable"));
+    }
+
+    #[test]
+    fn profile_validation_rejects_relative_cwd() {
+        let mut profile = profile_with_network(NetworkPolicy::default());
+        profile.cwd = Some(PathBuf::from("relative"));
+
+        let error = validate_profile(&profile).expect_err("relative cwd should fail");
+        assert!(error.to_string().contains("must be absolute"));
+    }
+
+    #[test]
+    fn profile_validation_rejects_empty_startup_program() {
+        let mut profile = profile_with_network(NetworkPolicy::default());
+        profile.startup_apps.push(ProfileStartupApp {
+            name: Some("bad".to_string()),
+            command: vec!["".to_string()],
+            cwd: None,
+            env: Vec::new(),
+        });
+
+        let error = validate_profile(&profile).expect_err("empty command program should fail");
+        assert!(error
+            .to_string()
+            .contains("command program cannot be empty"));
     }
 }
