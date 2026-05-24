@@ -110,7 +110,7 @@ Current gate status on 2026-05-25:
   manifests, stop, stale cleanup, daemon-crash recovery, self-stop from inside
   a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
   discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`. `cargo test`
-  currently passes 46 tests.
+  currently passes 53 tests.
 - A still has known product gaps: host-localhost bridging for `local_only` and
   more varied real-project coverage. Broad network allowlists and egress proxy
   filtering are out of scope for this pass; the product network model is
@@ -126,7 +126,8 @@ Current gate status on 2026-05-25:
   final UI approval boundary and a richer live viewer before it should become a
   hard trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
-  app configuration, and recovery/inspection flows work at the primitive level.
+  app configuration, PID-less arbitrary app window targeting, and
+  recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
   slice. The Codex for Linux app picker now accepts both executable files and
   `.desktop` launchers, parsing launcher `Name`/`Exec` fields into startup app

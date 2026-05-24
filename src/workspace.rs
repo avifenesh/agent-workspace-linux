@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
     os::unix::{
@@ -2720,6 +2720,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
             apps: Vec::new(),
         },
         apps: Vec::new(),
+        window_app_ids: BTreeMap::new(),
         event_path,
         next_event_sequence: 1,
     };
@@ -3451,6 +3452,7 @@ fn workspace_environment(status: &WorkspaceStatus) -> WorkspaceEnvironment {
 struct DaemonState {
     status: WorkspaceStatus,
     apps: Vec<AppProcess>,
+    window_app_ids: BTreeMap<String, String>,
     event_path: PathBuf,
     next_event_sequence: u64,
 }
@@ -3741,7 +3743,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ),
             }
         }
-        IpcRequest::ActiveWindow => match active_workspace_window(&state.status) {
+        IpcRequest::ActiveWindow => match active_workspace_window_for_state(state) {
             Ok(Some(window)) => {
                 record_event(
                     state,
@@ -6041,6 +6043,11 @@ fn active_workspace_window(status: &WorkspaceStatus) -> Result<Option<WorkspaceW
     Ok(Some(window_info(status, window_id)?))
 }
 
+fn active_workspace_window_for_state(state: &DaemonState) -> Result<Option<WorkspaceWindow>> {
+    active_workspace_window(&state.status)
+        .map(|window| window.map(|window| annotate_workspace_window(state, window)))
+}
+
 fn workspace_pointer(status: &WorkspaceStatus) -> Result<WorkspacePointer> {
     let output = workspace_command(status, "xdotool")
         .args(["getmouselocation", "--shell"])
@@ -6079,8 +6086,8 @@ fn observe_workspace(
     include_hidden: bool,
     output_path: Option<PathBuf>,
 ) -> Result<IpcResponse> {
-    let windows = list_workspace_windows(&state.status, include_hidden)?;
-    let active_window = active_workspace_window(&state.status)?;
+    let windows = list_workspace_windows_for_state(state, include_hidden)?;
+    let active_window = active_workspace_window_for_state(state)?;
     let pointer = workspace_pointer(&state.status)?;
     let screenshot = if screenshot {
         Some(capture_workspace_screenshot(&state.status, output_path)?)
@@ -6199,11 +6206,15 @@ fn wait_launch_workspace_window(
             return Ok(windows);
         }
         if let Some(pre_launch_visible_window_ids) = pre_launch_visible_window_ids {
-            let new_windows = list_workspace_windows(&state.status, false)?
+            let new_windows = list_workspace_windows_for_state(state, false)?
                 .into_iter()
                 .filter(|window| !pre_launch_visible_window_ids.contains(&window.id))
                 .collect::<Vec<_>>();
             if !new_windows.is_empty() {
+                if let Some(app_id) = criteria.app_id.as_deref() {
+                    remember_workspace_window_app_ids(state, app_id, &new_windows);
+                    return Ok(annotate_workspace_windows(state, new_windows));
+                }
                 return Ok(new_windows);
             }
         }
@@ -6239,7 +6250,7 @@ fn list_matching_workspace_windows(
         .as_ref()
         .map(|app_id| resolve_workspace_app(&state.status.apps, app_id).cloned())
         .transpose()?;
-    Ok(list_workspace_windows(&state.status, include_hidden)?
+    Ok(list_workspace_windows_for_state(state, include_hidden)?
         .into_iter()
         .filter(|window| {
             criteria
@@ -6263,13 +6274,57 @@ fn list_matching_workspace_windows(
                 return window.pid == Some(pid);
             }
             if let Some(app) = &app_filter {
-                return window
-                    .pid
-                    .is_some_and(|window_pid| process_belongs_to_app(window_pid, app));
+                return window_belongs_to_app(window, app);
             }
             true
         })
         .collect())
+}
+
+fn list_workspace_windows_for_state(
+    state: &DaemonState,
+    include_hidden: bool,
+) -> Result<Vec<WorkspaceWindow>> {
+    let windows = list_workspace_windows(&state.status, include_hidden)?;
+    Ok(annotate_workspace_windows(state, windows))
+}
+
+fn annotate_workspace_windows(
+    state: &DaemonState,
+    windows: Vec<WorkspaceWindow>,
+) -> Vec<WorkspaceWindow> {
+    windows
+        .into_iter()
+        .map(|window| annotate_workspace_window(state, window))
+        .collect()
+}
+
+fn annotate_workspace_window(state: &DaemonState, mut window: WorkspaceWindow) -> WorkspaceWindow {
+    if window.app_id.is_none() {
+        window.app_id = state.window_app_ids.get(&window.id).cloned();
+    }
+    window
+}
+
+fn remember_workspace_window_app_ids(
+    state: &mut DaemonState,
+    app_id: &str,
+    windows: &[WorkspaceWindow],
+) {
+    for window in windows {
+        if window.app_id.is_none() {
+            state
+                .window_app_ids
+                .insert(window.id.clone(), app_id.to_string());
+        }
+    }
+}
+
+fn window_belongs_to_app(window: &WorkspaceWindow, app: &WorkspaceApp) -> bool {
+    window.app_id.as_deref() == Some(app.id.as_str())
+        || window
+            .pid
+            .is_some_and(|window_pid| process_belongs_to_app(window_pid, app))
 }
 
 fn process_is_descendant_or_self(pid: u32, ancestor_pid: u32) -> bool {
@@ -6353,6 +6408,7 @@ fn move_workspace_window_target(
         return Ok(None);
     };
     move_workspace_window(&state.status, &window.id, x, y)
+        .map(|window| annotate_workspace_window(state, window))
         .map(Some)
         .with_context(|| format!("failed to move workspace window {}", window.id))
 }
@@ -6370,6 +6426,7 @@ fn resize_workspace_window_target(
         return Ok(None);
     };
     resize_workspace_window(&state.status, &window.id, width, height)
+        .map(|window| annotate_workspace_window(state, window))
         .map(Some)
         .with_context(|| format!("failed to resize workspace window {}", window.id))
 }
@@ -6383,6 +6440,7 @@ fn raise_workspace_window_target(
         return Ok(None);
     };
     raise_workspace_window(&state.status, &window.id)
+        .map(|window| annotate_workspace_window(state, window))
         .map(Some)
         .with_context(|| format!("failed to raise workspace window {}", window.id))
 }
@@ -6396,6 +6454,7 @@ fn minimize_workspace_window_target(
         return Ok(None);
     };
     minimize_workspace_window(&state.status, &window.id)
+        .map(|window| annotate_workspace_window(state, window))
         .map(Some)
         .with_context(|| format!("failed to minimize workspace window {}", window.id))
 }
@@ -6410,6 +6469,7 @@ fn show_workspace_window_target(
         return Ok(None);
     };
     show_workspace_window(&state.status, &window.id)
+        .map(|window| annotate_workspace_window(state, window))
         .map(Some)
         .with_context(|| format!("failed to show workspace window {}", window.id))
 }
@@ -6700,7 +6760,9 @@ fn resolve_workspace_window_with_visibility(
 ) -> Result<Option<WorkspaceWindow>> {
     if let Some(window_id) = window_id {
         let window_id = sanitize_x11_id(window_id, "window id")?;
-        return window_info(&state.status, &window_id).map(Some);
+        return window_info(&state.status, &window_id)
+            .map(|window| annotate_workspace_window(state, window))
+            .map(Some);
     }
     Ok(
         wait_workspace_window_with_visibility(state, criteria, include_hidden)?
@@ -8433,6 +8495,7 @@ mod tests {
         DaemonState {
             status,
             apps: Vec::new(),
+            window_app_ids: BTreeMap::new(),
             event_path: runtime_dir.join(EVENT_LOG_FILE),
             next_event_sequence: 1,
         }
@@ -8460,6 +8523,63 @@ mod tests {
             stopped_at_unix: Some(2),
             runtime_seconds: Some(1),
         }
+    }
+
+    fn workspace_window_for_test(id: &str) -> WorkspaceWindow {
+        WorkspaceWindow {
+            id: id.to_string(),
+            title: "Calculator".to_string(),
+            wm_class: Some("XCalc".to_string()),
+            wm_instance: Some("xcalc".to_string()),
+            pid: None,
+            app_id: None,
+            visible: true,
+            geometry: WindowGeometry {
+                x: 10,
+                y: 20,
+                width: 200,
+                height: 160,
+                screen: Some(0),
+            },
+        }
+    }
+
+    #[test]
+    fn remembers_pidless_launch_window_for_app_filtering() {
+        let mut state = daemon_state_for_test("pidless-window-association");
+        let mut app = workspace_app_for_test("app-4242");
+        app.running = true;
+        state.status.apps = vec![app.clone()];
+        let window = workspace_window_for_test("4194326");
+
+        remember_workspace_window_app_ids(&mut state, &app.id, std::slice::from_ref(&window));
+        let annotated = annotate_workspace_window(&state, window);
+
+        assert_eq!(annotated.app_id.as_deref(), Some("app-4242"));
+        assert!(window_belongs_to_app(&annotated, &app));
+    }
+
+    #[test]
+    fn pidless_launch_window_does_not_match_other_apps() {
+        let mut state = daemon_state_for_test("pidless-window-other-app");
+        let launched_app = workspace_app_for_test("app-4242");
+        let other_app = WorkspaceApp {
+            id: "app-7777".to_string(),
+            pid: 7777,
+            process_group_id: Some(7777),
+            ..workspace_app_for_test("app-7777")
+        };
+        let window = workspace_window_for_test("4194326");
+
+        remember_workspace_window_app_ids(
+            &mut state,
+            &launched_app.id,
+            std::slice::from_ref(&window),
+        );
+        let annotated = annotate_workspace_window(&state, window);
+
+        assert!(window_belongs_to_app(&annotated, &launched_app));
+        assert!(!window_belongs_to_app(&annotated, &other_app));
     }
 
     #[test]

@@ -393,3 +393,14 @@ Previous post-patch verification:
   `/tmp/installed-conversation-panel-after-refresh.png`. Only the launched
   installed-app probe `app-1535846` was killed afterward; the `mcp-visible`
   workspace remained running.
+- 2026-05-25 C-gate arbitrary-app dogfood found and fixed a PID-less X11 window
+  targeting gap. `xcalc` launched in `dogfood-xcalc-appid` and exposed a
+  `Calculator` window with `pid=null`; before the fix, later `--app` window
+  filters could not recover that window. The daemon now remembers windows that
+  appear from the launch fallback and annotates them with the launched app id.
+  Installed-binary validation showed `workspace launch --wait-window
+  --screenshot-window -- xcalc` returning window `4194326` with
+  `app_id=app-1785548`, `workspace windows --app app-1785548 --all` finding the
+  PID-less window, and app-targeted `minimize-window`, `show-window`,
+  `move-window`, and `screenshot-window` succeeding. The temporary workspace was
+  stopped and cleaned afterward.
