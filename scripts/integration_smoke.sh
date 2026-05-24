@@ -197,6 +197,16 @@ run_awl profile template "${CHROME_TEMPLATE_ARGS[@]}" > "$SMOKE_DIR/restricted-c
 assert_json '.id == "restricted-chrome-smoke" and .network.mode == "disabled" and .require_enforced_policy == true and (.description | contains("--no-sandbox")) and .startup_apps[0].command[0] == $browser and (.startup_apps[0].command | index("--no-sandbox"))' "$SMOKE_DIR/restricted-chrome-template.json" --arg browser "$EXPECTED_BROWSER_BIN"
 run_awl profile validate --json "$SMOKE_DIR/restricted-chrome-template.json" > "$SMOKE_DIR/restricted-chrome-template-validate.json"
 assert_json '.ok == true and .profile.id == "restricted-chrome-smoke" and .check.applied_policy.enforcement.network.enforced == true' "$SMOKE_DIR/restricted-chrome-template-validate.json"
+BROWSER_SESSION_DATA="$SMOKE_DIR/browser-session-data"
+mkdir -p "$BROWSER_SESSION_DATA"
+BROWSER_SESSION_ARGS=(browser-session --id browser-session-smoke --user-data-dir "$BROWSER_SESSION_DATA")
+if [[ -n "$BROWSER_BIN" ]]; then
+  BROWSER_SESSION_ARGS+=(--browser-path "$BROWSER_BIN")
+fi
+run_awl profile template "${BROWSER_SESSION_ARGS[@]}" > "$SMOKE_DIR/browser-session-template.json"
+assert_json '.id == "browser-session-smoke" and .network.mode == "inherit_host" and .require_enforced_policy == true and (.description | contains("explicit user approval")) and .mounts[0].workspace_path == "/workspace/browser-user-data" and .mounts[0].mode == "read_write" and .startup_apps[0].command[0] == $browser and (.startup_apps[0].command | index("--no-sandbox")) and (.startup_apps[0].command | index("--user-data-dir=/workspace/browser-user-data"))' "$SMOKE_DIR/browser-session-template.json" --arg browser "$EXPECTED_BROWSER_BIN"
+run_awl profile validate --json "$SMOKE_DIR/browser-session-template.json" > "$SMOKE_DIR/browser-session-template-validate.json"
+assert_json '.ok == true and .profile.id == "browser-session-smoke" and .check.applied_policy.enforcement.mounts.enforced == true and .check.applied_policy.enforcement.network.state == "not_requested"' "$SMOKE_DIR/browser-session-template-validate.json"
 
 echo "== open-profile dry-run =="
 OPEN_PROFILE="$SMOKE_DIR/open-profile.json"

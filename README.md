@@ -62,6 +62,7 @@ cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
 cargo run -- profile template restricted-chrome --browser-path /usr/bin/google-chrome
+cargo run -- profile template browser-session --browser-path /usr/bin/google-chrome --user-data-dir "$HOME/.config/google-chrome"
 cargo run -- profile validate --json ./profile.json
 cargo run -- profile put --json ./profile.json --dry-run
 cargo run -- profile put --json ./profile.json
@@ -311,11 +312,15 @@ exiting.
 - `profile template project-dev` creates a starter project QA profile. `profile
   template restricted-chrome` creates a browser starter profile with
   `network.mode=disabled`, `require_enforced_policy=true`, an isolated Chrome
-  user-data dir, and an explicit `--no-sandbox` startup command. That flag is
-  visible in the generated profile because Chrome's SUID sandbox can abort
-  before opening a window inside the bubblewrap network namespace; use this
-  template with an isolated browser profile and edit the browser path or command
-  before saving when needed.
+  user-data dir, and an explicit `--no-sandbox` startup command. `profile
+  template browser-session --user-data-dir PATH` creates an authenticated-browser
+  starter that mounts the selected browser data directory read-write at
+  `/workspace/browser-user-data`, inherits host networking, and starts the
+  browser with that mounted profile. The browser templates keep `--no-sandbox`
+  visible in generated JSON because Chrome can abort before opening a window
+  inside bubblewrap namespaces; use browser-session only for explicitly
+  user-approved browser data, and close the host browser or point it at a copied
+  profile to avoid profile lock/corruption.
 - `profile put --json --dry-run` previews whether the profile would be created,
   replaced, or rejected without writing. Its response includes the requested
   profile and, when the id already exists, the existing saved profile.

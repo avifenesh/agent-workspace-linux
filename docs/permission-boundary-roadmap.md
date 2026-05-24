@@ -121,8 +121,10 @@ Current gate status on 2026-05-24:
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, and recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
-  slice. Authenticated browser-profile sharing and user-friendly
-  environment/profile creation are still open.
+  slice. Authenticated browser-profile sharing now has a `browser-session`
+  starter template for explicitly user-approved browser data directories, but
+  user-friendly environment/profile creation and a safer account-profile
+  picker/copy/lock-warning flow are still open.
 
 ### A. Prove Runtime Claims With Real Workloads
 
@@ -173,8 +175,9 @@ tasks users may reasonably ask for:
 
 - Desktop app QA with project mounts, setup commands, local dev servers, browser
   testing, screenshots, logs, and cleanup.
-- Browser-centered tasks such as shopping or web workflows, including profiles
-  or mounted browser data when the user explicitly grants that environment.
+- Browser-centered tasks such as shopping or web workflows, including the
+  `browser-session` starter for mounted browser data when the user explicitly
+  grants that environment.
 - Arbitrary apps chosen through file pickers or configured startup apps.
 - Long-running auto-loop agents that need preconfigured network/file/app
   ceilings without Codex-specific UI.

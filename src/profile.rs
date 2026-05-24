@@ -401,6 +401,7 @@ pub fn template_profile(
     id: Option<String>,
     host_path: Option<PathBuf>,
     browser_path: Option<PathBuf>,
+    user_data_dir: Option<PathBuf>,
 ) -> Result<WorkspaceProfile> {
     let kind = kind.trim();
     let profile = match kind {
@@ -471,7 +472,51 @@ pub fn template_profile(
                 }],
             }
         }
-        _ => bail!("unknown profile template {kind:?}. Expected: project-dev or restricted-chrome"),
+        "browser-session" | "browser_session" | "authenticated-chrome" | "authenticated_chrome" => {
+            let id = id.unwrap_or_else(|| "browser-session".to_string());
+            let host_path = user_data_dir
+                .or(host_path)
+                .context("browser-session template requires --user-data-dir PATH")?;
+            let browser = browser_path
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "google-chrome".to_string());
+            WorkspaceProfile {
+                id,
+                description: Some(
+                    "Browser session profile with the selected user-data directory mounted read-write. Use only with explicit user approval; close the host browser or point to a copied profile to avoid profile lock/corruption. Uses --no-sandbox because Chrome can abort inside the enforced bubblewrap mount namespace.".to_string(),
+                ),
+                width: Some(1280),
+                height: Some(800),
+                cwd: Some(PathBuf::from("/tmp")),
+                env: Vec::new(),
+                mounts: vec![ProfileMount {
+                    host_path,
+                    workspace_path: PathBuf::from("/workspace/browser-user-data"),
+                    mode: MountMode::ReadWrite,
+                }],
+                network: NetworkPolicy::default(),
+                require_enforced_policy: true,
+                setup_commands: Vec::new(),
+                startup_apps: vec![ProfileStartupApp {
+                    name: Some("browser-session-no-sandbox".to_string()),
+                    command: vec![
+                        browser,
+                        "--user-data-dir=/workspace/browser-user-data".to_string(),
+                        "--no-sandbox".to_string(),
+                        "--disable-dev-shm-usage".to_string(),
+                        "--no-first-run".to_string(),
+                        "--no-default-browser-check".to_string(),
+                        "--new-window".to_string(),
+                        "about:blank".to_string(),
+                    ],
+                    cwd: Some(PathBuf::from("/tmp")),
+                    env: Vec::new(),
+                }],
+            }
+        }
+        _ => bail!(
+            "unknown profile template {kind:?}. Expected: project-dev, restricted-chrome, or browser-session"
+        ),
     };
     validate_profile(&profile)?;
     Ok(profile)
@@ -1528,6 +1573,7 @@ mod tests {
             Some("chrome-smoke".to_string()),
             None,
             Some(PathBuf::from("/usr/bin/google-chrome")),
+            None,
         )
         .expect("restricted chrome template");
 
@@ -1543,5 +1589,52 @@ mod tests {
         assert_eq!(app.command[0], "/usr/bin/google-chrome");
         assert!(app.command.iter().any(|arg| arg == "--no-sandbox"));
         assert!(app.command.iter().any(|arg| arg == "about:blank"));
+    }
+
+    #[test]
+    fn browser_session_template_mounts_user_data_with_explicit_caveat() {
+        let profile = template_profile(
+            "browser-session",
+            Some("session-smoke".to_string()),
+            None,
+            Some(PathBuf::from("/usr/bin/google-chrome")),
+            Some(PathBuf::from("/home/me/.config/google-chrome")),
+        )
+        .expect("browser session template");
+
+        assert_eq!(profile.id, "session-smoke");
+        assert!(matches!(profile.network.mode, NetworkMode::InheritHost));
+        assert!(profile.require_enforced_policy);
+        let description = profile.description.as_deref().unwrap_or_default();
+        assert!(description.contains("explicit user approval"));
+        assert!(description.contains("--no-sandbox"));
+        assert_eq!(profile.mounts.len(), 1);
+        assert_eq!(
+            profile.mounts[0].workspace_path,
+            PathBuf::from("/workspace/browser-user-data")
+        );
+        assert!(matches!(profile.mounts[0].mode, MountMode::ReadWrite));
+        let app = &profile.startup_apps[0];
+        assert_eq!(app.name.as_deref(), Some("browser-session-no-sandbox"));
+        assert_eq!(app.command[0], "/usr/bin/google-chrome");
+        assert!(app
+            .command
+            .iter()
+            .any(|arg| arg == "--user-data-dir=/workspace/browser-user-data"));
+        assert!(app.command.iter().any(|arg| arg == "--no-sandbox"));
+    }
+
+    #[test]
+    fn browser_session_template_requires_user_data_dir() {
+        let error = template_profile(
+            "browser-session",
+            Some("session-smoke".to_string()),
+            None,
+            Some(PathBuf::from("/usr/bin/google-chrome")),
+            None,
+        )
+        .expect_err("browser session template should require user-data dir");
+
+        assert!(error.to_string().contains("--user-data-dir"));
     }
 }

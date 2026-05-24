@@ -25,10 +25,10 @@ Environment:
   the same current behavior as the repo build for permission ceilings, network
   isolation, mount enforcement, browser QA, screenshots/input/clipboard, events,
   cleanup, daemon-crash recovery, and self-stop.
-- `cargo test` passed 38 tests, including permission-ceiling checks,
+- `cargo test` passed 40 tests, including permission-ceiling checks,
   local-only/disabled network policy planning, launch-preview daemon
-  requirements, workspace socket-path validation, stop behavior, and profile
-  validation.
+  requirements, workspace socket-path validation, stop behavior, browser-session
+  template behavior, and profile validation.
 - The Codex for Linux side-by-side dev app was rebuilt from
   `/home/avifenesh/projects/codex-desktop-linux` with `make build-dev-app` and
   launched inside the hidden `mcp-visible` workspace. A launcher bug was found
@@ -47,6 +47,15 @@ Environment:
 - The Agent Workspaces settings page in the dev app showed the MCP permissions
   card, one active-workspace card, saved-workspaces section, and a working
   Status/Hide status toggle. The corresponding feature tests now pass 12 tests.
+- A C-gate browser-session probe added a starter profile for explicitly
+  user-approved browser data directories. The first probe mounted a temporary
+  user-data dir read-write and launched Chrome without `--no-sandbox`; Chrome
+  exited before opening a window. The generated `browser-session` template keeps
+  that caveat visible by adding `--no-sandbox`, mounting the selected data dir at
+  `/workspace/browser-user-data`, requiring mount enforcement, and inheriting
+  host networking for authenticated web tasks. A live template probe then opened
+  `about:blank - Google Chrome` with
+  `mount_isolation=bubblewrap_mount_namespace` and `network_isolation=host`.
 
 Remaining gaps from this pass:
 
@@ -54,8 +63,10 @@ Remaining gaps from this pass:
   a product/runtime gap.
 - Network allowlists remain declared intent until an egress-filter backend is
   implemented and tested.
-- Browser tasks that need logged-in sessions still need an explicit
-  user-approved browser profile or mounted browser-data story.
+- Browser tasks that need logged-in sessions now have a starter
+  `browser-session` profile for explicitly user-approved browser data dirs, but
+  the product UI still needs a friendly picker/copy/lock-warning flow before it
+  is comfortable for real account profiles.
 - Hard permission enforcement in Codex for Linux should still wait until the UI
   approval boundary is wired so agents cannot call the same workspace tools
   outside the user-approved path.

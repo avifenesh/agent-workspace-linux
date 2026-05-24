@@ -112,8 +112,10 @@ fn handle_profile(args: Vec<String>, permissions: &permissions::McpPermissionSta
             print_json(&validation)
         }
         "template" => {
-            let (kind, id, host_path, browser_path) = parse_profile_template_options(&args[1..])?;
-            let template = profile::template_profile(&kind, id, host_path, browser_path)?;
+            let (kind, id, host_path, browser_path, user_data_dir) =
+                parse_profile_template_options(&args[1..])?;
+            let template =
+                profile::template_profile(&kind, id, host_path, browser_path, user_data_dir)?;
             permissions.validate_profile(&template)?;
             print_json(&template)
         }
@@ -1190,14 +1192,23 @@ fn parse_profile_json_file_options(
 
 fn parse_profile_template_options(
     args: &[String],
-) -> Result<(String, Option<String>, Option<PathBuf>, Option<PathBuf>)> {
+) -> Result<(
+    String,
+    Option<String>,
+    Option<PathBuf>,
+    Option<PathBuf>,
+    Option<PathBuf>,
+)> {
     let kind = args
         .first()
-        .context("profile template requires a kind, for example project-dev or restricted-chrome")?
+        .context(
+            "profile template requires a kind, for example project-dev, restricted-chrome, or browser-session",
+        )?
         .to_string();
     let mut id = None;
     let mut host_path = None;
     let mut browser_path = None;
+    let mut user_data_dir = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -1213,10 +1224,14 @@ fn parse_profile_template_options(
                 browser_path = Some(PathBuf::from(value_after(args, index, "--browser-path")?));
                 index += 2;
             }
+            "--user-data-dir" => {
+                user_data_dir = Some(PathBuf::from(value_after(args, index, "--user-data-dir")?));
+                index += 2;
+            }
             flag => bail!("unknown profile template option '{flag}'"),
         }
     }
-    Ok((kind, id, host_path, browser_path))
+    Ok((kind, id, host_path, browser_path, user_data_dir))
 }
 
 fn parse_profile_export_options(args: &[String]) -> Result<(String, Option<PathBuf>, bool)> {
@@ -3560,6 +3575,7 @@ Usage:
   agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux profile template restricted-chrome [--id ID] [--browser-path PATH]
+  agent-workspace-linux profile template browser-session [--id ID] [--browser-path PATH] --user-data-dir PATH
   agent-workspace-linux workspace start [--dry-run] --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace open-profile [--dry-run] [--ack-hidden-workspace] [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--startup-screenshot-window] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace list
