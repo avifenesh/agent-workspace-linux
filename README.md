@@ -167,8 +167,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   contacting the workspace daemon, making it suitable for stopped workspaces or
   post-run audit views. `workspace status` remains live IPC state.
 - `workspace artifacts` returns a read-only inventory of files in the runtime
-  directory, including the manifest, event log, daemon logs, app logs, and any
-  screenshots captured into the workspace runtime directory.
+  directory, including the manifest, control socket, Xauthority file, applied
+  policy snapshot, event log, daemon logs, app logs, and any screenshots
+  captured into the workspace runtime directory.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace

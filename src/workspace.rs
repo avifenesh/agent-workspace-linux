@@ -954,6 +954,37 @@ pub fn artifacts(id: &str) -> WorkspaceArtifacts {
         "workspace manifest",
         runtime_dir.join(WORKSPACE_MANIFEST_FILE),
     );
+    let control_socket_path = manifest
+        .as_ref()
+        .map(|manifest| manifest.socket_path.clone())
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| runtime_dir.join("control.sock"));
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "control_socket",
+        "workspace control socket",
+        control_socket_path,
+    );
+    let xauthority_path = manifest
+        .as_ref()
+        .map(|manifest| manifest.xauthority_path.clone())
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| runtime_dir.join("Xauthority"));
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "xauthority",
+        "workspace Xauthority",
+        xauthority_path,
+    );
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "policy",
+        "applied policy snapshot",
+        runtime_dir.join(APPLIED_POLICY_FILE),
+    );
     let event_log_path = manifest
         .as_ref()
         .map(|manifest| manifest.event_log_path.clone())
