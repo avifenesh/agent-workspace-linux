@@ -60,6 +60,10 @@ Findings:
 - Browser tasks that require logged-in sessions need an explicit browser
   profile/mount story. The Chrome smoke used a temporary isolated user data dir,
   not the user's authenticated browser profile.
+- Chrome under the bubblewrap disabled-network namespace needed `--no-sandbox`
+  on this machine. Without it, Chrome aborted before opening a window because
+  its SUID sandbox helper was not usable in the launch context. Browser launch
+  templates should make this tradeoff visible instead of hiding it in JSON.
 - Fixed while codifying the browser smoke: host Wayland environment variables
   could make Chrome prefer the host Wayland session over the hidden X11 display.
   Workspace launches now scrub inherited Wayland hints and set common toolkit
@@ -107,3 +111,10 @@ Post-patch verification:
   passed 9 tests. After `workspace_stop`, saved-manifest log reads and events
   still reported the passed test output and app history; stale cleanup removed
   the runtime and the temporary profile was deleted.
+- MCP dogfood covered browser behavior under `network.mode=disabled`: a
+  temporary `dogfood-chrome-netoff` profile opened Chrome in the hidden X11
+  workspace with `network_isolation=bubblewrap_unshare_net`, captured a window
+  screenshot, and Chrome rendered its own `ERR_INTERNET_DISCONNECTED` page for
+  `example.com`. `workspace_observe`, `workspace_screenshot_window`, event
+  history, `workspace_stop`, stale cleanup, and profile deletion all worked
+  after the browser run.
