@@ -100,7 +100,7 @@ Rules:
 
 ## Gates Before Hard Enforcement
 
-Current gate status on 2026-05-24:
+Current gate status on 2026-05-25:
 
 - A is validated for the current X11/bubblewrap runtime surface covered by the
   integration smoke. Real MCP dogfood and `scripts/integration_smoke.sh` have
@@ -115,11 +115,14 @@ Current gate status on 2026-05-24:
   network allowlist enforcement, and more varied real-project coverage.
 - B has a first Codex for Linux slice: the conversation surface can show a live
   active-workspace panel with screenshot, profile/policy/app metadata, Stop, and
-  Revoke. The side-by-side dev app has been dogfooded inside a hidden workspace.
-  The launcher now avoids inherited renderer URLs, the live panel appears in the
-  conversation view, and it hides on Settings pages where the dedicated Agent
-  Workspaces controls are shown. It still needs main-app install QA and the
-  final UI approval boundary before it should become a hard trust boundary.
+  Revoke. The side-by-side dev app and the installed user-facing app have both
+  been dogfooded inside a hidden workspace. The launcher now avoids inherited
+  renderer URLs, the live panel appears in the conversation view, and it hides
+  on Settings pages where the dedicated Agent Workspaces controls are shown. The
+  installed app was verified through Chrome DevTools Protocol with real MCP
+  bridge calls, a live screenshot, and Refresh interaction. B still needs the
+  final UI approval boundary and a richer live viewer before it should become a
+  hard trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, and recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced

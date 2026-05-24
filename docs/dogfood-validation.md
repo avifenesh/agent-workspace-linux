@@ -338,3 +338,20 @@ Previous post-patch verification:
   workspace. The same MCP pass generated a `browser-session` profile by calling
   `profile_template` with `kind="browser-session"` and `user_data_dir`, proving
   the installed MCP path exposes the new browser-session behavior after reload.
+- 2026-05-25 installed-app B-gate dogfood verified the conversation embedded
+  workspace panel against the patched user-facing Codex app bundle. A hidden
+  workspace launched
+  `/home/avifenesh/.local/opt/codex-desktop-linux/codex-app/start.sh
+  --new-instance -- --remote-debugging-port=9338` with real
+  `CODEX_HOME=/home/avifenesh/.codex` and
+  `CODEX_AGENT_WORKSPACE_BIN=/home/avifenesh/.local/bin/agent-workspace-linux`.
+  Chrome DevTools Protocol attached to the installed Electron renderer at
+  `http://127.0.0.1:5175/?mcpAppSandboxDevtools=1`. The conversation surface
+  showed `Codex app nonoptional MCP card dogfood`, Refresh/Stop/Revoke controls,
+  `:90 - 1 app: installed-codex-conversation-refresh-qa`, and an embedded
+  screenshot data URL with natural size `1280x800`. A CDP click on Refresh
+  completed, the screenshot data URL changed length, and no relevant
+  console/runtime errors were observed. Screenshot evidence was captured at
+  `/tmp/installed-conversation-panel-after-refresh.png`. Only the launched
+  installed-app probe `app-1535846` was killed afterward; the `mcp-visible`
+  workspace remained running.
