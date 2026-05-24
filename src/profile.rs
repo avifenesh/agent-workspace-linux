@@ -29,6 +29,8 @@ pub struct WorkspaceProfile {
     pub mounts: Vec<ProfileMount>,
     #[serde(default)]
     pub network: NetworkPolicy,
+    #[serde(default)]
+    pub require_enforced_policy: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setup_commands: Vec<ProfileSetupCommand>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -140,6 +142,8 @@ pub struct ProfileCheck {
     pub applied_policy: AppliedWorkspacePolicy,
     pub requires_hidden_workspace_ack: bool,
     pub requires_unenforced_policy_ack: bool,
+    pub can_acknowledge_unenforced_policy: bool,
+    pub blocks_unenforced_policy: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
@@ -297,6 +301,7 @@ pub fn template_profile(
                     mode: MountMode::ReadWrite,
                 }],
                 network: NetworkPolicy::default(),
+                require_enforced_policy: false,
                 setup_commands: Vec::new(),
                 startup_apps: Vec::new(),
             }
@@ -310,13 +315,17 @@ pub fn template_profile(
 pub fn check_profile(id: &str) -> Result<ProfileCheck> {
     let profile = get_profile(id)?;
     let applied_policy = applied_policy(&profile);
-    let requires_unenforced_policy_ack = applied_policy.has_requested_unenforced_policy();
+    let can_acknowledge_unenforced_policy = applied_policy.can_acknowledge_unenforced_policy();
+    let blocks_unenforced_policy = applied_policy.blocks_requested_unenforced_policy();
+    let requires_unenforced_policy_ack = can_acknowledge_unenforced_policy;
     let warnings = policy_warnings(&applied_policy);
     Ok(ProfileCheck {
         profile,
         applied_policy,
         requires_hidden_workspace_ack: true,
         requires_unenforced_policy_ack,
+        can_acknowledge_unenforced_policy,
+        blocks_unenforced_policy,
         warnings,
     })
 }
@@ -597,6 +606,7 @@ pub fn applied_policy(profile: &WorkspaceProfile) -> AppliedWorkspacePolicy {
         profile.id.clone(),
         profile.mounts.clone(),
         profile.network.clone(),
+        profile.require_enforced_policy,
         profile.setup_commands.len(),
         workspace::policy_runtime_capabilities(),
     )
@@ -955,6 +965,7 @@ mod tests {
             env: Vec::new(),
             mounts: Vec::new(),
             network,
+            require_enforced_policy: false,
             setup_commands: Vec::new(),
             startup_apps: Vec::new(),
         }

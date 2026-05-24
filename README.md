@@ -31,6 +31,10 @@ show exactly what is enforced before it starts the hidden environment.
 `network.mode=local_only` is available for profile intent where workspace apps
 should reach selected localhost or loopback services but not the internet; it is
 reported as unenforced until a local bridge/proxy backend exists.
+Profiles can also set `require_enforced_policy=true` to fail closed: if any
+requested mount or network policy is not enforced by the current runtime, starts
+and launches are rejected even when the caller passes the unenforced-policy
+acknowledgement.
 
 For the current bubblewrap runtime, profile mount sources must use absolute host
 paths, and mount destinations must be non-overlapping absolute paths under
@@ -157,6 +161,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   targets such as `localhost:3000` or `127.0.0.1:5173`, but the current runtime
   does not yet provide the bridge/proxy needed to enforce that split, so they
   require `--ack-unenforced-policy`.
+  If the saved profile sets `require_enforced_policy=true`, the runtime refuses
+  to start or launch with unenforced policy instead of accepting that
+  acknowledgement.
   Network allowlists are different: `allow_hosts` is saved and shown as profile
   intent, but host filtering is not active yet, so allowlist profiles always
   require `--ack-unenforced-policy` and report the limitation in

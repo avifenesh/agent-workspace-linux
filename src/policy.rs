@@ -70,6 +70,8 @@ pub struct AppliedWorkspacePolicy {
     pub mounts: Vec<ProfileMount>,
     #[serde(default)]
     pub network: NetworkPolicy,
+    #[serde(default)]
+    pub require_full_enforcement: bool,
     pub setup_command_count: usize,
     #[serde(default)]
     pub runtime_capabilities: PolicyRuntimeCapabilities,
@@ -81,6 +83,7 @@ impl AppliedWorkspacePolicy {
         profile_id: String,
         mounts: Vec<ProfileMount>,
         network: NetworkPolicy,
+        require_full_enforcement: bool,
         setup_command_count: usize,
         runtime_capabilities: PolicyRuntimeCapabilities,
     ) -> Self {
@@ -190,10 +193,15 @@ impl AppliedWorkspacePolicy {
                 );
             }
         }
+        if require_full_enforcement {
+            mark_blocked_by_required_enforcement(&mut mount_status);
+            mark_blocked_by_required_enforcement(&mut network_status);
+        }
         Self {
             profile_id,
             mounts,
             network,
+            require_full_enforcement,
             setup_command_count,
             runtime_capabilities,
             enforcement: PolicyEnforcement {
@@ -227,6 +235,14 @@ impl AppliedWorkspacePolicy {
     pub fn has_requested_unenforced_policy(&self) -> bool {
         requested_but_unenforced(&self.enforcement.mounts)
             || requested_but_unenforced(&self.enforcement.network)
+    }
+
+    pub fn blocks_requested_unenforced_policy(&self) -> bool {
+        self.require_full_enforcement && self.has_requested_unenforced_policy()
+    }
+
+    pub fn can_acknowledge_unenforced_policy(&self) -> bool {
+        self.has_requested_unenforced_policy() && !self.require_full_enforcement
     }
 }
 
@@ -382,6 +398,19 @@ fn requested_but_unenforced(status: &PolicyCapabilityStatus) -> bool {
     status.requested && !status.enforced
 }
 
+fn mark_blocked_by_required_enforcement(status: &mut PolicyCapabilityStatus) {
+    if requested_but_unenforced(status) {
+        status.requires_acknowledgement = Some(false);
+        status.required_acknowledgement = None;
+        status
+            .limitations
+            .retain(|limitation| !limitation.contains("when this profile is acknowledged"));
+        status.limitations.push(
+            "require_enforced_policy=true blocks launch until this policy is enforced".to_string(),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +449,7 @@ mod tests {
                 mode: NetworkMode::Disabled,
                 allow_hosts: Vec::new(),
             },
+            true,
             0,
             capabilities(true, false, false, false),
         );
@@ -450,6 +480,7 @@ mod tests {
                 mode: NetworkMode::Allowlist,
                 allow_hosts: vec!["example.com".to_string()],
             },
+            false,
             0,
             capabilities(true, true, true, true),
         );
@@ -490,6 +521,7 @@ mod tests {
                 mode: NetworkMode::LocalOnly,
                 allow_hosts: vec!["localhost:3000".to_string(), "127.0.0.1:5173".to_string()],
             },
+            false,
             0,
             capabilities(true, false, false, true),
         );
@@ -520,6 +552,36 @@ mod tests {
             .limitations
             .iter()
             .any(|limitation| limitation.contains("local service intent")));
+    }
+
+    #[test]
+    fn strict_profiles_block_requested_unenforced_policy() {
+        let policy = AppliedWorkspacePolicy::new_with_capabilities(
+            "strict-local".to_string(),
+            Vec::new(),
+            NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string()],
+            },
+            true,
+            0,
+            capabilities(true, false, false, true),
+        );
+
+        assert!(policy.has_requested_unenforced_policy());
+        assert!(policy.blocks_requested_unenforced_policy());
+        assert!(!policy.can_acknowledge_unenforced_policy());
+        assert_eq!(
+            policy.enforcement.network.requires_acknowledgement,
+            Some(false)
+        );
+        assert_eq!(policy.enforcement.network.required_acknowledgement, None);
+        assert!(policy
+            .enforcement
+            .network
+            .limitations
+            .iter()
+            .any(|limitation| limitation.contains("blocks launch")));
     }
 
     #[test]

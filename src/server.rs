@@ -83,6 +83,7 @@ impl AgentWorkspaceLinux {
                     env: Vec::new(),
                     mounts: Vec::new(),
                     network: Default::default(),
+                    require_enforced_policy: false,
                     setup_commands: Vec::new(),
                     startup_apps: Vec::new(),
                 }],
@@ -178,7 +179,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "profile_put",
-        description = "Create an agent workspace profile. Existing profile ids are rejected unless replace=true is set explicitly. Set dry_run=true to preview whether the profile would be created, replaced, or rejected without writing. Mounts, network, and setup commands are persisted as declared intent and surfaced in workspace status; display size, cwd, and env are currently applied by the X11 runtime.",
+        description = "Create an agent workspace profile. Existing profile ids are rejected unless replace=true is set explicitly. Set dry_run=true to preview whether the profile would be created, replaced, or rejected without writing. Mounts, network, require_enforced_policy, and setup commands are persisted as declared intent and surfaced in workspace status; display size, cwd, and env are currently applied by the X11 runtime.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -268,7 +269,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_start",
-        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when available; local_only and allowlist network profiles are declared intent until dedicated backends exist.",
+        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when available; local_only and allowlist network profiles are declared intent until dedicated backends exist. Profiles with require_enforced_policy=true reject unenforced policy instead of accepting acknowledgement.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

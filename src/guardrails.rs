@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 3,
+        version: 4,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -188,6 +188,19 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 "Mount profiles are enforced only when bubblewrap is available.",
                 "Install bubblewrap for active mount namespace enforcement, or pass --ack-unenforced-policy to run without it.",
                 "profile_check reports mounts.state=enforced with backend=bubblewrap_mount_namespace, or state=unenforced with required_acknowledgement=ack_unenforced_policy.",
+            ),
+            rule(
+                "profile-require-enforced-policy",
+                "policy_guardrail",
+                &[
+                    "profile require_enforced_policy=true",
+                    "profile_check",
+                    "workspace start --profile",
+                    "workspace launch --profile",
+                ],
+                "Profiles may opt into fail-closed policy handling.",
+                "Set require_enforced_policy=true in the saved profile.",
+                "If any requested mount or network policy is unenforced, starts and launches are rejected even when --ack-unenforced-policy is passed.",
             ),
         ],
         timeout_terminations: vec![

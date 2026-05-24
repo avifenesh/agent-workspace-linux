@@ -1260,14 +1260,29 @@ fn cwd_is_provided_by_bubblewrap_mount(
 }
 
 fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
-    if spec
-        .applied_policy
-        .as_ref()
-        .is_some_and(AppliedWorkspacePolicy::has_requested_unenforced_policy)
-        && !spec.user_acknowledged_unenforced_policy
-    {
+    if let Some(policy) = &spec.applied_policy {
+        validate_policy_acknowledgement(
+            policy,
+            spec.user_acknowledged_unenforced_policy,
+            "launch profile",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_policy_acknowledgement(
+    policy: &AppliedWorkspacePolicy,
+    acknowledged_unenforced_policy: bool,
+    subject: &str,
+) -> Result<()> {
+    if policy.blocks_requested_unenforced_policy() {
         bail!(
-            "launch profile requests mount or network policy that is not enforced by this runtime; pass --ack-unenforced-policy or set acknowledge_unenforced_policy=true"
+            "{subject} requires full mount/network policy enforcement, but this runtime cannot enforce all requested policy"
+        );
+    }
+    if policy.has_requested_unenforced_policy() && !acknowledged_unenforced_policy {
+        bail!(
+            "{subject} requests mount or network policy that is not enforced by this runtime; pass --ack-unenforced-policy or set acknowledge_unenforced_policy=true"
         );
     }
     Ok(())
@@ -2215,15 +2230,12 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
             "starting a hidden agent workspace requires explicit acknowledgement; pass --ack-hidden-workspace or set acknowledge_hidden_workspace=true"
         );
     }
-    if options
-        .applied_policy
-        .as_ref()
-        .is_some_and(AppliedWorkspacePolicy::has_requested_unenforced_policy)
-        && !options.user_acknowledged_unenforced_policy
-    {
-        bail!(
-            "profile requests mount or network policy that is not enforced by this X11 runtime; pass --ack-unenforced-policy or set acknowledge_unenforced_policy=true"
-        );
+    if let Some(policy) = &options.applied_policy {
+        validate_policy_acknowledgement(
+            policy,
+            options.user_acknowledged_unenforced_policy,
+            "profile",
+        )?;
     }
 
     let runtime = doctor_report();
