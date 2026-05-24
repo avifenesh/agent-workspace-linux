@@ -184,8 +184,11 @@ command = "/home/YOU/.local/bin/agent-workspace-linux"
 args = ["mcp"]
 ```
 
-After installation, restart Codex or reload MCP servers so the `workspace_*`
-tools become available. Run a preview without writing files with:
+After installation or upgrade, restart Codex or reload MCP servers so new
+workspace tools, parameters, profile templates, and runtime behavior become
+available. Already-running MCP server processes keep serving their old schema
+until the host restarts or reloads them. Run a preview without writing files
+with:
 
 ```bash
 ./install.sh --dry-run

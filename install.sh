@@ -149,6 +149,33 @@ write_codex_config() {
   echo "Registered Codex MCP server '$CODEX_MCP_SERVER_NAME' in $CODEX_CONFIG"
 }
 
+warn_running_mcp_processes() {
+  local matches
+
+  if [ "$DRY_RUN" -eq 1 ] || [ "$CONFIGURE_CODEX" -ne 1 ]; then
+    return
+  fi
+
+  if ! command -v ps >/dev/null 2>&1; then
+    return
+  fi
+
+  matches="$(
+    ps -eo pid=,args= | awk -v self="$$" -v bin="$BIN_NAME" -v dest="$DEST_BIN" '
+      $1 != self && index($0, " mcp") && (index($0, dest) || index($0, bin)) {
+        print
+      }
+    '
+  )"
+
+  if [ -n "$matches" ]; then
+    echo
+    echo "Detected running $BIN_NAME MCP process(es):"
+    printf '%s\n' "$matches"
+    echo "Restart Codex or reload MCP servers now; running MCP processes keep their old tool schema, templates, and behavior until restarted."
+  fi
+}
+
 if [ "$SKIP_BUILD" -eq 0 ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "Would build release binary with cargo."
@@ -182,5 +209,6 @@ if [ "$RUN_DOCTOR" -eq 1 ]; then
 fi
 
 if [ "$CONFIGURE_CODEX" -eq 1 ]; then
-  echo "Restart Codex or reload MCP servers so the new workspace_* tools become available."
+  warn_running_mcp_processes
+  echo "Restart Codex or reload MCP servers so new workspace tools, parameters, templates, and behavior become available."
 fi

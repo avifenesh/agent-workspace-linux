@@ -125,3 +125,24 @@ Post-patch verification:
   `network.mode=disabled`, `require_enforced_policy=true`, an isolated
   user-data dir, and `--no-sandbox`; the integration smoke validates that
   generated profile before the browser launch coverage.
+- MCP dogfood revalidated disabled-network Chrome through the installed MCP
+  tools after the template work. Because the current MCP server process was
+  still stale, `profile_template(kind="restricted-chrome")` returned
+  `unknown profile template "restricted-chrome". Expected: project-dev`; the
+  pass created the equivalent temporary profile with `profile_put` instead.
+  `workspace_start --dry-run` and real start both reported
+  `network.enforcement.state="enforced"` with `backend="bubblewrap_unshare_net"`
+  and only the hidden-workspace acknowledgement required. Host networking could
+  fetch `http://1.1.1.1`, while a workspace `curl http://1.1.1.1` probe failed
+  with status 7 and no routes. Chrome launched with `--no-sandbox` inside that
+  disabled-network workspace, first rendered `ERR_INTERNET_DISCONNECTED`, then
+  targeted `ctrl+l`, `paste-window`, and `Return` navigated to a `data:` page
+  proving scoped input. The event log recorded paste byte/character counts, not
+  raw pasted text. `workspace_manifest`, `workspace_artifacts`,
+  `workspace_ipc_info`, `workspace_list_apps`, `workspace_stop`,
+  `workspace_cleanup_stale`, and profile deletion all worked afterward.
+- Fixed after this pass: the installer now warns when an
+  `agent-workspace-linux mcp` process is already running and clarifies that
+  Codex/MCP reload is required for new tool schemas, parameters, templates, and
+  runtime behavior. README install docs now make the same upgrade caveat
+  explicit.
