@@ -320,6 +320,16 @@ pub struct WindowGeometry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspacePointer {
+    pub x: i32,
+    pub y: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceScreenshot {
     pub path: PathBuf,
     pub width: u32,
@@ -427,6 +437,7 @@ pub enum IpcRequest {
         app_id: Option<String>,
     },
     ActiveWindow,
+    Pointer,
     Observe {
         screenshot: bool,
         #[serde(default)]
@@ -669,6 +680,8 @@ pub struct IpcResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_window: Option<WorkspaceWindow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pointer: Option<WorkspacePointer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<WorkspaceScreenshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_log: Option<WorkspaceAppLog>,
@@ -764,6 +777,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             ipc: None,
             windows: None,
             active_window: None,
+            pointer: None,
             screenshot: None,
             app_log: None,
             clipboard: None,
@@ -1018,6 +1032,11 @@ pub fn list_windows(
 pub fn active_window(id: &str) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::ActiveWindow)
+}
+
+pub fn pointer(id: &str) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::Pointer)
 }
 
 pub fn observe(
@@ -2091,6 +2110,7 @@ fn response_with_status(
         apps: None,
         windows: None,
         active_window: None,
+        pointer: None,
         screenshot: None,
         app_log: None,
         clipboard: None,
@@ -2364,6 +2384,28 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 let mut response =
                     response_with_status(false, "workspace active window not found", &state.status);
                 response.windows = Some(Vec::new());
+                (response, false)
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::Pointer => match workspace_pointer(&state.status) {
+            Ok(pointer) => {
+                record_event(
+                    state,
+                    "pointer",
+                    serde_json::json!({
+                        "x": pointer.x,
+                        "y": pointer.y,
+                        "screen": pointer.screen,
+                        "window_id": pointer.window_id.as_deref(),
+                    }),
+                )?;
+                let mut response =
+                    response_with_status(true, "workspace pointer reported", &state.status);
+                response.pointer = Some(pointer);
                 (response, false)
             }
             Err(error) => (
@@ -4280,6 +4322,38 @@ fn active_workspace_window(status: &WorkspaceStatus) -> Result<Option<WorkspaceW
     Ok(Some(window_info(status, window_id)?))
 }
 
+fn workspace_pointer(status: &WorkspaceStatus) -> Result<WorkspacePointer> {
+    let output = workspace_command(status, "xdotool")
+        .args(["getmouselocation", "--shell"])
+        .output()
+        .context("failed to run xdotool getmouselocation")?;
+    let text = output_text(output, "xdotool getmouselocation")?;
+    let mut x = None;
+    let mut y = None;
+    let mut screen = None;
+    let mut window_id = None;
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key {
+            "X" => x = Some(value.parse().context("pointer X must be an integer")?),
+            "Y" => y = Some(value.parse().context("pointer Y must be an integer")?),
+            "SCREEN" => screen = Some(value.parse().context("pointer SCREEN must be an integer")?),
+            "WINDOW" if !value.trim().is_empty() && value.trim() != "0" => {
+                window_id = Some(value.trim().to_string());
+            }
+            _ => {}
+        }
+    }
+    Ok(WorkspacePointer {
+        x: x.context("pointer output missing X")?,
+        y: y.context("pointer output missing Y")?,
+        screen,
+        window_id,
+    })
+}
+
 fn observe_workspace(
     state: &DaemonState,
     screenshot: bool,
@@ -4288,6 +4362,7 @@ fn observe_workspace(
 ) -> Result<IpcResponse> {
     let windows = list_workspace_windows(&state.status, include_hidden)?;
     let active_window = active_workspace_window(&state.status)?;
+    let pointer = workspace_pointer(&state.status)?;
     let screenshot = if screenshot {
         Some(capture_workspace_screenshot(&state.status, output_path)?)
     } else {
@@ -4301,6 +4376,7 @@ fn observe_workspace(
         ipc: None,
         windows: Some(windows),
         active_window,
+        pointer: Some(pointer),
         screenshot,
         app_log: None,
         clipboard: None,

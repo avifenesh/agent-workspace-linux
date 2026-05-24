@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, ipc-info, launch, run, launch-profile-apps, apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, ipc-info, launch, run, launch-profile-apps, apps, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -174,6 +174,10 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         "active-window" => {
             let id = parse_id_option(&args[1..])?;
             print_json(&workspace::active_window(&id)?)
+        }
+        "pointer" => {
+            let id = parse_id_option(&args[1..])?;
+            print_json(&workspace::pointer(&id)?)
         }
         "observe" => {
             let (
@@ -568,7 +572,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, ipc-info, launch, run, launch-profile-apps, apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, ipc-info, launch, run, launch-profile-apps, apps, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -3062,6 +3066,7 @@ Usage:
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]
+  agent-workspace-linux workspace pointer [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH] [--events] [--events-tail N] [--events-since SEQUENCE]
   agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace screenshot [--id ID] [--output PATH]

@@ -63,6 +63,7 @@ cargo run -- workspace windows --all
 cargo run -- workspace windows --app app-12345
 cargo run -- workspace windows --class xterm
 cargo run -- workspace active-window
+cargo run -- workspace pointer
 cargo run -- workspace observe --screenshot --output /tmp/agent-observe.png
 cargo run -- workspace observe --all-windows
 cargo run -- workspace wait-window --title xterm --timeout-ms 10000
@@ -181,7 +182,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   the full workspace status. It can filter by `--app APP_ID_OR_PID_OR_NAME`,
   app `--name TEXT`, `--command TEXT`, `--profile PROFILE`, `--running`, or
   `--stopped`.
-- `workspace windows`, `workspace active-window`, `workspace observe`,
+- `workspace windows`, `workspace active-window`, `workspace pointer`,
+  `workspace observe`,
   `workspace wait-window`, `workspace screenshot`, `workspace screenshot-window`,
   `workspace focus-window`, `workspace close-window`, `workspace move-window`,
   `workspace resize-window`, `workspace raise-window`,
@@ -200,12 +202,13 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--all` includes minimized/hidden windows so they can be shown again by id.
   `windows` can also filter the current list with `--title`, `--class`,
   `--pid`, or `--app`. `active-window` reports the current workspace-local focus,
-  and `observe` returns status, apps, windows, active window, and optionally a
-  root screenshot in one IPC call. Screenshot records include path, dimensions,
-  PNG byte size, and capture timestamp. `observe --events`, `--events-tail`,
-  and `--events-since` include recent or incremental event records in the same
-  IPC response. `observe --all-windows` uses the same hidden-window listing as
-  `windows --all`. `focus-window`, `screenshot-window`,
+  `pointer` reports the current workspace-local pointer coordinates, and
+  `observe` returns status, apps, windows, active window, pointer, and
+  optionally a root screenshot in one IPC call. Screenshot records include path,
+  dimensions, PNG byte size, and capture timestamp. `observe --events`,
+  `--events-tail`, and `--events-since` include recent or incremental event
+  records in the same IPC response. `observe --all-windows` uses the same
+  hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
   `close-window`, `move-window`, `resize-window`, `raise-window`,
   `minimize-window`, `key-window`, and `type-window` can use either a raw X11
   window id or the same title/class/pid/app filters as `wait-window`; class
@@ -271,7 +274,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_status`, `workspace_ipc_info`, `workspace_launch_app`,
 `workspace_run_app`,
 `workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_list_windows`,
-`workspace_active_window`, `workspace_observe`, `workspace_wait_window`,
+`workspace_active_window`, `workspace_pointer`, `workspace_observe`,
+`workspace_wait_window`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
 `workspace_focus_matching_window`, `workspace_close_window`, `workspace_click`,
 `workspace_close_matching_window`, `workspace_move_window`,
