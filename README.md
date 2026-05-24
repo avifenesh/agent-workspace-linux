@@ -43,7 +43,7 @@ cargo run -- profile get project-dev
 cargo run -- profile check project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-unenforced-policy --profile project-dev
-cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window
+cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
@@ -52,7 +52,7 @@ cargo run -- workspace ipc-info
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
-cargo run -- workspace launch-profile-apps --profile project-dev --wait-window --window-timeout-ms 10000
+cargo run -- workspace launch-profile-apps --profile project-dev --wait-window --screenshot-window --window-timeout-ms 10000
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace apps
 cargo run -- workspace apps --running
@@ -148,6 +148,7 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--setup-timeout-ms` overrides the default setup wait timeout.
   `--setup-kill-on-timeout` terminates a timed-out setup command process group.
   `--startup-wait-window` waits for each startup app's first visible window.
+  `--startup-screenshot-window` also captures each first startup window.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable. Running and stale runtime directories can
   include a durable manifest with the hidden-workspace acknowledgement, purpose,
@@ -256,7 +257,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   names become stable app targets after launch. If startup apps use a profile
   with policy that remains unenforced, they require `--ack-unenforced-policy`.
   `--wait-window` returns each startup app's first visible window when it appears
-  before the timeout.
+  before the timeout. `--screenshot-window` also captures each first startup
+  window.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
   start timestamp, optional purpose, hidden-workspace acknowledgement,

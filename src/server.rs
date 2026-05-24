@@ -232,7 +232,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_open_profile",
-        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. Set startup_wait_window=true to wait for each startup app's first visible window.",
+        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. Set startup_wait_window=true to wait for each startup app's first visible window, or startup_screenshot_window=true to also capture each first startup window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1446,7 +1446,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_profile_apps",
-        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set wait_window=true to wait for each startup app's first visible window.",
+        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set wait_window=true to wait for each startup app's first visible window, or screenshot_window=true to also capture each first startup window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1468,6 +1468,7 @@ impl AgentWorkspaceLinux {
                     acknowledge_unenforced_policy: params.acknowledge_unenforced_policy,
                     wait_window: params.wait_window,
                     window_timeout_ms: params.window_timeout_ms,
+                    screenshot_window: params.screenshot_window,
                 },
             ) {
                 Ok(run) => ProfileStartupResult {
@@ -1683,6 +1684,8 @@ struct WorkspaceOpenProfileParams {
     startup_wait_window: bool,
     #[serde(default)]
     startup_window_timeout_ms: Option<u64>,
+    #[serde(default)]
+    startup_screenshot_window: bool,
 }
 
 impl WorkspaceOpenProfileParams {
@@ -1727,8 +1730,11 @@ impl WorkspaceOpenProfileParams {
             },
             startup: profile::ProfileStartupOptions {
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
-                wait_window: self.startup_wait_window || self.startup_window_timeout_ms.is_some(),
+                wait_window: self.startup_wait_window
+                    || self.startup_window_timeout_ms.is_some()
+                    || self.startup_screenshot_window,
                 window_timeout_ms: self.startup_window_timeout_ms,
+                screenshot_window: self.startup_screenshot_window,
             },
         }
     }
@@ -2266,6 +2272,8 @@ struct WorkspaceProfileLaunchParams {
     wait_window: bool,
     #[serde(default)]
     window_timeout_ms: Option<u64>,
+    #[serde(default)]
+    screenshot_window: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

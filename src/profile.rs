@@ -114,6 +114,7 @@ pub struct ProfileStartupRun {
     pub workspace_id: String,
     pub profile_id: String,
     pub wait_window: bool,
+    pub screenshot_window: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_timeout_ms: Option<u64>,
     pub launched: Vec<IpcResponse>,
@@ -154,6 +155,7 @@ pub struct ProfileStartupOptions {
     pub acknowledge_unenforced_policy: bool,
     pub wait_window: bool,
     pub window_timeout_ms: Option<u64>,
+    pub screenshot_window: bool,
 }
 
 pub fn profiles_path() -> PathBuf {
@@ -538,13 +540,14 @@ pub fn launch_profile_startup_apps(
             spec,
             options.wait_window,
             options.window_timeout_ms,
-            false,
+            options.screenshot_window,
         )?);
     }
     Ok(ProfileStartupRun {
         workspace_id: workspace_id.to_string(),
         profile_id: profile_id.to_string(),
         wait_window: options.wait_window,
+        screenshot_window: options.screenshot_window,
         window_timeout_ms: options.window_timeout_ms,
         launched,
     })
