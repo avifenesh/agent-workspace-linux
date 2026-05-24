@@ -533,8 +533,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "events" => {
-            let (id, tail) = parse_events_options(&args[1..])?;
-            print_json(&workspace::read_events(&id, tail)?)
+            let (id, tail, since_sequence) = parse_events_options(&args[1..])?;
+            print_json(&workspace::read_events(&id, tail, since_sequence)?)
         }
         "setup" => {
             let (id, profile_id, options) = parse_workspace_setup_options(&args[1..])?;
@@ -2662,9 +2662,10 @@ fn parse_wait_app_options(args: &[String]) -> Result<(String, String, Option<u64
     bail!("workspace wait-app requires an app id")
 }
 
-fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>)> {
+fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>, Option<u64>)> {
     let mut id = workspace::default_workspace_id();
     let mut tail = None;
+    let mut since_sequence = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -2680,10 +2681,18 @@ fn parse_events_options(args: &[String]) -> Result<(String, Option<usize>)> {
                 );
                 index += 2;
             }
+            "--since" => {
+                since_sequence = Some(
+                    value_after(args, index, "--since")?
+                        .parse()
+                        .context("--since must be a non-negative integer")?,
+                );
+                index += 2;
+            }
             flag => bail!("unknown workspace events option '{flag}'"),
         }
     }
-    Ok((id, tail))
+    Ok((id, tail, since_sequence))
 }
 
 fn parse_stop_options(args: &[String]) -> Result<(String, Option<u64>)> {
@@ -2981,7 +2990,7 @@ Usage:
   agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--key KEY] [--timeout-ms N] TEXT
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] [--kill-on-timeout] APP_ID_OR_PID_OR_NAME
-  agent-workspace-linux workspace events [--id ID] [--tail N]
+  agent-workspace-linux workspace events [--id ID] [--tail N] [--since SEQUENCE]
   agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace stop [--id ID] [--timeout-ms N]"#

@@ -597,6 +597,7 @@ pub enum IpcRequest {
     },
     ReadEvents {
         tail: Option<usize>,
+        since_sequence: Option<u64>,
     },
     KillApp {
         app_id: String,
@@ -1641,9 +1642,19 @@ pub fn run_app_with_spec(
     })
 }
 
-pub fn read_events(id: &str, tail: Option<usize>) -> Result<IpcResponse> {
+pub fn read_events(
+    id: &str,
+    tail: Option<usize>,
+    since_sequence: Option<u64>,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    request(&workspace_socket_path(&id), IpcRequest::ReadEvents { tail })
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ReadEvents {
+            tail,
+            since_sequence,
+        },
+    )
 }
 
 pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
@@ -1894,18 +1905,25 @@ fn record_event(
     Ok(event)
 }
 
-fn read_event_log(path: &Path, tail: Option<usize>) -> Result<Vec<WorkspaceEvent>> {
+fn read_event_log(
+    path: &Path,
+    tail: Option<usize>,
+    since_sequence: Option<u64>,
+) -> Result<Vec<WorkspaceEvent>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
     let content =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let mut events = Vec::new();
+    let mut events: Vec<WorkspaceEvent> = Vec::new();
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
         events.push(
             serde_json::from_str(line)
                 .with_context(|| format!("failed to parse event in {}", path.display()))?,
         );
+    }
+    if let Some(since_sequence) = since_sequence {
+        events.retain(|event| event.sequence > since_sequence);
     }
     if let Some(tail) = tail {
         let start = events.len().saturating_sub(tail);
@@ -3647,7 +3665,10 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
-        IpcRequest::ReadEvents { tail } => match read_event_log(&state.event_path, tail) {
+        IpcRequest::ReadEvents {
+            tail,
+            since_sequence,
+        } => match read_event_log(&state.event_path, tail, since_sequence) {
             Ok(events) => {
                 let mut response =
                     response_with_status(true, "workspace events returned", &state.status);
