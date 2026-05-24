@@ -44,6 +44,11 @@ For the current bubblewrap runtime, profile mount sources must use absolute host
 paths, and mount destinations must be non-overlapping absolute paths under
 `/workspace/`.
 
+Permission hardening is intentionally deferred until the dogfood flows are
+validated. See [Permission Boundary Roadmap](docs/permission-boundary-roadmap.md)
+for the target authority model and the validation gates required before final
+enforcement.
+
 ## Commands
 
 ```bash
