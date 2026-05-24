@@ -107,8 +107,9 @@ Current gate status on 2026-05-24:
   covered Chrome, local-dev browser QA, Codex desktop feature tests, disabled
   networking, local-only networking, read-only/read-write mounts, setup/startup
   commands, screenshots, window targeting, input, clipboard, app logs, events,
-  manifests, stop, stale cleanup, daemon-crash recovery, and self-stop from
-  inside a workspace app. `cargo test` currently passes 38 tests.
+  manifests, stop, stale cleanup, daemon-crash recovery, self-stop from inside
+  a workspace app, and consistent workspace discovery when a Codex/MCP launcher
+  omits `XDG_RUNTIME_DIR`. `cargo test` currently passes 44 tests.
 - A still has known product gaps: host-localhost bridging for `local_only`,
   network allowlist enforcement, and more varied real-project coverage.
 - B has a first Codex for Linux slice: the conversation surface can show a live
