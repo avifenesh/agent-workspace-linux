@@ -7,6 +7,7 @@ pub struct GuardrailSummary {
     pub acknowledgements: Vec<GuardrailRule>,
     pub previews: Vec<GuardrailRule>,
     pub explicit_overrides: Vec<GuardrailRule>,
+    pub policy_modes: Vec<GuardrailRule>,
     pub timeout_terminations: Vec<GuardrailRule>,
     pub scope_notes: Vec<GuardrailRule>,
 }
@@ -23,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 1,
+        version: 2,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -125,6 +126,55 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 "Exporting to an existing output file is rejected.",
                 "--replace or replace=true",
                 "Allows intentional overwrite of an existing exported profile JSON file.",
+            ),
+        ],
+        policy_modes: vec![
+            rule(
+                "profile-network-inherit-host",
+                "policy_mode",
+                &["profile network.mode=inherit_host", "profile_check"],
+                "No restricted network policy is requested.",
+                "No unenforced-policy acknowledgement is needed.",
+                "Launched apps use the host network, and profile_check reports network.state=not_requested.",
+            ),
+            rule(
+                "profile-network-disabled",
+                "policy_mode",
+                &[
+                    "profile network.mode=disabled",
+                    "profile_check",
+                    "workspace start --profile",
+                    "workspace launch --profile",
+                ],
+                "Network-disabled profiles are enforced only when bubblewrap is available.",
+                "Install bubblewrap for active --unshare-net enforcement, or pass --ack-unenforced-policy to run without it.",
+                "profile_check reports network.state=enforced with backend=bubblewrap_unshare_net, or state=unenforced with required_acknowledgement=ack_unenforced_policy.",
+            ),
+            rule(
+                "profile-network-allowlist",
+                "policy_mode",
+                &[
+                    "profile network.mode=allowlist",
+                    "profile_check",
+                    "workspace start --profile",
+                    "workspace launch --profile",
+                ],
+                "Host allowlists are saved as declared intent but are not enforced by the current X11 runtime.",
+                "--ack-unenforced-policy or acknowledge_unenforced_policy=true",
+                "Records acceptance that allow_hosts is visible in policy status but launched apps still keep host network access.",
+            ),
+            rule(
+                "profile-mounts",
+                "policy_mode",
+                &[
+                    "profile mounts",
+                    "profile_check",
+                    "workspace start --profile",
+                    "workspace launch --profile",
+                ],
+                "Mount profiles are enforced only when bubblewrap is available.",
+                "Install bubblewrap for active mount namespace enforcement, or pass --ack-unenforced-policy to run without it.",
+                "profile_check reports mounts.state=enforced with backend=bubblewrap_mount_namespace, or state=unenforced with required_acknowledgement=ack_unenforced_policy.",
             ),
         ],
         timeout_terminations: vec![

@@ -25,7 +25,9 @@ declared intent for the future Codex app/profile UI. The runtime snapshots that
 intent into `workspace status` with an enforcement report; this X11 runtime
 enforces display/input scoping, profile mounts and disabled-network profiles
 through bubblewrap when available, display size, launch cwd, and environment
-overrides today.
+overrides today. Each enforcement report includes a machine-readable state,
+active backend, limitations, and any required acknowledgement so the app can
+show exactly what is enforced before it starts the hidden environment.
 
 For the current bubblewrap runtime, profile mount sources must use absolute host
 paths, and mount destinations must be non-overlapping absolute paths under
@@ -148,6 +150,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   not need that extra acknowledgement when bubblewrap is available because
   launches run inside a bubblewrap mount namespace and/or with
   `bwrap --unshare-net`.
+  Network allowlists are different: `allow_hosts` is saved and shown as profile
+  intent, but host filtering is not active yet, so allowlist profiles always
+  require `--ack-unenforced-policy` and report the limitation in
+  `applied_policy.enforcement.network`.
   It then chooses a free X11 display, creates an `xauth` file, starts `Xvfb`,
   starts a lightweight window manager, and binds a control socket under
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
@@ -325,10 +331,12 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   profile ids when a profile shaped the workspace or app. It also reports the
   start timestamp, optional purpose, hidden-workspace acknowledgement,
   unenforced-policy acknowledgement, applied policy snapshot, policy backend
-  candidates discovered at start time, which parts are currently enforced, and
-  the last event sequence for incremental event polling. `workspace status` and
-  `workspace stop` talk to the same socket; use `workspace manifest` for saved
-  disk state after shutdown. `workspace stop --dry-run` previews running apps
+  candidates discovered at start time, which parts are currently enforced,
+  `state`, `backend`, `limitations`, and `required_acknowledgement` for each
+  policy area, and the last event sequence for incremental event polling.
+  `workspace status` and `workspace stop` talk to the same socket; use
+  `workspace manifest` for saved disk state after shutdown.
+  `workspace stop --dry-run` previews running apps
   without stopping the workspace. `workspace stop` waits for the daemon IPC
   socket to close before returning; `--timeout-ms` overrides the default 30000ms
   wait. Its response includes apps terminated by the workspace shutdown.
@@ -368,7 +376,9 @@ running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
 `workspace_guardrails` returns a machine-readable summary of acknowledgement,
 dry-run, explicit override, timeout-termination, and workspace-scope rules for
-approval UI flows.
+approval UI flows. It also includes `policy_modes`, which describes how profile
+mounts and each network mode map to `profile_check` state, backend, limitation,
+and acknowledgement fields.
 `profile_put` accepts `dry_run=true` to preview whether a profile would be
 created, replaced, or rejected. It rejects existing profile ids by default; set
 `replace=true` only when intentionally overwriting a saved environment profile.

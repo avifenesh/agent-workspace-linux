@@ -20,7 +20,7 @@ pub struct AgentWorkspaceLinux;
 impl AgentWorkspaceLinux {
     #[tool(
         name = "workspace_guardrails",
-        description = "Return the machine-readable guardrail summary for isolated workspace actions, including acknowledgement, dry-run, explicit override, and timeout-termination requirements.",
+        description = "Return the machine-readable guardrail summary for isolated workspace actions, including acknowledgement, policy mode, dry-run, explicit override, and timeout-termination requirements.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -120,7 +120,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "profile_check",
-        description = "Preflight a saved profile against the current machine. Returns the applied policy, backend candidates, warnings, and acknowledgement requirements before starting a workspace.",
+        description = "Preflight a saved profile against the current machine. Returns the applied policy, per-capability state/backend/limitations, warnings, and acknowledgement requirements before starting a workspace.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
