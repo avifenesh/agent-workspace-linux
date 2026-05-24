@@ -133,9 +133,12 @@ Current gate status on 2026-05-25:
   `.desktop` launchers, parsing launcher `Name`/`Exec` fields into startup app
   commands without a shell. Authenticated browser-profile sharing now has a
   `browser-session` starter template and a first Codex for Linux picker/copy/
-  lock-warning flow for explicitly user-approved browser data directories.
-  Live real-account dogfood is still needed before making that path the default
-  recommendation for shopping-style tasks.
+  lock-warning flow for explicitly user-approved browser data directories. The
+  installed MCP path has also proven that template end to end with a synthetic
+  Chrome profile: approval preview, real startup, visible Chrome window,
+  mounted browser-data read/write, screenshots/observe/artifacts, stop, profile
+  deletion, and stale cleanup. Live real-account dogfood is still needed before
+  making that path the default recommendation for shopping-style tasks.
 
 ### A. Prove Runtime Claims With Real Workloads
 

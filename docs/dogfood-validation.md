@@ -4,6 +4,72 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-25 MCP Browser-Session Restart Pass
+
+Environment:
+
+- Dogfood ran through the installed Codex MCP tools after restarting the Codex
+  app and MCP server.
+- `mcp_permissions` reported no spawn-time ceiling for this developer-open run.
+- `workspace_doctor` reported the X11 workspace dependencies and bubblewrap
+  backend ready.
+
+Verified:
+
+- A harmless `workspace_start` dry-run returned a machine-readable approval
+  bundle under `start_preview.approval`, including the hidden-workspace
+  acknowledgement requirement. This rechecked the app-facing approval payload
+  shape after restart without creating a workspace.
+- A synthetic browser data directory at
+  `/tmp/agent-workspace-browser-session-dogfood` was used with the
+  `browser-session` profile template. The template mounted that directory
+  read-write at `/workspace/browser-user-data`, required enforced policy, used
+  `network.mode=inherit_host`, and declared the Chrome startup command with
+  `--no-sandbox`.
+- `workspace_open_profile` dry-run reported the start/profile/startup plan
+  without launching a daemon. The real `workspace_open_profile` then started
+  `dogfood-browser-session` on `:90`, launched Chrome as
+  `browser-session-no-sandbox`, and found a visible
+  `about:blank - Google Chrome` window tagged with app id `app-1809254`.
+- Runtime status reported `mount_isolation=bubblewrap_mount_namespace`,
+  `network_isolation=host`, profile id
+  `dogfood-browser-session-synthetic`, and an applied policy snapshot with
+  display isolation, input scope, and mounts enforced.
+- A workspace command verified
+  `/workspace/browser-user-data/Default/Cookies`, wrote
+  `/workspace/browser-user-data/Default/AgentWorkspaceMarker`, and exited 0.
+  The host then read the same marker at
+  `/tmp/agent-workspace-browser-session-dogfood/Default/AgentWorkspaceMarker`
+  with content `marker-from-workspace`, proving the mounted browser data path
+  was shared as intended.
+- `workspace_observe` returned the active Chrome window, hidden Chromium helper
+  windows, pointer metadata, recent event history, and a root screenshot.
+  `workspace_artifacts` listed the manifest, applied policy, event log, daemon
+  logs, app logs, and screenshots.
+- `workspace_stop` terminated the Chrome app with SIGTERM and wrote stopped
+  status to the manifest. The temporary saved profile was deleted and
+  `workspace cleanup` removed the stale runtime directory. `workspace_list`
+  then returned no active/stopped runtime entries and `profile_list` returned
+  no saved profiles.
+
+Findings:
+
+- The browser-session path is now proven for a synthetic Chrome profile through
+  the installed MCP surface: template generation, approval preview, real
+  startup, visible Chrome window discovery, mounted data reads/writes,
+  screenshot/observe/artifacts, stop, profile deletion, and stale cleanup.
+- This is still not a live real-account proof. Treat real shopping/account
+  workflows as pending explicit user opt-in and a copied or otherwise safe
+  browser profile test.
+- The workspace command stderr contained repeated
+  `Failed to create stream fd: No such file or directory` messages while still
+  exiting 0 and producing the expected marker. This is low-priority runtime
+  noise to investigate after the core gates.
+- Cleanup saw the stopped daemon pid as a defunct `[agent-workspace]` process
+  and skipped killing it because the process identity check did not match the
+  full binary name. It still removed the stale runtime directory. This did not
+  block cleanup, but the messaging could be made friendlier.
+
 ## 2026-05-24 MCP Pass
 
 Environment:
