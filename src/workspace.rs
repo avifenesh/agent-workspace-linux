@@ -266,6 +266,7 @@ pub enum IpcRequest {
         env: Vec<EnvVar>,
     },
     ListWindows,
+    ActiveWindow,
     WaitWindow {
         title_contains: Option<String>,
         pid: Option<u32>,
@@ -615,6 +616,11 @@ fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
 pub fn list_windows(id: &str) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(&workspace_socket_path(&id), IpcRequest::ListWindows)
+}
+
+pub fn active_window(id: &str) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::ActiveWindow)
 }
 
 pub fn wait_window(
@@ -1214,6 +1220,34 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 let mut response =
                     response_with_status(true, "workspace windows listed", &state.status);
                 response.windows = Some(windows);
+                (response, false)
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::ActiveWindow => match active_workspace_window(&state.status) {
+            Ok(Some(window)) => {
+                record_event(
+                    state,
+                    "active_window",
+                    serde_json::json!({ "window_id": &window.id }),
+                )?;
+                let mut response =
+                    response_with_status(true, "workspace active window reported", &state.status);
+                response.windows = Some(vec![window]);
+                (response, false)
+            }
+            Ok(None) => {
+                record_event(
+                    state,
+                    "active_window",
+                    serde_json::json!({ "window_id": serde_json::Value::Null }),
+                )?;
+                let mut response =
+                    response_with_status(false, "workspace active window not found", &state.status);
+                response.windows = Some(Vec::new());
                 (response, false)
             }
             Err(error) => (
@@ -2031,6 +2065,22 @@ fn list_workspace_windows(status: &WorkspaceStatus) -> Result<Vec<WorkspaceWindo
             (!id.is_empty()).then(|| window_info(status, id))
         })
         .collect()
+}
+
+fn active_workspace_window(status: &WorkspaceStatus) -> Result<Option<WorkspaceWindow>> {
+    let output = workspace_command(status, "xdotool")
+        .arg("getactivewindow")
+        .output()
+        .context("failed to run xdotool getactivewindow")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let text = output_text(output, "xdotool getactivewindow")?;
+    let window_id = text.trim();
+    if window_id.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(window_info(status, window_id)?))
 }
 
 struct WindowWaitCriteria {

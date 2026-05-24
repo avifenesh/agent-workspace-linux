@@ -53,6 +53,7 @@ cargo run -- workspace run --timeout-ms 30000 --tail-bytes 65536 -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
+cargo run -- workspace active-window
 cargo run -- workspace wait-window --title xterm --timeout-ms 10000
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
 cargo run -- workspace focus-window 4194316
@@ -122,13 +123,14 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
   completion fields in one response.
-- `workspace windows`, `workspace wait-window`, `workspace screenshot`,
-  `workspace focus-window`, `workspace close-window`, `workspace click`,
-  `workspace click-window`, `workspace key`, `workspace key-window`,
-  `workspace type`, `workspace type-window`, `workspace logs`,
-  `workspace wait-app`, `workspace events`, `workspace setup`, and
-  `workspace kill-app` inspect or act through the same daemon, scoped to the
-  workspace display. `focus-window`, `key-window`, and `type-window` can use
+- `workspace windows`, `workspace active-window`, `workspace wait-window`,
+  `workspace screenshot`, `workspace focus-window`, `workspace close-window`,
+  `workspace click`, `workspace click-window`, `workspace key`,
+  `workspace key-window`, `workspace type`, `workspace type-window`,
+  `workspace logs`, `workspace wait-app`, `workspace events`,
+  `workspace setup`, and `workspace kill-app` inspect or act through the same
+  daemon, scoped to the workspace display. `active-window` reports the current
+  workspace-local focus. `focus-window`, `key-window`, and `type-window` can use
   either a raw X11 window id or the same title/pid/app filters as `wait-window`;
   `click-window` resolves the same targets and clicks window-relative
   coordinates.
@@ -158,9 +160,10 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_launch_app`, `workspace_run_app`,
 `workspace_launch_profile_apps`, `workspace_list_windows`,
-`workspace_wait_window`, `workspace_screenshot`, `workspace_focus_window`,
-`workspace_focus_matching_window`, `workspace_close_window`, `workspace_click`,
-`workspace_click_window`, `workspace_key`, `workspace_key_window`,
-`workspace_type_text`, `workspace_type_window`, `workspace_read_app_log`,
-`workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`.
+`workspace_active_window`, `workspace_wait_window`, `workspace_screenshot`,
+`workspace_focus_window`, `workspace_focus_matching_window`,
+`workspace_close_window`, `workspace_click`, `workspace_click_window`,
+`workspace_key`, `workspace_key_window`, `workspace_type_text`,
+`workspace_type_window`, `workspace_read_app_log`, `workspace_wait_app`,
+`workspace_events`, `workspace_run_profile_setup`, `workspace_kill_app`, and
+`workspace_stop`.
