@@ -140,13 +140,14 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "apps" => {
-            let (id, app_id, name_contains, profile_id, running) = parse_apps_options(&args[1..])?;
+            let parsed = parse_apps_options(&args[1..])?;
             print_json(&workspace::list_apps(
-                &id,
-                app_id,
-                name_contains,
-                profile_id,
-                running,
+                &parsed.id,
+                parsed.app_id,
+                parsed.name_contains,
+                parsed.command_contains,
+                parsed.profile_id,
+                parsed.running,
             )?)
         }
         "windows" => {
@@ -716,18 +717,20 @@ fn parse_id_option(args: &[String]) -> Result<String> {
     Ok(id)
 }
 
-fn parse_apps_options(
-    args: &[String],
-) -> Result<(
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<bool>,
-)> {
+struct ParsedAppsOptions {
+    id: String,
+    app_id: Option<String>,
+    name_contains: Option<String>,
+    command_contains: Option<String>,
+    profile_id: Option<String>,
+    running: Option<bool>,
+}
+
+fn parse_apps_options(args: &[String]) -> Result<ParsedAppsOptions> {
     let mut id = workspace::default_workspace_id();
     let mut app_id = None;
     let mut name_contains = None;
+    let mut command_contains = None;
     let mut profile_id = None;
     let mut running = None;
     let mut index = 0;
@@ -743,6 +746,10 @@ fn parse_apps_options(
             }
             "--name" => {
                 name_contains = Some(value_after(args, index, "--name")?.to_string());
+                index += 2;
+            }
+            "--command" => {
+                command_contains = Some(value_after(args, index, "--command")?.to_string());
                 index += 2;
             }
             "--profile" => {
@@ -766,7 +773,14 @@ fn parse_apps_options(
             flag => bail!("unknown workspace apps option '{flag}'"),
         }
     }
-    Ok((id, app_id, name_contains, profile_id, running))
+    Ok(ParsedAppsOptions {
+        id,
+        app_id,
+        name_contains,
+        command_contains,
+        profile_id,
+        running,
+    })
 }
 
 fn parse_windows_options(
@@ -2905,7 +2919,7 @@ Usage:
   agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
-  agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--profile PROFILE] [--running|--stopped]
+  agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]

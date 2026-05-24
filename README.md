@@ -55,6 +55,7 @@ cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace apps
 cargo run -- workspace apps --running
 cargo run -- workspace apps --name terminal
+cargo run -- workspace apps --command xterm
 cargo run -- workspace windows
 cargo run -- workspace windows --all
 cargo run -- workspace windows --app app-12345
@@ -163,7 +164,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   elapses, while preserving stdout/stderr logs in the response.
 - `workspace apps` lists launched apps from the daemon IPC state without dumping
   the full workspace status. It can filter by `--app APP_ID_OR_PID_OR_NAME`,
-  app `--name TEXT`, `--profile PROFILE`, `--running`, or `--stopped`.
+  app `--name TEXT`, `--command TEXT`, `--profile PROFILE`, `--running`, or
+  `--stopped`.
 - `workspace windows`, `workspace active-window`, `workspace observe`,
   `workspace wait-window`, `workspace screenshot`, `workspace screenshot-window`,
   `workspace focus-window`, `workspace close-window`, `workspace move-window`,
@@ -253,7 +255,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
 `workspace_kill_app`, and `workspace_stop`. `workspace_list_apps` can filter by
-app id/pid/name, app name substring, profile id, or running/stopped state.
+app id/pid/name, app name substring, command substring, profile id, or
+running/stopped state.
 `workspace_stop` accepts `timeout_ms` to control how long it waits for the
 daemon IPC socket to close after requesting shutdown.
 `workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app

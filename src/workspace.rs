@@ -353,6 +353,7 @@ pub enum IpcRequest {
     ListApps {
         app_id: Option<String>,
         name_contains: Option<String>,
+        command_contains: Option<String>,
         profile_id: Option<String>,
         running: Option<bool>,
     },
@@ -879,16 +880,18 @@ pub fn list_apps(
     id: &str,
     app_id: Option<String>,
     name_contains: Option<String>,
+    command_contains: Option<String>,
     profile_id: Option<String>,
     running: Option<bool>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_app_list_filters(&app_id, &name_contains, &profile_id)?;
+    validate_app_list_filters(&app_id, &name_contains, &command_contains, &profile_id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::ListApps {
             app_id,
             name_contains,
+            command_contains,
             profile_id,
             running,
         },
@@ -1979,35 +1982,46 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::ListApps {
             app_id,
             name_contains,
+            command_contains,
             profile_id,
             running,
-        } => match validate_app_list_filters(&app_id, &name_contains, &profile_id)
-            .and_then(|()| refresh_apps(state))
-            .map(|()| {
-                filter_workspace_apps(&state.status, &app_id, &name_contains, &profile_id, running)
-            }) {
-            Ok(apps) => {
-                record_event(
-                    state,
-                    "list_apps",
-                    serde_json::json!({
-                        "count": apps.len(),
-                        "app_id": app_id.as_deref(),
-                        "name_contains": name_contains.as_deref(),
-                        "profile_id": profile_id.as_deref(),
-                        "running": running,
-                    }),
-                )?;
-                let mut response =
-                    response_with_status(true, "workspace apps listed", &state.status);
-                response.apps = Some(apps);
-                (response, false)
+        } => {
+            match validate_app_list_filters(&app_id, &name_contains, &command_contains, &profile_id)
+                .and_then(|()| refresh_apps(state))
+                .map(|()| {
+                    filter_workspace_apps(
+                        &state.status,
+                        &app_id,
+                        &name_contains,
+                        &command_contains,
+                        &profile_id,
+                        running,
+                    )
+                }) {
+                Ok(apps) => {
+                    record_event(
+                        state,
+                        "list_apps",
+                        serde_json::json!({
+                            "count": apps.len(),
+                            "app_id": app_id.as_deref(),
+                            "name_contains": name_contains.as_deref(),
+                            "command_contains": command_contains.as_deref(),
+                            "profile_id": profile_id.as_deref(),
+                            "running": running,
+                        }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace apps listed", &state.status);
+                    response.apps = Some(apps);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
             }
-            Err(error) => (
-                response_with_status(false, error.to_string(), &state.status),
-                false,
-            ),
-        },
+        }
         IpcRequest::ListWindows {
             include_hidden,
             title_contains,
@@ -3992,6 +4006,7 @@ fn filter_workspace_apps(
     status: &WorkspaceStatus,
     app_id: &Option<String>,
     name_contains: &Option<String>,
+    command_contains: &Option<String>,
     profile_id: &Option<String>,
     running: Option<bool>,
 ) -> Vec<WorkspaceApp> {
@@ -4009,6 +4024,11 @@ fn filter_workspace_apps(
                     .as_ref()
                     .is_some_and(|name| contains_ascii_case_insensitive(name, needle))
             })
+        })
+        .filter(|app| {
+            command_contains
+                .as_ref()
+                .is_none_or(|needle| command_matches(&app.command, needle))
         })
         .filter(|app| {
             profile_id
@@ -5266,6 +5286,13 @@ fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
     app.id == app_id || app.pid.to_string() == app_id || app.name.as_deref() == Some(app_id)
 }
 
+fn command_matches(command: &[String], needle: &str) -> bool {
+    command
+        .iter()
+        .any(|arg| contains_ascii_case_insensitive(arg, needle))
+        || contains_ascii_case_insensitive(&command.join(" "), needle)
+}
+
 fn response_last_app_id(response: &IpcResponse) -> Option<String> {
     if let Some(app) = response.apps.as_ref().and_then(|apps| apps.last()) {
         return Some(app.id.clone());
@@ -5615,6 +5642,7 @@ fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
 fn validate_app_list_filters(
     app_id: &Option<String>,
     name_contains: &Option<String>,
+    command_contains: &Option<String>,
     profile_id: &Option<String>,
 ) -> Result<()> {
     if app_id
@@ -5628,6 +5656,12 @@ fn validate_app_list_filters(
         .is_some_and(|name| name.trim().is_empty())
     {
         bail!("app name filter cannot be empty");
+    }
+    if command_contains
+        .as_ref()
+        .is_some_and(|command| command.trim().is_empty())
+    {
+        bail!("app command filter cannot be empty");
     }
     if profile_id
         .as_ref()
