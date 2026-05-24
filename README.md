@@ -56,6 +56,7 @@ cargo run -- workspace windows
 cargo run -- workspace windows --all
 cargo run -- workspace active-window
 cargo run -- workspace observe --screenshot --output /tmp/agent-observe.png
+cargo run -- workspace observe --all-windows
 cargo run -- workspace wait-window --title xterm --timeout-ms 10000
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
 cargo run -- workspace screenshot-window --title xterm --output /tmp/agent-window.png
@@ -159,8 +160,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   workspace display. `windows` lists visible windows by default; `--all`
   includes minimized/hidden windows with a `visible` flag so they can be shown
   again by id. `active-window` reports the current workspace-local focus,
-  and `observe` returns status, visible windows, active window, and optionally a
-  root screenshot in one IPC call. `focus-window`, `screenshot-window`,
+  and `observe` returns status, windows, active window, and optionally a root
+  screenshot in one IPC call. `observe --all-windows` uses the same
+  hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
   `close-window`, `move-window`, `resize-window`, `raise-window`,
   `minimize-window`, `key-window`, and `type-window` can use either a raw X11
   window id or the same title/pid/app filters as `wait-window`; app filters
@@ -219,6 +221,6 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_type_window`, `workspace_set_clipboard`, `workspace_get_clipboard`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` accepts
-`include_hidden=true` to return minimized/hidden windows as well as visible
-windows.
+`workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` and
+`workspace_observe` accept `include_hidden=true` to return minimized/hidden
+windows as well as visible windows.

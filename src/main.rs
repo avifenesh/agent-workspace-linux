@@ -143,8 +143,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::active_window(&id)?)
         }
         "observe" => {
-            let (id, screenshot, output_path) = parse_observe_options(&args[1..])?;
-            print_json(&workspace::observe(&id, screenshot, output_path)?)
+            let (id, screenshot, include_hidden, output_path) = parse_observe_options(&args[1..])?;
+            print_json(&workspace::observe(
+                &id,
+                screenshot,
+                include_hidden,
+                output_path,
+            )?)
         }
         "wait-window" => {
             let (id, title_contains, pid, app_id, timeout_ms) =
@@ -905,9 +910,10 @@ fn parse_screenshot_options(args: &[String]) -> Result<(String, Option<PathBuf>)
     Ok((id, output_path))
 }
 
-fn parse_observe_options(args: &[String]) -> Result<(String, bool, Option<PathBuf>)> {
+fn parse_observe_options(args: &[String]) -> Result<(String, bool, bool, Option<PathBuf>)> {
     let mut id = workspace::default_workspace_id();
     let mut screenshot = false;
+    let mut include_hidden = false;
     let mut output_path = None;
     let mut index = 0;
     while index < args.len() {
@@ -920,6 +926,10 @@ fn parse_observe_options(args: &[String]) -> Result<(String, bool, Option<PathBu
                 screenshot = true;
                 index += 1;
             }
+            "--all-windows" | "--include-hidden" => {
+                include_hidden = true;
+                index += 1;
+            }
             "--output" => {
                 output_path = Some(PathBuf::from(value_after(args, index, "--output")?));
                 index += 2;
@@ -930,7 +940,7 @@ fn parse_observe_options(args: &[String]) -> Result<(String, bool, Option<PathBu
     if output_path.is_some() && !screenshot {
         bail!("workspace observe --output requires --screenshot");
     }
-    Ok((id, screenshot, output_path))
+    Ok((id, screenshot, include_hidden, output_path))
 }
 
 type ScreenshotWindowOptions = (
@@ -2526,7 +2536,7 @@ Usage:
   agent-workspace-linux workspace windows [--id ID]
   agent-workspace-linux workspace windows [--id ID] --all
   agent-workspace-linux workspace active-window [--id ID]
-  agent-workspace-linux workspace observe [--id ID] [--screenshot] [--output PATH]
+  agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]
   agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace screenshot [--id ID] [--output PATH]
   agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--output PATH] [--timeout-ms N]

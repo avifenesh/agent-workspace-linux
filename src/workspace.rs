@@ -331,6 +331,8 @@ pub enum IpcRequest {
     ActiveWindow,
     Observe {
         screenshot: bool,
+        #[serde(default)]
+        include_hidden: bool,
         output_path: Option<PathBuf>,
     },
     WaitWindow {
@@ -818,12 +820,18 @@ pub fn active_window(id: &str) -> Result<IpcResponse> {
     request(&workspace_socket_path(&id), IpcRequest::ActiveWindow)
 }
 
-pub fn observe(id: &str, screenshot: bool, output_path: Option<PathBuf>) -> Result<IpcResponse> {
+pub fn observe(
+    id: &str,
+    screenshot: bool,
+    include_hidden: bool,
+    output_path: Option<PathBuf>,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::Observe {
             screenshot,
+            include_hidden,
             output_path,
         },
     )
@@ -1845,14 +1853,16 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         },
         IpcRequest::Observe {
             screenshot,
+            include_hidden,
             output_path,
-        } => match observe_workspace(state, screenshot, output_path) {
+        } => match observe_workspace(state, screenshot, include_hidden, output_path) {
             Ok(mut response) => {
                 record_event(
                     state,
                     "observe",
                     serde_json::json!({
                         "windows": response.windows.as_ref().map(Vec::len).unwrap_or_default(),
+                        "include_hidden": include_hidden,
                         "active_window_id": response.active_window.as_ref().map(|window| window.id.as_str()),
                         "screenshot": response.screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
                     }),
@@ -3612,9 +3622,10 @@ fn active_workspace_window(status: &WorkspaceStatus) -> Result<Option<WorkspaceW
 fn observe_workspace(
     state: &DaemonState,
     screenshot: bool,
+    include_hidden: bool,
     output_path: Option<PathBuf>,
 ) -> Result<IpcResponse> {
-    let windows = list_workspace_windows(&state.status, false)?;
+    let windows = list_workspace_windows(&state.status, include_hidden)?;
     let active_window = active_workspace_window(&state.status)?;
     let screenshot = if screenshot {
         Some(capture_workspace_screenshot(&state.status, output_path)?)
