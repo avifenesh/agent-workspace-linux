@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -234,6 +234,38 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 timeout_ms,
             )?)
         }
+        "drag" => {
+            let (id, from_x, from_y, to_x, to_y, button) = parse_drag_options(&args[1..])?;
+            print_json(&workspace::drag(&id, from_x, from_y, to_x, to_y, button)?)
+        }
+        "drag-window" => {
+            let (
+                id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                button,
+                timeout_ms,
+            ) = parse_drag_window_options(&args[1..])?;
+            print_json(&workspace::drag_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                button,
+                timeout_ms,
+            )?)
+        }
         "key" => {
             let (id, key) = parse_one_arg_command(&args[1..], "workspace key requires a key")?;
             print_json(&workspace::key(&id, key)?)
@@ -296,7 +328,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1231,6 +1263,161 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
     ))
 }
 
+fn parse_drag_options(args: &[String]) -> Result<(String, i32, i32, i32, i32, Option<u8>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut button = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--button" => {
+                button = Some(
+                    value_after(args, index, "--button")?
+                        .parse()
+                        .context("--button must be an integer between 1 and 5")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => bail!("unknown workspace drag option '{value}'"),
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    if values.len() != 4 {
+        bail!("workspace drag requires FROM_X FROM_Y TO_X TO_Y coordinates");
+    }
+    let from_x = values[0]
+        .parse()
+        .context("drag FROM_X must be an integer")?;
+    let from_y = values[1]
+        .parse()
+        .context("drag FROM_Y must be an integer")?;
+    let to_x = values[2].parse().context("drag TO_X must be an integer")?;
+    let to_y = values[3].parse().context("drag TO_Y must be an integer")?;
+    Ok((id, from_x, from_y, to_x, to_y, button))
+}
+
+type DragWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    i32,
+    i32,
+    i32,
+    i32,
+    Option<u8>,
+    Option<u64>,
+);
+
+fn parse_drag_window_options(args: &[String]) -> Result<DragWindowOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
+    let mut timeout_ms = None;
+    let mut button = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--button" => {
+                button = Some(
+                    value_after(args, index, "--button")?
+                        .parse()
+                        .context("--button must be an integer between 1 and 5")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace drag-window option '{value}'")
+            }
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, coordinate_values) = if has_match_filter {
+        if values.len() != 4 {
+            bail!(
+                "workspace drag-window with match filters requires FROM_X FROM_Y TO_X TO_Y coordinates"
+            );
+        }
+        (None, values.as_slice())
+    } else {
+        if values.len() != 5 {
+            bail!("workspace drag-window requires WINDOW_ID FROM_X FROM_Y TO_X TO_Y or match filters with FROM_X FROM_Y TO_X TO_Y");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace drag-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), &values[1..])
+    };
+    let from_x = coordinate_values[0]
+        .parse()
+        .context("drag-window FROM_X must be an integer")?;
+    let from_y = coordinate_values[1]
+        .parse()
+        .context("drag-window FROM_Y must be an integer")?;
+    let to_x = coordinate_values[2]
+        .parse()
+        .context("drag-window TO_X must be an integer")?;
+    let to_y = coordinate_values[3]
+        .parse()
+        .context("drag-window TO_Y must be an integer")?;
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        pid,
+        app_id,
+        from_x,
+        from_y,
+        to_x,
+        to_y,
+        button,
+        timeout_ms,
+    ))
+}
+
 type WindowTargetValues = (
     String,
     Option<String>,
@@ -1703,6 +1890,9 @@ Usage:
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--count N] [--timeout-ms N] X Y
+  agent-workspace-linux workspace drag [--id ID] [--button N] FROM_X FROM_Y TO_X TO_Y
+  agent-workspace-linux workspace drag-window [--id ID] [--button N] WINDOW_ID FROM_X FROM_Y TO_X TO_Y
+  agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace key [--id ID] KEY
   agent-workspace-linux workspace key-window [--id ID] WINDOW_ID KEY
   agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY

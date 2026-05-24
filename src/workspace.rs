@@ -325,6 +325,25 @@ pub enum IpcRequest {
         count: u8,
         timeout_ms: u64,
     },
+    Drag {
+        from_x: i32,
+        from_y: i32,
+        to_x: i32,
+        to_y: i32,
+        button: u8,
+    },
+    DragWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        from_x: i32,
+        from_y: i32,
+        to_x: i32,
+        to_y: i32,
+        button: u8,
+        timeout_ms: u64,
+    },
     Key {
         key: String,
     },
@@ -822,6 +841,65 @@ pub fn click_window(
             y,
             button,
             count,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn drag(
+    id: &str,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    button: Option<u8>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let button = button.unwrap_or(DEFAULT_CLICK_BUTTON);
+    validate_click_options(button, DEFAULT_CLICK_COUNT)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            button,
+        },
+    )
+}
+
+pub fn drag_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    button: Option<u8>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let button = button.unwrap_or(DEFAULT_CLICK_BUTTON);
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_relative_click_coordinates(from_x, from_y)?;
+    validate_relative_click_coordinates(to_x, to_y)?;
+    validate_click_options(button, DEFAULT_CLICK_COUNT)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::DragWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            button,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
@@ -1781,6 +1859,119 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 }
             }
         }
+        IpcRequest::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            button,
+        } => match drag_workspace(&state.status, from_x, from_y, to_x, to_y, button) {
+            Ok(()) => {
+                record_event(
+                    state,
+                    "drag",
+                    serde_json::json!({
+                        "from_x": from_x,
+                        "from_y": from_y,
+                        "to_x": to_x,
+                        "to_y": to_y,
+                        "button": button,
+                    }),
+                )?;
+                (
+                    response_with_status(true, "workspace drag sent", &state.status),
+                    false,
+                )
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::DragWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            button,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| validate_relative_click_coordinates(from_x, from_y))
+            .and_then(|()| validate_relative_click_coordinates(to_x, to_y))
+            .and_then(|()| validate_click_options(button, DEFAULT_CLICK_COUNT))
+            {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match drag_workspace_window(
+                    state,
+                    window_id.as_deref(),
+                    &criteria,
+                    from_x,
+                    from_y,
+                    to_x,
+                    to_y,
+                    button,
+                ) {
+                    Ok(Some(dragged)) => {
+                        record_event(
+                            state,
+                            "drag_window",
+                            serde_json::json!({
+                                "window_id": &dragged.window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "from_x": dragged.from_x,
+                                "from_y": dragged.from_y,
+                                "to_x": dragged.to_x,
+                                "to_y": dragged.to_y,
+                                "relative_from_x": from_x,
+                                "relative_from_y": from_y,
+                                "relative_to_x": to_x,
+                                "relative_to_y": to_y,
+                                "button": button,
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response =
+                            response_with_status(true, "workspace window drag sent", &state.status);
+                        response.windows = Some(vec![dragged.window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
         IpcRequest::Key { key } => {
             let logged_key = key.trim().to_string();
             match key_workspace(&state.status, key) {
@@ -2497,6 +2688,14 @@ struct WindowClickResult {
     y: i32,
 }
 
+struct WindowDragResult {
+    window: WorkspaceWindow,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+}
+
 fn click_workspace_window(
     state: &mut DaemonState,
     window_id: Option<&str>,
@@ -2534,6 +2733,74 @@ fn click_workspace_window(
         window,
         x: absolute_x,
         y: absolute_y,
+    }))
+}
+
+fn drag_workspace_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    button: u8,
+) -> Result<Option<WindowDragResult>> {
+    validate_relative_click_coordinates(from_x, from_y)?;
+    validate_relative_click_coordinates(to_x, to_y)?;
+    validate_click_options(button, DEFAULT_CLICK_COUNT)?;
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    if from_x as u32 >= window.geometry.width || from_y as u32 >= window.geometry.height {
+        bail!(
+            "window drag start coordinates {from_x},{from_y} are outside window bounds {}x{}",
+            window.geometry.width,
+            window.geometry.height
+        );
+    }
+    if to_x as u32 >= window.geometry.width || to_y as u32 >= window.geometry.height {
+        bail!(
+            "window drag end coordinates {to_x},{to_y} are outside window bounds {}x{}",
+            window.geometry.width,
+            window.geometry.height
+        );
+    }
+    let absolute_from_x = window
+        .geometry
+        .x
+        .checked_add(from_x)
+        .context("window drag start X coordinate overflow")?;
+    let absolute_from_y = window
+        .geometry
+        .y
+        .checked_add(from_y)
+        .context("window drag start Y coordinate overflow")?;
+    let absolute_to_x = window
+        .geometry
+        .x
+        .checked_add(to_x)
+        .context("window drag end X coordinate overflow")?;
+    let absolute_to_y = window
+        .geometry
+        .y
+        .checked_add(to_y)
+        .context("window drag end Y coordinate overflow")?;
+    focus_workspace_window(&state.status, &window.id)?;
+    drag_workspace(
+        &state.status,
+        absolute_from_x,
+        absolute_from_y,
+        absolute_to_x,
+        absolute_to_y,
+        button,
+    )?;
+    Ok(Some(WindowDragResult {
+        window,
+        from_x: absolute_from_x,
+        from_y: absolute_from_y,
+        to_x: absolute_to_x,
+        to_y: absolute_to_y,
     }))
 }
 
@@ -2783,13 +3050,7 @@ fn close_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<(
 }
 
 fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32, button: u8, count: u8) -> Result<()> {
-    if x < 0 || y < 0 || x as u32 >= status.width || y as u32 >= status.height {
-        bail!(
-            "click coordinates {x},{y} are outside workspace bounds {}x{}",
-            status.width,
-            status.height
-        );
-    }
+    validate_workspace_coordinates(status, x, y, "click")?;
     validate_click_options(button, count)?;
     let output = workspace_command(status, "xdotool")
         .args(["mousemove", "--sync", &x.to_string(), &y.to_string()])
@@ -2797,6 +3058,33 @@ fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32, button: u8, count: 
         .output()
         .context("failed to run xdotool click")?;
     output_text(output, "xdotool click")?;
+    Ok(())
+}
+
+fn drag_workspace(
+    status: &WorkspaceStatus,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    button: u8,
+) -> Result<()> {
+    validate_workspace_coordinates(status, from_x, from_y, "drag start")?;
+    validate_workspace_coordinates(status, to_x, to_y, "drag end")?;
+    validate_click_options(button, DEFAULT_CLICK_COUNT)?;
+    let output = workspace_command(status, "xdotool")
+        .args([
+            "mousemove",
+            "--sync",
+            &from_x.to_string(),
+            &from_y.to_string(),
+        ])
+        .args(["mousedown", &button.to_string()])
+        .args(["mousemove", "--sync", &to_x.to_string(), &to_y.to_string()])
+        .args(["mouseup", &button.to_string()])
+        .output()
+        .context("failed to run xdotool drag")?;
+    output_text(output, "xdotool drag")?;
     Ok(())
 }
 
@@ -3266,6 +3554,22 @@ fn validate_window_target_options(
 fn validate_relative_click_coordinates(x: i32, y: i32) -> Result<()> {
     if x < 0 || y < 0 {
         bail!("window click coordinates must be non-negative");
+    }
+    Ok(())
+}
+
+fn validate_workspace_coordinates(
+    status: &WorkspaceStatus,
+    x: i32,
+    y: i32,
+    label: &str,
+) -> Result<()> {
+    if x < 0 || y < 0 || x as u32 >= status.width || y as u32 >= status.height {
+        bail!(
+            "{label} coordinates {x},{y} are outside workspace bounds {}x{}",
+            status.width,
+            status.height
+        );
     }
     Ok(())
 }
