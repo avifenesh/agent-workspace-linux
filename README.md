@@ -76,6 +76,8 @@ cargo run -- workspace key Return
 cargo run -- workspace key-window --title xterm Return
 cargo run -- workspace type "hello from the agent workspace"
 cargo run -- workspace type-window --title xterm "hello from the agent workspace"
+cargo run -- workspace clipboard-set "hello from the agent workspace"
+cargo run -- workspace clipboard-get
 cargo run -- workspace logs --stream stdout app-12345
 cargo run -- workspace wait-app --timeout-ms 30000 app-12345
 cargo run -- workspace events --tail 20
@@ -89,7 +91,7 @@ On Debian/Ubuntu-like systems, the initial X11 workspace runtime is expected to
 need packages along these lines:
 
 ```bash
-sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick
+sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip
 ```
 
 `doctor` is implemented first so missing runtime dependencies are visible before
@@ -140,8 +142,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `workspace click-window`, `workspace move-pointer`,
   `workspace move-pointer-window`, `workspace drag`, `workspace drag-window`,
   `workspace scroll`, `workspace scroll-window`, `workspace key`,
-  `workspace key-window`,
-  `workspace type`, `workspace type-window`, `workspace logs`,
+  `workspace key-window`, `workspace type`, `workspace type-window`,
+  `workspace clipboard-set`, `workspace clipboard-get`, `workspace logs`,
   `workspace wait-app`, `workspace events`, `workspace setup`, and
   `workspace kill-app` inspect or act through the same daemon, scoped to the
   workspace display. `active-window` reports the current workspace-local focus,
@@ -156,6 +158,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   gestures. `scroll` and `scroll-window` send wheel ticks in the requested
   direction. Window-targeted pointer tools resolve the same targets and use
   window-relative coordinates.
+- `workspace clipboard-set` and `workspace clipboard-get` read/write the X11
+  clipboard selection inside the workspace using `xclip` or `xsel`. Clipboard
+  set events record only size metadata, not the raw clipboard text.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   App launches and exits are recorded with structured metadata. Typed text is
   logged as metadata such as character count, not raw text.
@@ -189,6 +194,6 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_move_pointer`, `workspace_move_pointer_window`, `workspace_drag`,
 `workspace_drag_window`, `workspace_scroll`, `workspace_scroll_window`,
 `workspace_key`, `workspace_key_window`, `workspace_type_text`,
-`workspace_type_window`,
+`workspace_type_window`, `workspace_set_clipboard`, `workspace_get_clipboard`,
 `workspace_read_app_log`, `workspace_wait_app`, `workspace_events`,
 `workspace_run_profile_setup`, `workspace_kill_app`, and `workspace_stop`.

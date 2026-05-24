@@ -89,6 +89,7 @@ pub struct RuntimeReport {
     pub window_manager: Check,
     pub xdotool: Check,
     pub screenshot: Check,
+    pub clipboard: Check,
     pub policy: PolicyRuntimeCapabilities,
 }
 
@@ -272,6 +273,14 @@ pub struct WorkspaceAppLog {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceClipboard {
+    pub selection: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    pub bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct WorkspaceRun {
     pub app_id: String,
@@ -442,6 +451,10 @@ pub enum IpcRequest {
         text: String,
         timeout_ms: u64,
     },
+    SetClipboard {
+        text: String,
+    },
+    GetClipboard,
     ReadAppLog {
         app_id: String,
         stream: String,
@@ -474,6 +487,8 @@ pub struct IpcResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_log: Option<WorkspaceAppLog>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard: Option<WorkspaceClipboard>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<Vec<WorkspaceEvent>>,
 }
 
@@ -490,6 +505,7 @@ pub fn doctor_report() -> DoctorReport {
         window_manager: first_available_command(&["openbox", "i3", "fluxbox"]),
         xdotool: command_path_check("xdotool"),
         screenshot: first_available_command(&["import", "scrot"]),
+        clipboard: first_available_command(&["xclip", "xsel"]),
         policy: policy_runtime_capabilities(),
     };
 
@@ -555,6 +571,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             active_window: None,
             screenshot: None,
             app_log: None,
+            clipboard: None,
             events: None,
         }),
         WorkspaceStartPlan::Start(daemon_options) => {
@@ -1140,6 +1157,20 @@ pub fn type_window(
     )
 }
 
+pub fn set_clipboard(id: &str, text: String) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_clipboard_text(&text)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::SetClipboard { text },
+    )
+}
+
+pub fn get_clipboard(id: &str) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::GetClipboard)
+}
+
 pub fn read_app_log(
     id: &str,
     app_id: String,
@@ -1487,6 +1518,7 @@ fn response_with_status(
         active_window: None,
         screenshot: None,
         app_log: None,
+        clipboard: None,
         events: None,
     }
 }
@@ -2505,6 +2537,52 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 }
             }
         }
+        IpcRequest::SetClipboard { text } => {
+            let char_count = text.chars().count();
+            match validate_clipboard_text(&text)
+                .and_then(|()| set_workspace_clipboard(&state.status, &text))
+            {
+                Ok(clipboard) => {
+                    record_event(
+                        state,
+                        "set_clipboard",
+                        serde_json::json!({
+                            "selection": &clipboard.selection,
+                            "char_count": char_count,
+                            "bytes": clipboard.bytes,
+                        }),
+                    )?;
+                    let mut response =
+                        response_with_status(true, "workspace clipboard set", &state.status);
+                    response.clipboard = Some(clipboard);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
+        IpcRequest::GetClipboard => match get_workspace_clipboard(&state.status) {
+            Ok(clipboard) => {
+                record_event(
+                    state,
+                    "get_clipboard",
+                    serde_json::json!({
+                        "selection": &clipboard.selection,
+                        "bytes": clipboard.bytes,
+                    }),
+                )?;
+                let mut response =
+                    response_with_status(true, "workspace clipboard returned", &state.status);
+                response.clipboard = Some(clipboard);
+                (response, false)
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
         IpcRequest::ReadAppLog {
             app_id,
             stream,
@@ -2933,6 +3011,7 @@ fn observe_workspace(
         active_window,
         screenshot,
         app_log: None,
+        clipboard: None,
         events: None,
     })
 }
@@ -3591,6 +3670,89 @@ fn type_workspace_text(status: &WorkspaceStatus, text: String) -> Result<()> {
     Ok(())
 }
 
+fn set_workspace_clipboard(status: &WorkspaceStatus, text: &str) -> Result<WorkspaceClipboard> {
+    validate_clipboard_text(text)?;
+    if command_path_check("xclip").ok {
+        write_clipboard_command(
+            status,
+            "xclip",
+            &["-selection", "clipboard"],
+            text,
+            "xclip clipboard input",
+        )?;
+    } else if command_path_check("xsel").ok {
+        write_clipboard_command(
+            status,
+            "xsel",
+            &["--clipboard", "--input"],
+            text,
+            "xsel clipboard input",
+        )?;
+    } else {
+        bail!("missing clipboard command: install xclip or xsel");
+    }
+
+    Ok(WorkspaceClipboard {
+        selection: "clipboard".to_string(),
+        content: None,
+        bytes: text.len() as u64,
+    })
+}
+
+fn get_workspace_clipboard(status: &WorkspaceStatus) -> Result<WorkspaceClipboard> {
+    let content = if command_path_check("xclip").ok {
+        let output = workspace_command(status, "xclip")
+            .args(["-selection", "clipboard", "-out"])
+            .output()
+            .context("failed to run xclip clipboard output")?;
+        output_text(output, "xclip clipboard output")?
+    } else if command_path_check("xsel").ok {
+        let output = workspace_command(status, "xsel")
+            .args(["--clipboard", "--output"])
+            .output()
+            .context("failed to run xsel clipboard output")?;
+        output_text(output, "xsel clipboard output")?
+    } else {
+        bail!("missing clipboard command: install xclip or xsel");
+    };
+
+    Ok(WorkspaceClipboard {
+        selection: "clipboard".to_string(),
+        bytes: content.len() as u64,
+        content: Some(content),
+    })
+}
+
+fn write_clipboard_command(
+    status: &WorkspaceStatus,
+    command: &str,
+    args: &[&str],
+    text: &str,
+    label: &str,
+) -> Result<()> {
+    let mut child = workspace_command(status, command)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("failed to run {label}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .with_context(|| format!("failed to write stdin for {label}"))?;
+    } else {
+        bail!("failed to open stdin for {label}");
+    }
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for {label}"))?;
+    if !status.success() {
+        bail!("{label} failed with {status}");
+    }
+    Ok(())
+}
+
 fn read_workspace_app_log(
     state: &mut DaemonState,
     app_id: &str,
@@ -4066,6 +4228,16 @@ fn validate_click_options(button: u8, count: u8) -> Result<()> {
 fn validate_scroll_options(_direction: ScrollDirection, amount: u8) -> Result<()> {
     if amount == 0 || amount > MAX_SCROLL_AMOUNT {
         bail!("scroll amount must be between 1 and {MAX_SCROLL_AMOUNT}");
+    }
+    Ok(())
+}
+
+fn validate_clipboard_text(text: &str) -> Result<()> {
+    if text.is_empty() {
+        bail!("clipboard text cannot be empty");
+    }
+    if text.contains('\0') {
+        bail!("clipboard text cannot contain NUL bytes");
     }
     Ok(())
 }

@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -338,6 +338,14 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 timeout_ms,
             )?)
         }
+        "clipboard-set" => {
+            let (id, text) = parse_clipboard_set_options(&args[1..])?;
+            print_json(&workspace::set_clipboard(&id, text)?)
+        }
+        "clipboard-get" => {
+            let id = parse_id_option(&args[1..])?;
+            print_json(&workspace::get_clipboard(&id)?)
+        }
         "logs" => {
             let (id, app_id, stream, tail_bytes) = parse_logs_options(&args[1..])?;
             print_json(&workspace::read_app_log(&id, app_id, stream, tail_bytes)?)
@@ -366,7 +374,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1860,6 +1868,14 @@ fn parse_text_command(args: &[String]) -> Result<(String, String)> {
     Ok((id, values.join(" ")))
 }
 
+fn parse_clipboard_set_options(args: &[String]) -> Result<(String, String)> {
+    let (id, values) = parse_id_and_args(args)?;
+    if values.is_empty() {
+        bail!("workspace clipboard-set requires text");
+    }
+    Ok((id, values.join(" ")))
+}
+
 fn parse_logs_options(args: &[String]) -> Result<(String, String, String, Option<u64>)> {
     let mut id = workspace::default_workspace_id();
     let mut stream = "stdout".to_string();
@@ -2204,6 +2220,8 @@ Usage:
   agent-workspace-linux workspace type [--id ID] TEXT
   agent-workspace-linux workspace type-window [--id ID] WINDOW_ID TEXT
   agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] TEXT
+  agent-workspace-linux workspace clipboard-set [--id ID] TEXT
+  agent-workspace-linux workspace clipboard-get [--id ID]
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID
   agent-workspace-linux workspace events [--id ID] [--tail N]
