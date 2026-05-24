@@ -161,11 +161,18 @@ warn_running_mcp_processes() {
   fi
 
   matches="$(
-    ps -eo pid=,args= | awk -v self="$$" -v bin="$BIN_NAME" -v dest="$DEST_BIN" '
-      $1 != self && index($0, " mcp") && (index($0, dest) || index($0, bin)) {
-        print
-      }
-    '
+    while read -r pid command_path rest; do
+      if [ -z "${pid:-}" ] || [ "$pid" = "$$" ] || [ -z "${command_path:-}" ]; then
+        continue
+      fi
+      command_name="${command_path##*/}"
+      if [ "$command_path" != "$DEST_BIN" ] && [ "$command_name" != "$BIN_NAME" ]; then
+        continue
+      fi
+      case " $command_path ${rest:-} " in
+        *" mcp "*) printf '%s %s %s\n' "$pid" "$command_path" "${rest:-}" ;;
+      esac
+    done < <(ps -eo pid=,args=)
   )"
 
   if [ -n "$matches" ]; then

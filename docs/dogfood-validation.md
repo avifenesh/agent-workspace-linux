@@ -213,3 +213,7 @@ Post-patch verification:
   the already-running MCP server process still used older profile-cwd behavior
   until the installed CLI was invoked directly. This is an upgrade/reload
   lifecycle issue, not a current-runtime failure.
+- The installer stale-MCP warning was tightened after dogfood showed it could
+  include its own process-scanning helper in the match list. `install.sh
+  --skip-build --no-doctor` now reports only the actual
+  `agent-workspace-linux mcp` process that must be restarted.
