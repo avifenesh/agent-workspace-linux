@@ -17,6 +17,13 @@ need xmessage
 
 cargo build --manifest-path "$ROOT_DIR/Cargo.toml" >/dev/null
 
+if command -v node >/dev/null 2>&1; then
+  echo "== mcp permissions smoke =="
+  AGENT_WORKSPACE_BIN="$BIN" node "$ROOT_DIR/scripts/mcp_permissions_smoke.js"
+else
+  echo "== mcp permissions smoke skipped: node not found =="
+fi
+
 BROWSER_BIN="${BROWSER_BIN:-}"
 if [[ -z "$BROWSER_BIN" ]]; then
   BROWSER_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"

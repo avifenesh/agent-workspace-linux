@@ -172,7 +172,11 @@ Post-patch verification:
   without read-only to read-write upgrades, and rejects launch commands outside
   the app allowlist. CLI smoke verified `mcp --help`, missing permission-file
   errors, invalid app allowlist errors, and that a valid permissions file loads
-  and starts the stdio MCP server when stdin stays open.
+  and starts the stdio MCP server when stdin stays open. The added stdio MCP
+  smoke initializes the server, calls `mcp_permissions`, verifies the structured
+  ceiling response, rejects an inherited-network profile under a disabled
+  ceiling, rejects a startup app outside the allowlist, and accepts a narrowed
+  disabled-network profile dry-run.
 - Full `scripts/integration_smoke.sh` still passes after the MCP ceiling patch,
   covering profile import/export, open-profile dry-run/setup/startup, local-only
   and disabled-network enforcement, read-only/read-write mounts, screenshots,
