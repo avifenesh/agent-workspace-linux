@@ -12,6 +12,7 @@ use std::{
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
     os::unix::{
+        ffi::OsStrExt,
         fs::{FileTypeExt, PermissionsExt},
         net::{UnixListener, UnixStream},
         process::{CommandExt, ExitStatusExt},
@@ -44,6 +45,7 @@ const SIGKILL: i32 = 9;
 const ESRCH: i32 = 3;
 const PRIVATE_RUNTIME_DIR_MODE: u32 = 0o700;
 const PRIVATE_SOCKET_MODE: u32 = 0o600;
+const MAX_UNIX_SOCKET_PATH_BYTES: usize = 107;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
 const WORKSPACE_MANIFEST_FILE: &str = "workspace.json";
@@ -2670,6 +2672,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     let id = sanitize_workspace_id(&options.id)?;
     let session_id = normalize_session_id(&options.session_id)?;
     options.purpose = normalize_workspace_purpose(options.purpose)?;
+    validate_unix_socket_path(&options.socket_path)?;
     create_private_runtime_dir(&options.runtime_dir)?;
     remove_stale_socket(&options.socket_path)?;
 
@@ -2778,6 +2781,15 @@ fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     let purpose = normalize_workspace_purpose(options.purpose)?;
     let already_running = status_workspace(&id).is_ok();
     let runtime = doctor_report();
+    let socket_path = workspace_socket_path(&id);
+    let socket_path_error = validate_unix_socket_path(&socket_path)
+        .err()
+        .map(|error| error.to_string());
+    let mut runtime_blockers = runtime.blockers;
+    if let Some(error) = &socket_path_error {
+        runtime_blockers.push(error.clone());
+    }
+    let runtime_ready = runtime.ready_for_x11_workspace && socket_path_error.is_none();
     let applied_policy = options.applied_policy.clone();
     let blocks_unenforced_policy = applied_policy
         .as_ref()
@@ -2792,7 +2804,7 @@ fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     let missing_unenforced_policy_ack =
         requires_unenforced_policy_ack && !options.user_acknowledged_unenforced_policy;
     let ok_to_start = already_running
-        || (runtime.ready_for_x11_workspace
+        || (runtime_ready
             && !missing_hidden_workspace_ack
             && !missing_unenforced_policy_ack
             && !blocks_unenforced_policy);
@@ -2806,10 +2818,10 @@ fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceSt
             .to_string()
     } else if missing_unenforced_policy_ack {
         "workspace start would require unenforced-policy acknowledgement".to_string()
-    } else if !runtime.ready_for_x11_workspace {
+    } else if !runtime_ready {
         format!(
             "workspace runtime is not ready: {}",
-            runtime.blockers.join("; ")
+            runtime_blockers.join("; ")
         )
     } else {
         "workspace start would create a new hidden workspace".to_string()
@@ -2821,8 +2833,8 @@ fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         ok_to_start,
         would_start,
         already_running,
-        runtime_ready: runtime.ready_for_x11_workspace,
-        runtime_blockers: runtime.blockers,
+        runtime_ready,
+        runtime_blockers,
         profile_id: options.profile_id,
         applied_policy,
         user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
@@ -2900,8 +2912,9 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
     }
 
     let runtime_dir = workspace_dir(&id);
-    create_private_runtime_dir(&runtime_dir)?;
     let socket_path = runtime_dir.join("control.sock");
+    validate_unix_socket_path(&socket_path)?;
+    create_private_runtime_dir(&runtime_dir)?;
     remove_stale_socket(&socket_path)?;
     let xauthority_path = runtime_dir.join("Xauthority");
     let display = pick_display()?;
@@ -7773,6 +7786,17 @@ fn remove_stale_socket(socket_path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn validate_unix_socket_path(socket_path: &Path) -> Result<()> {
+    let byte_len = socket_path.as_os_str().as_bytes().len();
+    if byte_len > MAX_UNIX_SOCKET_PATH_BYTES {
+        bail!(
+            "workspace control socket path {} is {byte_len} bytes; Unix socket paths must be at most {MAX_UNIX_SOCKET_PATH_BYTES} bytes. Use a shorter workspace id or a shorter XDG_RUNTIME_DIR",
+            socket_path.display()
+        );
+    }
+    Ok(())
+}
+
 fn workspace_socket_path(id: &str) -> PathBuf {
     workspace_dir(id).join("control.sock")
 }
@@ -8268,6 +8292,18 @@ mod tests {
                 .flatten(),
             Some("x11")
         );
+    }
+
+    #[test]
+    fn validates_workspace_socket_path_before_spawn() {
+        let max_path = format!("/{}", "x".repeat(MAX_UNIX_SOCKET_PATH_BYTES - 1));
+        validate_unix_socket_path(Path::new(&max_path)).expect("max-length socket path");
+
+        let too_long_path = format!("/{}", "x".repeat(MAX_UNIX_SOCKET_PATH_BYTES));
+        let error = validate_unix_socket_path(Path::new(&too_long_path))
+            .expect_err("too-long socket path should fail before daemon spawn");
+
+        assert!(error.to_string().contains("Unix socket paths"));
     }
 
     fn daemon_state_for_test(name: &str) -> DaemonState {

@@ -187,3 +187,15 @@ Post-patch verification:
   ceiling, while a disabled-network profile with an allowlisted `sh` startup app
   is accepted in dry-run mode. This gives the Codex for Linux CLI bridge a way
   to honor a locked MCP permission file instead of bypassing it.
+- Dogfooding the Codex dev app in a hidden workspace exposed a startup failure
+  for long workspace ids: the derived `control.sock` path could exceed the Unix
+  socket `sun_path` limit, causing the daemon to fail after Xvfb/openbox were
+  already spawned. The runtime now validates the socket path in start preview,
+  start preparation, and daemon startup before spawning workspace processes; unit
+  coverage verifies the boundary.
+- After the socket guard, the MCP workspace surface launched
+  `/home/avifenesh/projects/codex-desktop-linux/bin/codex-cua-lab` in a short-id
+  hidden workspace, found the `codex-cua-lab` window, captured a window
+  screenshot plus root screenshot/events, stopped the app/workspace cleanly, and
+  removed the stopped runtime through `workspace_cleanup_stale` dry-run plus
+  actual cleanup.
