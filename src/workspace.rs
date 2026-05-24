@@ -211,6 +211,8 @@ pub struct WorkspaceApp {
     pub name: Option<String>,
     pub pid: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_group_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
     pub mount_isolation: String,
     pub network_isolation: String,
@@ -2009,6 +2011,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "app_id": &app.id,
                         "name": app.name.as_deref(),
                         "pid": app.pid,
+                        "process_group_id": app.process_group_id,
                         "command": &app.command,
                         "profile_id": app.profile_id.as_deref(),
                         "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
@@ -3748,6 +3751,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         id: format!("app-{pid}"),
         name: spec.name,
         pid,
+        process_group_id: Some(pid),
         profile_id: spec.profile_id,
         mount_isolation,
         network_isolation,
@@ -4161,10 +4165,10 @@ fn list_matching_workspace_windows(
     include_hidden: bool,
     criteria: &WindowMatchCriteria,
 ) -> Result<Vec<WorkspaceWindow>> {
-    let app_root_pid = criteria
+    let app_filter = criteria
         .app_id
         .as_ref()
-        .map(|app_id| resolve_workspace_app(&state.status.apps, app_id).map(|app| app.pid))
+        .map(|app_id| resolve_workspace_app(&state.status.apps, app_id).cloned())
         .transpose()?;
     Ok(list_workspace_windows(&state.status, include_hidden)?
         .into_iter()
@@ -4189,10 +4193,10 @@ fn list_matching_workspace_windows(
             if let Some(pid) = criteria.pid {
                 return window.pid == Some(pid);
             }
-            if let Some(app_root_pid) = app_root_pid {
-                return window.pid.is_some_and(|window_pid| {
-                    process_is_descendant_or_self(window_pid, app_root_pid)
-                });
+            if let Some(app) = &app_filter {
+                return window
+                    .pid
+                    .is_some_and(|window_pid| process_belongs_to_app(window_pid, app));
             }
             true
         })
@@ -4213,12 +4217,37 @@ fn process_is_descendant_or_self(pid: u32, ancestor_pid: u32) -> bool {
     false
 }
 
+fn process_belongs_to_app(pid: u32, app: &WorkspaceApp) -> bool {
+    process_is_descendant_or_self(pid, app.pid)
+        || app
+            .process_group_id
+            .is_some_and(|process_group_id| process_is_in_group(pid, process_group_id))
+}
+
+fn process_is_in_group(pid: u32, process_group_id: u32) -> bool {
+    process_stat_ids(pid).is_some_and(|ids| ids.process_group_id == process_group_id)
+}
+
+struct ProcessStatIds {
+    parent_pid: u32,
+    process_group_id: u32,
+}
+
 fn parent_pid(pid: u32) -> Option<u32> {
+    Some(process_stat_ids(pid)?.parent_pid)
+}
+
+fn process_stat_ids(pid: u32) -> Option<ProcessStatIds> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_command = stat.rsplit_once(") ")?.1;
     let mut fields = after_command.split_whitespace();
     fields.next()?;
-    fields.next()?.parse().ok()
+    let parent_pid = fields.next()?.parse().ok()?;
+    let process_group_id = fields.next()?.parse().ok()?;
+    Some(ProcessStatIds {
+        parent_pid,
+        process_group_id,
+    })
 }
 
 fn focus_matching_workspace_window(
@@ -4662,7 +4691,7 @@ fn workspace_app_id_for_pid(status: &WorkspaceStatus, pid: u32) -> Option<String
     status
         .apps
         .iter()
-        .find(|app| process_is_descendant_or_self(pid, app.pid))
+        .find(|app| process_belongs_to_app(pid, app))
         .map(|app| app.id.clone())
 }
 
@@ -5410,6 +5439,7 @@ fn app_exit_event_detail(app: &WorkspaceApp) -> serde_json::Value {
         "app_id": &app.id,
         "name": app.name.as_deref(),
         "pid": app.pid,
+        "process_group_id": app.process_group_id,
         "command": &app.command,
         "profile_id": app.profile_id.as_deref(),
         "exit_status": app.exit_status.as_deref(),

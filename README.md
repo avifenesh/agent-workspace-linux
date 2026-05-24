@@ -155,7 +155,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   the launch requires `--ack-unenforced-policy`. Each launched app gets
   workspace-local stdout/stderr log files reported in `workspace status`.
   Profile-backed launches also report the profile id and effective
-  mount/network isolation on the app entry. App action responses such as
+  mount/network isolation on the app entry. App entries include the launch pid
+  and process group id so forked GUI child windows can still be associated with
+  the launched app. App action responses such as
   `launch`, `logs`, `wait-app`, and `kill-app` include the directly affected
   app in the top-level `apps` field. Completed apps report both a human
   `exit_status` string and structured `exit_code`/`exit_signal` fields.
