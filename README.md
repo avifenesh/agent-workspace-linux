@@ -150,13 +150,50 @@ On Debian/Ubuntu-like systems, the initial X11 workspace runtime is expected to
 need packages along these lines:
 
 ```bash
-sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip
+sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip bubblewrap
 ```
 
 `doctor` is implemented first so missing runtime dependencies are visible before
 the workspace runtime grows. It also reports optional policy backend candidates
 such as bubblewrap, firejail, unshare, and slirp4netns without treating them as
 active enforcement. The workspace commands use a small local Unix socket daemon:
+
+## MCP install
+
+Build a release binary and place it somewhere stable:
+
+```bash
+cargo build --release
+install -Dm755 target/release/agent-workspace-linux ~/.local/bin/agent-workspace-linux
+agent-workspace-linux doctor
+```
+
+For Codex config TOML, add an MCP server entry like this, using the absolute
+path where you installed the binary:
+
+```toml
+[mcp_servers.agent-workspace-linux]
+command = "/home/YOU/.local/bin/agent-workspace-linux"
+args = ["mcp"]
+```
+
+For MCP hosts that read `.mcp.json`, the equivalent shape is:
+
+```json
+{
+  "mcpServers": {
+    "agent-workspace-linux": {
+      "command": "/home/YOU/.local/bin/agent-workspace-linux",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+After adding the server, restart or reload the MCP host and call
+`workspace_doctor` first. The server speaks MCP over stdio; running
+`agent-workspace-linux mcp` directly is expected to wait for an MCP client rather
+than print a standalone report.
 
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.
