@@ -78,11 +78,11 @@ Post-patch verification:
   `daemon_pid`, `x_server_pid`, and `window_manager_pid` for process-aware stale
   cleanup.
 - `scripts/integration_smoke.sh` now covers profile validation, invalid-profile
-  rejection, and that self-stop lost-client case in addition to doctor,
-  profile import/export, open-profile dry-run, real `workspace open-profile`
-  execution with setup success, setup artifact creation, startup window wait,
-  startup screenshot, startup app targeting, workspace stop, and stopped
-  manifest log reads,
+  rejection, profile delete dry-run plus actual delete, and that self-stop
+  lost-client case in addition to doctor, profile import/export,
+  open-profile dry-run, real `workspace open-profile` execution with setup
+  success, setup artifact creation, startup window wait, startup screenshot,
+  startup app targeting, workspace stop, and stopped manifest log reads,
   `network.mode=local_only`, `network.mode=disabled`, read-write/read-only mount
   enforcement, session tracking, a real X11 window with screenshot, window
   listing, clipboard, keyboard input, app wait, artifact inspection, browser
