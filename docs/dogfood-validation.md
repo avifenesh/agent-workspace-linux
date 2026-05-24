@@ -157,3 +157,11 @@ Post-patch verification:
   log shows the click, the app exit, and `workspace_stop`, then stale cleanup
   removed the runtime. This validates the B-gate first slice against the actual
   app patch, not only synthetic tests.
+- A second live side-by-side dev-app pass verified the settings route. Inside the
+  hidden workspace, the app opened Settings, the sidebar included Agent
+  Workspaces, the page displayed the active workspace card, and the Chrome
+  template button opened the create form with `restricted-chrome`,
+  `network=disabled`, `/tmp`, and the `restricted-chrome-no-sandbox` startup app.
+  The profile was not saved; profile list remained empty after the pass. The
+  embedded panel Stop button again stopped the workspace and stale cleanup
+  removed the runtime.
