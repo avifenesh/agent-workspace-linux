@@ -87,6 +87,7 @@ pub struct RuntimeReport {
     pub xephyr: Check,
     pub xauth: Check,
     pub xdpyinfo: Check,
+    pub xprop: Check,
     pub window_manager: Check,
     pub xdotool: Check,
     pub screenshot: Check,
@@ -244,6 +245,8 @@ pub struct WorkspaceWindow {
     pub id: String,
     pub title: String,
     pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
     pub visible: bool,
     pub geometry: WindowGeometry,
 }
@@ -557,6 +560,7 @@ pub fn doctor_report() -> DoctorReport {
         xephyr: command_path_check("Xephyr"),
         xauth: command_path_check("xauth"),
         xdpyinfo: command_path_check("xdpyinfo"),
+        xprop: command_path_check("xprop"),
         window_manager: first_available_command(&["openbox", "i3", "fluxbox"]),
         xdotool: command_path_check("xdotool"),
         screenshot: first_available_command(&["import", "scrot"]),
@@ -575,6 +579,12 @@ pub fn doctor_report() -> DoctorReport {
     }
     if !runtime.xdpyinfo.ok {
         blockers.push("Install xdpyinfo so workspace display readiness can be probed.".to_string());
+    }
+    if !runtime.xprop.ok {
+        blockers.push(
+            "Install xprop so workspace windows can be associated with app process ids."
+                .to_string(),
+        );
     }
     if !runtime.window_manager.ok {
         blockers.push(
@@ -4117,7 +4127,8 @@ fn window_info_with_visibility(
         .ok()
         .and_then(|output| output.status.success().then_some(output.stdout))
         .and_then(|stdout| String::from_utf8(stdout).ok())
-        .and_then(|text| text.trim().parse::<u32>().ok());
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .or_else(|| window_pid_from_xprop(status, id));
     let geometry_output = workspace_command(status, "xdotool")
         .args(["getwindowgeometry", "--shell", id])
         .output()
@@ -4128,9 +4139,31 @@ fn window_info_with_visibility(
         id: id.to_string(),
         title,
         pid,
+        app_id: pid.and_then(|pid| workspace_app_id_for_pid(status, pid)),
         visible,
         geometry: parse_window_geometry(&geometry_text)?,
     })
+}
+
+fn workspace_app_id_for_pid(status: &WorkspaceStatus, pid: u32) -> Option<String> {
+    status
+        .apps
+        .iter()
+        .find(|app| process_is_descendant_or_self(pid, app.pid))
+        .map(|app| app.id.clone())
+}
+
+fn window_pid_from_xprop(status: &WorkspaceStatus, id: &str) -> Option<u32> {
+    let output = workspace_command(status, "xprop")
+        .args(["-id", id, "_NET_WM_PID"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    text.rsplit_once('=')
+        .and_then(|(_, value)| value.trim().parse::<u32>().ok())
 }
 
 fn parse_window_geometry(text: &str) -> Result<WindowGeometry> {

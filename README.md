@@ -157,9 +157,11 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `workspace paste-window`, `workspace logs`, `workspace wait-app`,
   `workspace events`, `workspace setup`, and
   `workspace kill-app` inspect or act through the same daemon, scoped to the
-  workspace display. `windows` lists visible windows by default; `--all`
-  includes minimized/hidden windows with a `visible` flag so they can be shown
-  again by id. `active-window` reports the current workspace-local focus,
+  workspace display. `windows` lists visible windows by default; window records
+  include X11 id, title, pid, workspace `app_id` when process metadata links
+  the window to a launched app, geometry, and visibility. `--all` includes
+  minimized/hidden windows so they can be shown again by id. `active-window`
+  reports the current workspace-local focus,
   and `observe` returns status, windows, active window, and optionally a root
   screenshot in one IPC call. `observe --all-windows` uses the same
   hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
