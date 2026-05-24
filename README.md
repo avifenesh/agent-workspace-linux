@@ -49,6 +49,7 @@ cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
 cargo run -- workspace manifest
+cargo run -- workspace artifacts
 cargo run -- workspace ipc-info
 cargo run -- workspace env
 cargo run -- workspace env --shell
@@ -164,6 +165,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace manifest` reads that saved manifest directly from disk without
   contacting the workspace daemon, making it suitable for stopped workspaces or
   post-run audit views. `workspace status` remains live IPC state.
+- `workspace artifacts` returns a read-only inventory of files in the runtime
+  directory, including the manifest, event log, daemon logs, app logs, and any
+  screenshots captured into the workspace runtime directory.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
@@ -314,8 +318,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
-`workspace_status`, `workspace_manifest`, `workspace_ipc_info`, `workspace_env`,
-`workspace_launch_app`, `workspace_run_app`,
+`workspace_status`, `workspace_manifest`, `workspace_artifacts`,
+`workspace_ipc_info`, `workspace_env`, `workspace_launch_app`, `workspace_run_app`,
 `workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_list_windows`,
 `workspace_active_window`, `workspace_pointer`, `workspace_observe`,
 `workspace_wait_window`,

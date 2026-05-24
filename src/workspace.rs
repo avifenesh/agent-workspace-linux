@@ -218,6 +218,26 @@ pub struct WorkspaceManifestRead {
     pub manifest_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceArtifacts {
+    pub ok: bool,
+    pub message: String,
+    pub id: String,
+    pub runtime_dir: PathBuf,
+    pub files: Vec<WorkspaceArtifact>,
+    pub manifest_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceArtifact {
+    pub kind: String,
+    pub label: String,
+    pub path: PathBuf,
+    pub exists: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceManifest {
     pub id: String,
@@ -900,6 +920,117 @@ pub fn read_manifest(id: &str) -> WorkspaceManifestRead {
             manifest: None,
             manifest_error: Some(error.to_string()),
         },
+    }
+}
+
+pub fn artifacts(id: &str) -> WorkspaceArtifacts {
+    let id = match sanitize_workspace_id(id) {
+        Ok(id) => id,
+        Err(error) => {
+            return WorkspaceArtifacts {
+                ok: false,
+                message: error.to_string(),
+                id: id.to_string(),
+                runtime_dir: PathBuf::new(),
+                files: Vec::new(),
+                manifest_error: Some(error.to_string()),
+            };
+        }
+    };
+    let runtime_dir = workspace_dir(&id);
+    let (manifest, manifest_error) = match read_workspace_manifest(&runtime_dir) {
+        Ok(manifest) => (manifest, None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    let mut files = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "manifest",
+        "workspace manifest",
+        runtime_dir.join(WORKSPACE_MANIFEST_FILE),
+    );
+    let event_log_path = manifest
+        .as_ref()
+        .map(|manifest| manifest.event_log_path.clone())
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| runtime_dir.join(EVENT_LOG_FILE));
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "event_log",
+        "workspace event log",
+        event_log_path,
+    );
+    let daemon_stdout_path = manifest
+        .as_ref()
+        .map(|manifest| manifest.daemon_stdout_path.clone())
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| runtime_dir.join("daemon.out.log"));
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "daemon_log",
+        "daemon stdout",
+        daemon_stdout_path,
+    );
+    let daemon_stderr_path = manifest
+        .as_ref()
+        .map(|manifest| manifest.daemon_stderr_path.clone())
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| runtime_dir.join("daemon.err.log"));
+    push_workspace_artifact(
+        &mut files,
+        &mut seen,
+        "daemon_log",
+        "daemon stderr",
+        daemon_stderr_path,
+    );
+
+    if let Some(manifest) = &manifest {
+        for app in &manifest.apps {
+            let label = app_label(app);
+            if let Some(path) = &app.stdout_path {
+                push_workspace_artifact(
+                    &mut files,
+                    &mut seen,
+                    "app_log",
+                    format!("{label} stdout"),
+                    path.clone(),
+                );
+            }
+            if let Some(path) = &app.stderr_path {
+                push_workspace_artifact(
+                    &mut files,
+                    &mut seen,
+                    "app_log",
+                    format!("{label} stderr"),
+                    path.clone(),
+                );
+            }
+        }
+    }
+    add_workspace_screenshot_artifacts(&runtime_dir, &mut files, &mut seen);
+
+    let ok = runtime_dir.exists() && manifest_error.is_none();
+    let message = if ok {
+        "workspace artifacts returned"
+    } else if !runtime_dir.exists() {
+        "workspace runtime directory not found"
+    } else {
+        "workspace artifacts returned with manifest error"
+    }
+    .to_string();
+
+    WorkspaceArtifacts {
+        ok,
+        message,
+        id,
+        runtime_dir,
+        files,
+        manifest_error,
     }
 }
 
@@ -2164,6 +2295,57 @@ fn read_workspace_manifest(runtime_dir: &Path) -> Result<Option<WorkspaceManifes
     let manifest = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
     Ok(Some(manifest))
+}
+
+fn push_workspace_artifact(
+    files: &mut Vec<WorkspaceArtifact>,
+    seen: &mut BTreeSet<PathBuf>,
+    kind: impl Into<String>,
+    label: impl Into<String>,
+    path: PathBuf,
+) {
+    if path.as_os_str().is_empty() || !seen.insert(path.clone()) {
+        return;
+    }
+    let metadata = fs::metadata(&path)
+        .ok()
+        .filter(|metadata| metadata.is_file());
+    files.push(WorkspaceArtifact {
+        kind: kind.into(),
+        label: label.into(),
+        path,
+        exists: metadata.is_some(),
+        bytes: metadata.map(|metadata| metadata.len()),
+    });
+}
+
+fn add_workspace_screenshot_artifacts(
+    runtime_dir: &Path,
+    files: &mut Vec<WorkspaceArtifact>,
+    seen: &mut BTreeSet<PathBuf>,
+) {
+    let Ok(entries) = fs::read_dir(runtime_dir) else {
+        return;
+    };
+    let mut screenshots = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name.starts_with("screenshot") && name.ends_with(".png") {
+            screenshots.push(path);
+        }
+    }
+    screenshots.sort();
+    for path in screenshots {
+        let label = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("screenshot")
+            .to_string();
+        push_workspace_artifact(files, seen, "screenshot", label, path);
+    }
 }
 
 fn record_event(
