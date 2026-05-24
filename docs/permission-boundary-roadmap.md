@@ -99,8 +99,9 @@ Current gate status on 2026-05-24:
   network allowlist enforcement, and more varied real-project coverage.
 - B has a first Codex for Linux slice: the conversation surface can show a live
   active-workspace panel with screenshot, profile/policy/app metadata, Stop, and
-  Revoke. It still needs more live app QA inside the installed Codex app before
-  it should become a hard trust boundary.
+  Revoke. The side-by-side dev app has been dogfooded inside a hidden workspace,
+  including a live panel Stop action. It still needs main-app install QA and more
+  repeated live app runs before it should become a hard trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, and recovery/inspection flows work at the primitive level.
   Authenticated browser-profile sharing, MCP-locked permission ceilings, app

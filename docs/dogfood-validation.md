@@ -146,3 +146,14 @@ Post-patch verification:
   Codex/MCP reload is required for new tool schemas, parameters, templates, and
   runtime behavior. README install docs now make the same upgrade caveat
   explicit.
+- MCP dogfood covered the Codex for Linux conversation-visibility slice with the
+  real side-by-side dev app. A hidden workspace launched
+  `/home/avifenesh/projects/codex-desktop-linux/bin/codex-cua-lab` and rendered a
+  `codex-cua-lab` window. `workspace_observe --screenshot` captured the Codex app
+  with the embedded Agent Workspace panel visible inside the conversation view,
+  including a live recursive workspace screenshot, profile/app metadata, and
+  Stop/Revoke controls. A workspace-local click on the panel's Stop button
+  triggered `workspace_stop` from inside the nested Codex app; the saved event
+  log shows the click, the app exit, and `workspace_stop`, then stale cleanup
+  removed the runtime. This validates the B-gate first slice against the actual
+  app patch, not only synthetic tests.
