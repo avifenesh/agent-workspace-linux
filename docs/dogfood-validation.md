@@ -182,3 +182,8 @@ Post-patch verification:
   and disabled-network enforcement, read-only/read-write mounts, screenshots,
   input/clipboard, artifacts, browser local-dev QA, crashed-daemon cleanup, and
   workspace self-stop.
+- CLI bridge parity smoke now covers `agent-workspace-linux --permissions PATH`:
+  a profile using `network.mode=inherit_host` is rejected under a disabled
+  ceiling, while a disabled-network profile with an allowlisted `sh` startup app
+  is accepted in dry-run mode. This gives the Codex for Linux CLI bridge a way
+  to honor a locked MCP permission file instead of bypassing it.

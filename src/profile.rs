@@ -389,15 +389,6 @@ pub fn export_profile(
     })
 }
 
-pub fn import_profile(
-    json_path: PathBuf,
-    replace: bool,
-    dry_run: bool,
-) -> Result<ProfilePutResult> {
-    let profile = read_profile_json_file(&json_path)?;
-    put_profile(profile, replace, dry_run)
-}
-
 pub fn read_profile_json_file(path: &Path) -> Result<WorkspaceProfile> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read profile JSON from {}", path.display()))?;

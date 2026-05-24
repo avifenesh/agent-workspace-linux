@@ -57,6 +57,7 @@ authority model and validation gates, and
 cargo run -- doctor
 cargo run -- guardrails
 cargo run -- mcp --permissions ./permissions.json
+cargo run -- --permissions ./permissions.json profile validate --json ./profile.json
 cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
@@ -223,6 +224,12 @@ broaden network mode, mount paths/access, or launch programs. Call
 `mcp_permissions` after connecting to see the active ceiling. App allowlists
 match the launched program only; allowing shells, package managers, or browsers
 delegates whatever those programs can do inside the workspace policy.
+
+The same ceiling can be applied to standalone CLI operations by placing
+`--permissions PATH` before the command, for example
+`agent-workspace-linux --permissions permissions.json workspace open-profile ...`.
+This lets Codex for Linux reuse the MCP server's configured permission file when
+it needs to call the local CLI bridge.
 
 After installation or upgrade, restart Codex or reload MCP servers so new
 workspace tools, parameters, profile templates, and runtime behavior become

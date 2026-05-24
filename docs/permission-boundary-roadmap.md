@@ -93,6 +93,10 @@ Rules:
 - Enforcement currently covers MCP profile template/check/validate/put/import,
   workspace start/open-profile, direct launch/run, and profile setup/startup
   launches. The standalone CLI remains a developer/admin surface.
+- The CLI also accepts a leading `--permissions PATH` global option. When used,
+  profile and workspace actions are checked against the same ceiling. This is
+  intended for the Codex for Linux bridge when it discovers a locked MCP server
+  config and needs to avoid bypassing that ceiling.
 
 ## Gates Before Hard Enforcement
 

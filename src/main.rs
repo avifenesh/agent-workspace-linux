@@ -15,6 +15,7 @@ use workspace::{DaemonOptions, EnvVar, LaunchSpec, WorkspaceStartOptions};
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    let permissions = parse_global_options(&mut args)?;
     match args.first().map(String::as_str) {
         Some("doctor") => {
             let report = workspace::doctor_report();
@@ -23,18 +24,18 @@ async fn main() -> Result<()> {
         Some("guardrails") => print_json(&guardrails::guardrail_summary()),
         Some("mcp") => {
             args.remove(0);
-            match parse_mcp_options(&args)? {
+            match parse_mcp_options(&args, permissions)? {
                 Some(permissions) => server::serve_mcp(permissions).await,
                 None => Ok(()),
             }
         }
         Some("profile") => {
             args.remove(0);
-            handle_profile(args)
+            handle_profile(args, &permissions)
         }
         Some("workspace") => {
             args.remove(0);
-            handle_workspace(args)
+            handle_workspace(args, &permissions)
         }
         Some("daemon") => {
             args.remove(0);
@@ -52,7 +53,37 @@ async fn main() -> Result<()> {
     }
 }
 
-fn handle_profile(args: Vec<String>) -> Result<()> {
+fn parse_global_options(args: &mut Vec<String>) -> Result<permissions::McpPermissionState> {
+    let mut permissions_path = None;
+    loop {
+        let Some(arg) = args.first() else {
+            break;
+        };
+        if let Some(path) = arg.strip_prefix("--permissions=") {
+            if path.is_empty() {
+                bail!("--permissions requires a path");
+            }
+            permissions_path = Some(PathBuf::from(path));
+            args.remove(0);
+            continue;
+        }
+        if arg == "--permissions" {
+            if args.len() < 2 {
+                bail!("--permissions requires a path");
+            }
+            permissions_path = Some(PathBuf::from(args.remove(1)));
+            args.remove(0);
+            continue;
+        }
+        break;
+    }
+    match permissions_path {
+        Some(path) => permissions::load_mcp_permission_state(path),
+        None => Ok(permissions::McpPermissionState::default()),
+    }
+}
+
+fn handle_profile(args: Vec<String>, permissions: &permissions::McpPermissionState) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!("missing profile command. Expected: path, list, get, check, validate, template, put, import, export, delete");
     };
@@ -71,28 +102,31 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
         }
         "check" => {
             let id = parse_required_id_arg(&args[1..], "profile check requires an id")?;
+            permissions.validate_profile(&profile::get_profile(&id)?)?;
             print_json(&profile::check_profile(&id)?)
         }
         "validate" => {
             let json_path = parse_profile_validate_options(&args[1..])?;
-            print_json(&profile::validate_profile_json_file(json_path)?)
+            let validation = profile::validate_profile_json_file(json_path)?;
+            permissions.validate_profile(&validation.profile)?;
+            print_json(&validation)
         }
         "template" => {
             let (kind, id, host_path, browser_path) = parse_profile_template_options(&args[1..])?;
-            print_json(&profile::template_profile(
-                &kind,
-                id,
-                host_path,
-                browser_path,
-            )?)
+            let template = profile::template_profile(&kind, id, host_path, browser_path)?;
+            permissions.validate_profile(&template)?;
+            print_json(&template)
         }
         "put" => {
-            let (profile, replace, dry_run) = parse_profile_put_options(&args[1..])?;
-            print_json(&profile::put_profile(profile, replace, dry_run)?)
+            let (workspace_profile, replace, dry_run) = parse_profile_put_options(&args[1..])?;
+            permissions.validate_profile(&workspace_profile)?;
+            print_json(&profile::put_profile(workspace_profile, replace, dry_run)?)
         }
         "import" => {
             let (json_path, replace, dry_run) = parse_profile_import_options(&args[1..])?;
-            print_json(&profile::import_profile(json_path, replace, dry_run)?)
+            let workspace_profile = profile::read_profile_json_file(&json_path)?;
+            permissions.validate_profile(&workspace_profile)?;
+            print_json(&profile::put_profile(workspace_profile, replace, dry_run)?)
         }
         "export" => {
             let (id, output_path, replace) = parse_profile_export_options(&args[1..])?;
@@ -108,7 +142,10 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
     }
 }
 
-fn parse_mcp_options(args: &[String]) -> Result<Option<permissions::McpPermissionState>> {
+fn parse_mcp_options(
+    args: &[String],
+    default_permissions: permissions::McpPermissionState,
+) -> Result<Option<permissions::McpPermissionState>> {
     let mut permissions_path = None;
     let mut index = 0;
     while index < args.len() {
@@ -141,11 +178,14 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<permissions::McpPermissio
     }
     match permissions_path {
         Some(path) => Ok(Some(permissions::load_mcp_permission_state(path)?)),
-        None => Ok(Some(permissions::McpPermissionState::default())),
+        None => Ok(Some(default_permissions)),
     }
 }
 
-fn handle_workspace(args: Vec<String>) -> Result<()> {
+fn handle_workspace(
+    args: Vec<String>,
+    permissions: &permissions::McpPermissionState,
+) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
             "missing workspace command. Expected: start, open-profile, list, cleanup, status, manifest, artifacts, ipc-info, env, launch, run, launch-profile-apps, apps, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
@@ -154,6 +194,10 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
     match command {
         "start" => {
             let start = parse_start_options(&args[1..])?;
+            if let Some(profile_id) = &start.profile_id {
+                permissions.validate_profile(&profile::get_profile(profile_id)?)?;
+            }
+            permissions.validate_start_options(&start.options)?;
             if start.dry_run {
                 print_json(&workspace::preview_workspace_start(start.options)?)
             } else if start.foreground {
@@ -164,6 +208,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         "open-profile" => {
             let (start, profile_id, open_options) = parse_open_profile_options(&args[1..])?;
+            permissions.validate_profile(&profile::get_profile(&profile_id)?)?;
+            permissions.validate_start_options(&start.options)?;
             if start.dry_run {
                 print_json(&profile::preview_open_profile_workspace(
                     start.options,
@@ -213,6 +259,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         "launch" => {
             let launch = parse_launch_options(&args[1..])?;
+            permissions.validate_launch_spec(&launch.spec)?;
             let response = if launch.dry_run {
                 workspace::preview_launch_app(
                     &launch.id,
@@ -234,6 +281,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         "run" => {
             let run = parse_run_options(&args[1..])?;
+            permissions.validate_launch_spec(&run.spec)?;
             if run.dry_run {
                 print_json(&workspace::preview_run_app_with_spec(
                     &run.id,
@@ -254,6 +302,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         "launch-profile-apps" => {
             let (id, profile_id, options) = parse_profile_launch_options(&args[1..])?;
+            permissions.validate_profile(&profile::get_profile(&profile_id)?)?;
             print_json(&profile::launch_profile_startup_apps(
                 &id,
                 &profile_id,
@@ -671,6 +720,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         "setup" => {
             let (id, profile_id, options) = parse_workspace_setup_options(&args[1..])?;
+            permissions.validate_profile(&profile::get_profile(&profile_id)?)?;
             print_json(&profile::launch_profile_setup(&id, &profile_id, options)?)
         }
         "kill-app" => {
@@ -692,6 +742,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
 
 struct ParsedStartOptions {
     options: WorkspaceStartOptions,
+    profile_id: Option<String>,
     foreground: bool,
     dry_run: bool,
 }
@@ -761,6 +812,7 @@ fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
     }
     Ok(ParsedStartOptions {
         options,
+        profile_id,
         foreground,
         dry_run,
     })
@@ -874,6 +926,7 @@ fn parse_open_profile_options(
     Ok((
         ParsedStartOptions {
             options,
+            profile_id: Some(profile_id.clone()),
             foreground: false,
             dry_run: open_options.setup.dry_run || open_options.startup.dry_run,
         },
@@ -3495,6 +3548,7 @@ fn print_help() {
         r#"agent-workspace-linux
 
 Usage:
+  agent-workspace-linux [--permissions PATH] <command>
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
   agent-workspace-linux mcp [--permissions PATH]

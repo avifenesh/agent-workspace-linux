@@ -64,6 +64,16 @@ assert_json() {
   jq -e "$@" "$filter" "$file" >/dev/null
 }
 
+expect_awl_failure() {
+  local output_file="$1"
+  shift
+  if run_awl "$@" >"$output_file" 2>&1; then
+    echo "expected command to fail: $*" >&2
+    cat "$output_file" >&2
+    return 1
+  fi
+}
+
 pid_alive() {
   local pid="$1"
   [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 0 ]] && kill -0 "$pid" 2>/dev/null
@@ -102,6 +112,41 @@ wait_pgid_gone() {
   echo "$label process group $pgid is still running" >&2
   return 1
 }
+
+echo "== cli permission ceiling smoke =="
+CLI_PERMISSIONS="$SMOKE_DIR/cli-permissions.json"
+CLI_OPEN_PROFILE="$SMOKE_DIR/cli-open-profile.json"
+CLI_LOCKED_PROFILE="$SMOKE_DIR/cli-locked-profile.json"
+cat > "$CLI_PERMISSIONS" <<'JSON'
+{
+  "network": { "mode": "disabled" },
+  "apps": { "allow": ["sh"] }
+}
+JSON
+cat > "$CLI_OPEN_PROFILE" <<'JSON'
+{
+  "id": "cli-too-open",
+  "network": { "mode": "inherit_host" },
+  "mounts": [],
+  "setup_commands": [],
+  "startup_apps": []
+}
+JSON
+cat > "$CLI_LOCKED_PROFILE" <<'JSON'
+{
+  "id": "cli-locked",
+  "network": { "mode": "disabled" },
+  "mounts": [],
+  "setup_commands": [],
+  "startup_apps": [
+    { "command": ["sh", "-lc", "true"] }
+  ]
+}
+JSON
+expect_awl_failure "$SMOKE_DIR/cli-open-profile.err" --permissions "$CLI_PERMISSIONS" profile validate --json "$CLI_OPEN_PROFILE"
+grep -q "exceeds MCP permission ceiling" "$SMOKE_DIR/cli-open-profile.err"
+run_awl --permissions "$CLI_PERMISSIONS" profile put --json "$CLI_LOCKED_PROFILE" --dry-run > "$SMOKE_DIR/cli-locked-profile-put.json"
+assert_json '.ok == true and .dry_run == true and .would_create == true' "$SMOKE_DIR/cli-locked-profile-put.json"
 
 echo "== doctor =="
 run_awl doctor > "$SMOKE_DIR/doctor.json"
