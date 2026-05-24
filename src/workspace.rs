@@ -348,6 +348,7 @@ pub enum IpcRequest {
     },
     WaitWindow {
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: u64,
@@ -358,6 +359,7 @@ pub enum IpcRequest {
     ScreenshotWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         output_path: Option<PathBuf>,
@@ -368,6 +370,7 @@ pub enum IpcRequest {
     },
     FocusMatchingWindow {
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: u64,
@@ -377,6 +380,7 @@ pub enum IpcRequest {
     },
     CloseMatchingWindow {
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: u64,
@@ -384,6 +388,7 @@ pub enum IpcRequest {
     MoveWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         x: i32,
@@ -393,6 +398,7 @@ pub enum IpcRequest {
     ResizeWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         width: u32,
@@ -402,6 +408,7 @@ pub enum IpcRequest {
     RaiseWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: u64,
@@ -409,6 +416,7 @@ pub enum IpcRequest {
     MinimizeWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: u64,
@@ -425,6 +433,7 @@ pub enum IpcRequest {
     ClickWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         x: i32,
@@ -440,6 +449,7 @@ pub enum IpcRequest {
     MovePointerWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         x: i32,
@@ -456,6 +466,7 @@ pub enum IpcRequest {
     DragWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         from_x: i32,
@@ -474,6 +485,7 @@ pub enum IpcRequest {
     ScrollWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         x: i32,
@@ -488,6 +500,7 @@ pub enum IpcRequest {
     KeyWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         key: String,
@@ -499,6 +512,7 @@ pub enum IpcRequest {
     TypeWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         text: String,
@@ -515,6 +529,7 @@ pub enum IpcRequest {
     PasteWindow {
         window_id: Option<String>,
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         text: String,
@@ -872,16 +887,18 @@ pub fn observe(
 pub fn wait_window(
     id: &str,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_match_options(&title_contains, pid, &app_id, false)?;
+    validate_window_match_options(&title_contains, &class_contains, pid, &app_id, false)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::WaitWindow {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
@@ -901,18 +918,20 @@ pub fn screenshot_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     output_path: Option<PathBuf>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::ScreenshotWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             output_path,
@@ -933,16 +952,18 @@ pub fn focus_window(id: &str, window_id: String) -> Result<IpcResponse> {
 pub fn focus_matching_window(
     id: &str,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_match_options(&title_contains, pid, &app_id, true)?;
+    validate_window_match_options(&title_contains, &class_contains, pid, &app_id, true)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::FocusMatchingWindow {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
@@ -962,16 +983,18 @@ pub fn close_window(id: &str, window_id: String) -> Result<IpcResponse> {
 pub fn close_matching_window(
     id: &str,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_match_options(&title_contains, pid, &app_id, true)?;
+    validate_window_match_options(&title_contains, &class_contains, pid, &app_id, true)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::CloseMatchingWindow {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
@@ -983,6 +1006,7 @@ pub fn move_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     x: i32,
@@ -990,12 +1014,13 @@ pub fn move_window(
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::MoveWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -1009,6 +1034,7 @@ pub fn resize_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     width: u32,
@@ -1016,13 +1042,14 @@ pub fn resize_window(
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     validate_window_size(width, height)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::ResizeWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             width,
@@ -1036,17 +1063,19 @@ pub fn raise_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::RaiseWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
@@ -1058,17 +1087,19 @@ pub fn minimize_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::MinimizeWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
@@ -1111,6 +1142,7 @@ pub fn click_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     x: i32,
@@ -1122,7 +1154,7 @@ pub fn click_window(
     let id = sanitize_workspace_id(id)?;
     let button = button.unwrap_or(DEFAULT_CLICK_BUTTON);
     let count = count.unwrap_or(DEFAULT_CLICK_COUNT);
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     validate_relative_click_coordinates(x, y)?;
     validate_click_options(button, count)?;
     request(
@@ -1130,6 +1162,7 @@ pub fn click_window(
         IpcRequest::ClickWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -1153,6 +1186,7 @@ pub fn move_pointer_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     x: i32,
@@ -1160,13 +1194,14 @@ pub fn move_pointer_window(
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     validate_relative_click_coordinates(x, y)?;
     request(
         &workspace_socket_path(&id),
         IpcRequest::MovePointerWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -1203,6 +1238,7 @@ pub fn drag_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     from_x: i32,
@@ -1214,7 +1250,7 @@ pub fn drag_window(
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     let button = button.unwrap_or(DEFAULT_CLICK_BUTTON);
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     validate_relative_click_coordinates(from_x, from_y)?;
     validate_relative_click_coordinates(to_x, to_y)?;
     validate_click_options(button, DEFAULT_CLICK_COUNT)?;
@@ -1223,6 +1259,7 @@ pub fn drag_window(
         IpcRequest::DragWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             from_x,
@@ -1260,6 +1297,7 @@ pub fn scroll_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     x: i32,
@@ -1270,7 +1308,7 @@ pub fn scroll_window(
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     let amount = amount.unwrap_or(DEFAULT_SCROLL_AMOUNT);
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     validate_relative_click_coordinates(x, y)?;
     validate_scroll_options(direction, amount)?;
     request(
@@ -1278,6 +1316,7 @@ pub fn scroll_window(
         IpcRequest::ScrollWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -1301,13 +1340,14 @@ pub fn key_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     key: String,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     if key.trim().is_empty() {
         bail!("key cannot be empty");
     }
@@ -1316,6 +1356,7 @@ pub fn key_window(
         IpcRequest::KeyWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             key,
@@ -1336,13 +1377,14 @@ pub fn type_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     text: String,
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     if text.is_empty() {
         bail!("text cannot be empty");
     }
@@ -1351,6 +1393,7 @@ pub fn type_window(
         IpcRequest::TypeWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             text,
@@ -1387,6 +1430,7 @@ pub fn paste_window(
     id: &str,
     window_id: Option<String>,
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     text: String,
@@ -1394,7 +1438,7 @@ pub fn paste_window(
     timeout_ms: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_target_options(&window_id, &title_contains, &class_contains, pid, &app_id)?;
     validate_clipboard_text(&text)?;
     let key = normalize_paste_key(key)?;
     request(
@@ -1402,6 +1446,7 @@ pub fn paste_window(
         IpcRequest::PasteWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             text,
@@ -1933,12 +1978,14 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         },
         IpcRequest::WaitWindow {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -1951,6 +1998,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "wait_window",
                         serde_json::json!({
                             "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                             "pid": criteria.pid,
                             "app_id": criteria.app_id.as_deref(),
                             "timeout_ms": criteria.timeout_ms,
@@ -1997,6 +2045,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::ScreenshotWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             output_path,
@@ -2004,6 +2053,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2011,6 +2061,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             ) {
@@ -2032,6 +2083,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 "path": result.screenshot.path.display().to_string(),
                                 "window_id": &result.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "timeout_ms": criteria.timeout_ms,
@@ -2083,18 +2135,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         }
         IpcRequest::FocusMatchingWindow {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
             };
             match validate_window_match_options(
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
                 true,
@@ -2111,6 +2166,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "timeout_ms": criteria.timeout_ms,
@@ -2165,18 +2221,21 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         }
         IpcRequest::CloseMatchingWindow {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
             };
             match validate_window_match_options(
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
                 true,
@@ -2193,6 +2252,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "timeout_ms": criteria.timeout_ms,
@@ -2225,6 +2285,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::MoveWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -2233,6 +2294,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2240,6 +2302,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2259,6 +2322,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 serde_json::json!({
                                     "window_id": &window.id,
                                     "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                     "pid": criteria.pid,
                                     "app_id": criteria.app_id.as_deref(),
                                     "x": x,
@@ -2291,6 +2355,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::ResizeWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             width,
@@ -2299,6 +2364,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2306,6 +2372,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2330,6 +2397,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "width": width,
@@ -2361,12 +2429,14 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::RaiseWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2374,6 +2444,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             ) {
@@ -2390,6 +2461,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 serde_json::json!({
                                     "window_id": &window.id,
                                     "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                     "pid": criteria.pid,
                                     "app_id": criteria.app_id.as_deref(),
                                     "timeout_ms": criteria.timeout_ms,
@@ -2423,12 +2495,14 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::MinimizeWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2436,6 +2510,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             ) {
@@ -2452,6 +2527,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 serde_json::json!({
                                     "window_id": &window.id,
                                     "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                     "pid": criteria.pid,
                                     "app_id": criteria.app_id.as_deref(),
                                     "timeout_ms": criteria.timeout_ms,
@@ -2526,6 +2602,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::ClickWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -2536,6 +2613,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2543,6 +2621,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2570,6 +2649,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 serde_json::json!({
                                     "window_id": &clicked.window.id,
                                     "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                     "pid": criteria.pid,
                                     "app_id": criteria.app_id.as_deref(),
                                     "relative_x": x,
@@ -2622,6 +2702,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::MovePointerWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -2630,6 +2711,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2637,6 +2719,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2660,6 +2743,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &moved.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "relative_x": x,
@@ -2725,6 +2809,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::DragWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             from_x,
@@ -2736,6 +2821,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2743,6 +2829,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2771,6 +2858,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &dragged.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "from_x": dragged.from_x,
@@ -2836,6 +2924,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::ScrollWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             x,
@@ -2846,6 +2935,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2853,6 +2943,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2879,6 +2970,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &scrolled.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "relative_x": x,
@@ -2933,6 +3025,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::KeyWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             key,
@@ -2940,6 +3033,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -2948,6 +3042,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -2969,6 +3064,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "key": logged_key,
@@ -3019,6 +3115,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::TypeWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             text,
@@ -3026,6 +3123,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -3034,6 +3132,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -3056,6 +3155,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                 serde_json::json!({
                                     "window_id": &window.id,
                                     "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                     "pid": criteria.pid,
                                     "app_id": criteria.app_id.as_deref(),
                                     "char_count": char_count,
@@ -3164,6 +3264,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::PasteWindow {
             window_id,
             title_contains,
+            class_contains,
             pid,
             app_id,
             text,
@@ -3172,6 +3273,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         } => {
             let criteria = WindowWaitCriteria {
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -3180,6 +3282,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             match validate_window_target_options(
                 &window_id,
                 &criteria.title_contains,
+                &criteria.class_contains,
                 criteria.pid,
                 &criteria.app_id,
             )
@@ -3204,6 +3307,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &pasted.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
+                                    "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "selection": &pasted.clipboard.selection,
@@ -3710,6 +3814,7 @@ struct WindowMatchCriteria {
 
 struct WindowWaitCriteria {
     title_contains: Option<String>,
+    class_contains: Option<String>,
     pid: Option<u32>,
     app_id: Option<String>,
     timeout_ms: u64,
@@ -3741,7 +3846,7 @@ fn matching_workspace_windows(
 ) -> Result<Vec<WorkspaceWindow>> {
     let match_criteria = WindowMatchCriteria {
         title_contains: criteria.title_contains.clone(),
-        class_contains: None,
+        class_contains: criteria.class_contains.clone(),
         pid: criteria.pid,
         app_id: criteria.app_id.clone(),
     };
@@ -5103,6 +5208,7 @@ fn sanitize_x11_id(id: &str, label: &str) -> Result<String> {
 
 fn validate_window_match_options(
     title_contains: &Option<String>,
+    class_contains: &Option<String>,
     pid: Option<u32>,
     app_id: &Option<String>,
     require_filter: bool,
@@ -5113,14 +5219,25 @@ fn validate_window_match_options(
     {
         bail!("window title filter cannot be empty");
     }
+    if class_contains
+        .as_ref()
+        .is_some_and(|class| class.trim().is_empty())
+    {
+        bail!("window class filter cannot be empty");
+    }
     if app_id
         .as_ref()
         .is_some_and(|app_id| app_id.trim().is_empty())
     {
         bail!("app id cannot be empty");
     }
-    if require_filter && title_contains.is_none() && pid.is_none() && app_id.is_none() {
-        bail!("window match requires --title, --pid, or --app");
+    if require_filter
+        && title_contains.is_none()
+        && class_contains.is_none()
+        && pid.is_none()
+        && app_id.is_none()
+    {
+        bail!("window match requires --title, --class, --pid, or --app");
     }
     Ok(())
 }
@@ -5131,27 +5248,32 @@ fn validate_window_list_filters(
     pid: Option<u32>,
     app_id: &Option<String>,
 ) -> Result<()> {
-    validate_window_match_options(title_contains, pid, app_id, false)?;
-    if class_contains
-        .as_ref()
-        .is_some_and(|class| class.trim().is_empty())
-    {
-        bail!("window class filter cannot be empty");
-    }
-    Ok(())
+    validate_window_match_options(title_contains, class_contains, pid, app_id, false)
 }
 
 fn validate_window_target_options(
     window_id: &Option<String>,
     title_contains: &Option<String>,
+    class_contains: &Option<String>,
     pid: Option<u32>,
     app_id: &Option<String>,
 ) -> Result<()> {
     if let Some(window_id) = window_id {
         sanitize_x11_id(window_id, "window id")?;
     }
-    validate_window_match_options(title_contains, pid, app_id, window_id.is_none())?;
-    if window_id.is_some() && (title_contains.is_some() || pid.is_some() || app_id.is_some()) {
+    validate_window_match_options(
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+        window_id.is_none(),
+    )?;
+    if window_id.is_some()
+        && (title_contains.is_some()
+            || class_contains.is_some()
+            || pid.is_some()
+            || app_id.is_some())
+    {
         bail!("window target accepts either a window id or match filters, not both");
     }
     Ok(())

@@ -160,11 +160,12 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "wait-window" => {
-            let (id, title_contains, pid, app_id, timeout_ms) =
+            let (id, title_contains, class_contains, pid, app_id, timeout_ms) =
                 parse_wait_window_options(&args[1..])?;
             print_json(&workspace::wait_window(
                 &id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -175,12 +176,21 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::screenshot(&id, output_path)?)
         }
         "screenshot-window" => {
-            let (id, window_id, title_contains, pid, app_id, output_path, timeout_ms) =
-                parse_screenshot_window_options(&args[1..])?;
+            let (
+                id,
+                window_id,
+                title_contains,
+                class_contains,
+                pid,
+                app_id,
+                output_path,
+                timeout_ms,
+            ) = parse_screenshot_window_options(&args[1..])?;
             print_json(&workspace::screenshot_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 output_path,
@@ -195,12 +205,14 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 }
                 FocusWindowTarget::Match {
                     title_contains,
+                    class_contains,
                     pid,
                     app_id,
                     timeout_ms,
                 } => print_json(&workspace::focus_matching_window(
                     &id,
                     title_contains,
+                    class_contains,
                     pid,
                     app_id,
                     timeout_ms,
@@ -215,12 +227,14 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 }
                 CloseWindowTarget::Match {
                     title_contains,
+                    class_contains,
                     pid,
                     app_id,
                     timeout_ms,
                 } => print_json(&workspace::close_matching_window(
                     &id,
                     title_contains,
+                    class_contains,
                     pid,
                     app_id,
                     timeout_ms,
@@ -228,12 +242,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             }
         }
         "move-window" => {
-            let (id, window_id, title_contains, pid, app_id, x, y, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, x, y, timeout_ms) =
                 parse_move_window_options(&args[1..])?;
             print_json(&workspace::move_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 x,
@@ -242,12 +257,22 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "resize-window" => {
-            let (id, window_id, title_contains, pid, app_id, width, height, timeout_ms) =
-                parse_resize_window_options(&args[1..])?;
+            let (
+                id,
+                window_id,
+                title_contains,
+                class_contains,
+                pid,
+                app_id,
+                width,
+                height,
+                timeout_ms,
+            ) = parse_resize_window_options(&args[1..])?;
             print_json(&workspace::resize_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 width,
@@ -256,24 +281,26 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "raise-window" => {
-            let (id, window_id, title_contains, pid, app_id, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, timeout_ms) =
                 parse_targeted_window_action_options(&args[1..], "workspace raise-window")?;
             print_json(&workspace::raise_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
             )?)
         }
         "minimize-window" => {
-            let (id, window_id, title_contains, pid, app_id, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, timeout_ms) =
                 parse_targeted_window_action_options(&args[1..], "workspace minimize-window")?;
             print_json(&workspace::minimize_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 timeout_ms,
@@ -289,12 +316,24 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::click(&id, x, y, button, count)?)
         }
         "click-window" => {
-            let (id, window_id, title_contains, pid, app_id, x, y, button, count, timeout_ms) =
-                parse_click_window_options(&args[1..])?;
+            let (
+                id,
+                window_id,
+                title_contains,
+                class_contains,
+                pid,
+                app_id,
+                x,
+                y,
+                button,
+                count,
+                timeout_ms,
+            ) = parse_click_window_options(&args[1..])?;
             print_json(&workspace::click_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 x,
@@ -309,12 +348,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::move_pointer(&id, x, y)?)
         }
         "move-pointer-window" => {
-            let (id, window_id, title_contains, pid, app_id, x, y, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, x, y, timeout_ms) =
                 parse_move_pointer_window_options(&args[1..])?;
             print_json(&workspace::move_pointer_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 x,
@@ -331,6 +371,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 from_x,
@@ -344,6 +385,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 from_x,
@@ -359,12 +401,24 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::scroll(&id, x, y, direction, amount)?)
         }
         "scroll-window" => {
-            let (id, window_id, title_contains, pid, app_id, x, y, direction, amount, timeout_ms) =
-                parse_scroll_window_options(&args[1..])?;
+            let (
+                id,
+                window_id,
+                title_contains,
+                class_contains,
+                pid,
+                app_id,
+                x,
+                y,
+                direction,
+                amount,
+                timeout_ms,
+            ) = parse_scroll_window_options(&args[1..])?;
             print_json(&workspace::scroll_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 x,
@@ -379,12 +433,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::key(&id, key)?)
         }
         "key-window" => {
-            let (id, window_id, title_contains, pid, app_id, key, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, key, timeout_ms) =
                 parse_key_window_options(&args[1..])?;
             print_json(&workspace::key_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 key,
@@ -396,12 +451,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::type_text(&id, text)?)
         }
         "type-window" => {
-            let (id, window_id, title_contains, pid, app_id, text, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, text, timeout_ms) =
                 parse_type_window_options(&args[1..])?;
             print_json(&workspace::type_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 text,
@@ -421,12 +477,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::paste_text(&id, text, key)?)
         }
         "paste-window" => {
-            let (id, window_id, title_contains, pid, app_id, text, key, timeout_ms) =
+            let (id, window_id, title_contains, class_contains, pid, app_id, text, key, timeout_ms) =
                 parse_paste_window_options(&args[1..])?;
             print_json(&workspace::paste_window(
                 &id,
                 window_id,
                 title_contains,
+                class_contains,
                 pid,
                 app_id,
                 text,
@@ -995,6 +1052,7 @@ type ScreenshotWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     Option<PathBuf>,
@@ -1005,6 +1063,7 @@ fn parse_screenshot_window_options(args: &[String]) -> Result<ScreenshotWindowOp
     let mut id = workspace::default_workspace_id();
     let mut window_id = None;
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut output_path = None;
@@ -1023,6 +1082,10 @@ fn parse_screenshot_window_options(args: &[String]) -> Result<ScreenshotWindowOp
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1068,12 +1131,15 @@ fn parse_screenshot_window_options(args: &[String]) -> Result<ScreenshotWindowOp
         }
         window_id = Some(positional_window_id);
     }
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     if window_id.is_some() && has_match_filter {
         bail!("workspace screenshot-window accepts either a window id or match filters, not both");
     }
     if window_id.is_none() && !has_match_filter {
-        bail!("workspace screenshot-window requires a window id or --title, --pid, or --app");
+        bail!(
+            "workspace screenshot-window requires a window id or --title, --class, --pid, or --app"
+        );
     }
     if window_id.is_some() && timeout_ms.is_some() {
         bail!("workspace screenshot-window accepts --timeout-ms only with match filters");
@@ -1083,6 +1149,7 @@ fn parse_screenshot_window_options(args: &[String]) -> Result<ScreenshotWindowOp
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         output_path,
@@ -1095,12 +1162,14 @@ fn parse_wait_window_options(
 ) -> Result<(
     String,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     Option<u64>,
 )> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1113,6 +1182,10 @@ fn parse_wait_window_options(
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1138,13 +1211,14 @@ fn parse_wait_window_options(
             flag => bail!("unknown workspace wait-window option '{flag}'"),
         }
     }
-    Ok((id, title_contains, pid, app_id, timeout_ms))
+    Ok((id, title_contains, class_contains, pid, app_id, timeout_ms))
 }
 
 enum FocusWindowTarget {
     WindowId(String),
     Match {
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: Option<u64>,
@@ -1155,6 +1229,7 @@ fn parse_focus_window_options(args: &[String]) -> Result<(String, FocusWindowTar
     let mut id = workspace::default_workspace_id();
     let mut window_id = None;
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1167,6 +1242,10 @@ fn parse_focus_window_options(args: &[String]) -> Result<(String, FocusWindowTar
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1202,7 +1281,8 @@ fn parse_focus_window_options(args: &[String]) -> Result<(String, FocusWindowTar
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     if let Some(window_id) = window_id {
         if has_match_filter || timeout_ms.is_some() {
             bail!("workspace focus-window accepts either a window id or match options, not both");
@@ -1210,12 +1290,13 @@ fn parse_focus_window_options(args: &[String]) -> Result<(String, FocusWindowTar
         return Ok((id, FocusWindowTarget::WindowId(window_id)));
     }
     if !has_match_filter {
-        bail!("workspace focus-window requires a window id or --title, --pid, or --app");
+        bail!("workspace focus-window requires a window id or --title, --class, --pid, or --app");
     }
     Ok((
         id,
         FocusWindowTarget::Match {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
@@ -1227,6 +1308,7 @@ enum CloseWindowTarget {
     WindowId(String),
     Match {
         title_contains: Option<String>,
+        class_contains: Option<String>,
         pid: Option<u32>,
         app_id: Option<String>,
         timeout_ms: Option<u64>,
@@ -1237,6 +1319,7 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
     let mut id = workspace::default_workspace_id();
     let mut window_id = None;
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1249,6 +1332,10 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1284,7 +1371,8 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     if let Some(window_id) = window_id {
         if has_match_filter || timeout_ms.is_some() {
             bail!("workspace close-window accepts either a window id or match options, not both");
@@ -1292,12 +1380,13 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
         return Ok((id, CloseWindowTarget::WindowId(window_id)));
     }
     if !has_match_filter {
-        bail!("workspace close-window requires a window id or --title, --pid, or --app");
+        bail!("workspace close-window requires a window id or --title, --class, --pid, or --app");
     }
     Ok((
         id,
         CloseWindowTarget::Match {
             title_contains,
+            class_contains,
             pid,
             app_id,
             timeout_ms,
@@ -1309,6 +1398,7 @@ type MoveWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     i32,
@@ -1317,9 +1407,10 @@ type MoveWindowOptions = (
 );
 
 fn parse_move_window_options(args: &[String]) -> Result<MoveWindowOptions> {
-    let (id, title_contains, pid, app_id, timeout_ms, values) =
+    let (id, title_contains, class_contains, pid, app_id, timeout_ms, values) =
         parse_window_target_values(args, "workspace move-window")?;
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, x_value, y_value) = if has_match_filter {
         if values.len() != 2 {
             bail!("workspace move-window with match filters requires X and Y coordinates");
@@ -1340,11 +1431,22 @@ fn parse_move_window_options(args: &[String]) -> Result<MoveWindowOptions> {
     let y = y_value
         .parse()
         .context("move-window Y must be an integer")?;
-    Ok((id, window_id, title_contains, pid, app_id, x, y, timeout_ms))
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+        x,
+        y,
+        timeout_ms,
+    ))
 }
 
 type ResizeWindowOptions = (
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<u32>,
@@ -1355,9 +1457,10 @@ type ResizeWindowOptions = (
 );
 
 fn parse_resize_window_options(args: &[String]) -> Result<ResizeWindowOptions> {
-    let (id, title_contains, pid, app_id, timeout_ms, values) =
+    let (id, title_contains, class_contains, pid, app_id, timeout_ms, values) =
         parse_window_target_values(args, "workspace resize-window")?;
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, width_value, height_value) = if has_match_filter {
         if values.len() != 2 {
             bail!("workspace resize-window with match filters requires WIDTH and HEIGHT");
@@ -1382,6 +1485,7 @@ fn parse_resize_window_options(args: &[String]) -> Result<ResizeWindowOptions> {
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         width,
@@ -1394,6 +1498,7 @@ type TargetedWindowActionOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     Option<u64>,
@@ -1403,9 +1508,10 @@ fn parse_targeted_window_action_options(
     args: &[String],
     command_name: &str,
 ) -> Result<TargetedWindowActionOptions> {
-    let (id, title_contains, pid, app_id, timeout_ms, values) =
+    let (id, title_contains, class_contains, pid, app_id, timeout_ms, values) =
         parse_window_target_values(args, command_name)?;
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let window_id = if has_match_filter {
         if !values.is_empty() {
             bail!("{command_name} with match filters does not accept a window id");
@@ -1420,7 +1526,15 @@ fn parse_targeted_window_action_options(
         }
         Some(values[0].clone())
     };
-    Ok((id, window_id, title_contains, pid, app_id, timeout_ms))
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+        timeout_ms,
+    ))
 }
 
 fn parse_click_options(args: &[String]) -> Result<(String, i32, i32, Option<u8>, Option<u8>)> {
@@ -1470,6 +1584,7 @@ type ClickWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     i32,
@@ -1482,6 +1597,7 @@ type ClickWindowOptions = (
 fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1497,6 +1613,10 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1545,7 +1665,8 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, x_value, y_value) = if has_match_filter {
         if values.len() != 2 {
             bail!("workspace click-window with match filters requires X and Y coordinates");
@@ -1570,6 +1691,7 @@ fn parse_click_window_options(args: &[String]) -> Result<ClickWindowOptions> {
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         x,
@@ -1615,6 +1737,7 @@ type MovePointerWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     i32,
@@ -1625,6 +1748,7 @@ type MovePointerWindowOptions = (
 fn parse_move_pointer_window_options(args: &[String]) -> Result<MovePointerWindowOptions> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1638,6 +1762,10 @@ fn parse_move_pointer_window_options(args: &[String]) -> Result<MovePointerWindo
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1670,7 +1798,8 @@ fn parse_move_pointer_window_options(args: &[String]) -> Result<MovePointerWindo
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, x_value, y_value) = if has_match_filter {
         if values.len() != 2 {
             bail!("workspace move-pointer-window with match filters requires X and Y coordinates");
@@ -1691,7 +1820,17 @@ fn parse_move_pointer_window_options(args: &[String]) -> Result<MovePointerWindo
     let y = y_value
         .parse()
         .context("move-pointer-window Y must be an integer")?;
-    Ok((id, window_id, title_contains, pid, app_id, x, y, timeout_ms))
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+        x,
+        y,
+        timeout_ms,
+    ))
 }
 
 fn parse_drag_options(args: &[String]) -> Result<(String, i32, i32, i32, i32, Option<u8>)> {
@@ -1738,6 +1877,7 @@ type DragWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     i32,
@@ -1751,6 +1891,7 @@ type DragWindowOptions = (
 fn parse_drag_window_options(args: &[String]) -> Result<DragWindowOptions> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1765,6 +1906,10 @@ fn parse_drag_window_options(args: &[String]) -> Result<DragWindowOptions> {
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1805,7 +1950,8 @@ fn parse_drag_window_options(args: &[String]) -> Result<DragWindowOptions> {
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, coordinate_values) = if has_match_filter {
         if values.len() != 4 {
             bail!(
@@ -1838,6 +1984,7 @@ fn parse_drag_window_options(args: &[String]) -> Result<DragWindowOptions> {
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         from_x,
@@ -1892,6 +2039,7 @@ type ScrollWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     i32,
@@ -1904,6 +2052,7 @@ type ScrollWindowOptions = (
 fn parse_scroll_window_options(args: &[String]) -> Result<ScrollWindowOptions> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -1918,6 +2067,10 @@ fn parse_scroll_window_options(args: &[String]) -> Result<ScrollWindowOptions> {
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -1958,7 +2111,8 @@ fn parse_scroll_window_options(args: &[String]) -> Result<ScrollWindowOptions> {
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, x_value, y_value, direction_value) = if has_match_filter {
         if values.len() != 3 {
             bail!("workspace scroll-window with match filters requires X Y DIRECTION");
@@ -1986,6 +2140,7 @@ fn parse_scroll_window_options(args: &[String]) -> Result<ScrollWindowOptions> {
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         x,
@@ -1999,6 +2154,7 @@ fn parse_scroll_window_options(args: &[String]) -> Result<ScrollWindowOptions> {
 type WindowTargetValues = (
     String,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     Option<u64>,
@@ -2008,6 +2164,7 @@ type WindowTargetValues = (
 fn parse_window_target_values(args: &[String], command_name: &str) -> Result<WindowTargetValues> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -2021,6 +2178,10 @@ fn parse_window_target_values(args: &[String], command_name: &str) -> Result<Win
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -2050,11 +2211,20 @@ fn parse_window_target_values(args: &[String], command_name: &str) -> Result<Win
             }
         }
     }
-    Ok((id, title_contains, pid, app_id, timeout_ms, values))
+    Ok((
+        id,
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+        timeout_ms,
+        values,
+    ))
 }
 
 type KeyWindowOptions = (
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<u32>,
@@ -2064,9 +2234,10 @@ type KeyWindowOptions = (
 );
 
 fn parse_key_window_options(args: &[String]) -> Result<KeyWindowOptions> {
-    let (id, title_contains, pid, app_id, timeout_ms, values) =
+    let (id, title_contains, class_contains, pid, app_id, timeout_ms, values) =
         parse_window_target_values(args, "workspace key-window")?;
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, key) = if has_match_filter {
         if values.len() != 1 {
             bail!("workspace key-window with match filters requires a key");
@@ -2081,11 +2252,21 @@ fn parse_key_window_options(args: &[String]) -> Result<KeyWindowOptions> {
         }
         (Some(values[0].clone()), values[1].clone())
     };
-    Ok((id, window_id, title_contains, pid, app_id, key, timeout_ms))
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        class_contains,
+        pid,
+        app_id,
+        key,
+        timeout_ms,
+    ))
 }
 
 type TypeWindowOptions = (
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<u32>,
@@ -2095,9 +2276,10 @@ type TypeWindowOptions = (
 );
 
 fn parse_type_window_options(args: &[String]) -> Result<TypeWindowOptions> {
-    let (id, title_contains, pid, app_id, timeout_ms, values) =
+    let (id, title_contains, class_contains, pid, app_id, timeout_ms, values) =
         parse_window_target_values(args, "workspace type-window")?;
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, text_values) = if has_match_filter {
         if values.is_empty() {
             bail!("workspace type-window with match filters requires text");
@@ -2116,6 +2298,7 @@ fn parse_type_window_options(args: &[String]) -> Result<TypeWindowOptions> {
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         text_values.join(" "),
@@ -2179,6 +2362,7 @@ type PasteWindowOptions = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
     Option<u32>,
     Option<String>,
     String,
@@ -2189,6 +2373,7 @@ type PasteWindowOptions = (
 fn parse_paste_window_options(args: &[String]) -> Result<PasteWindowOptions> {
     let mut id = workspace::default_workspace_id();
     let mut title_contains = None;
+    let mut class_contains = None;
     let mut pid = None;
     let mut app_id = None;
     let mut timeout_ms = None;
@@ -2203,6 +2388,10 @@ fn parse_paste_window_options(args: &[String]) -> Result<PasteWindowOptions> {
             }
             "--title" => {
                 title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--class" => {
+                class_contains = Some(value_after(args, index, "--class")?.to_string());
                 index += 2;
             }
             "--pid" => {
@@ -2239,7 +2428,8 @@ fn parse_paste_window_options(args: &[String]) -> Result<PasteWindowOptions> {
         }
     }
 
-    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let has_match_filter =
+        title_contains.is_some() || class_contains.is_some() || pid.is_some() || app_id.is_some();
     let (window_id, text_values) = if has_match_filter {
         if values.is_empty() {
             bail!("workspace paste-window with match filters requires text");
@@ -2258,6 +2448,7 @@ fn parse_paste_window_options(args: &[String]) -> Result<PasteWindowOptions> {
         id,
         window_id,
         title_contains,
+        class_contains,
         pid,
         app_id,
         text_values.join(" "),
@@ -2584,46 +2775,46 @@ Usage:
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]
-  agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace screenshot [--id ID] [--output PATH]
-  agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--output PATH] [--timeout-ms N]
+  agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--output PATH] [--timeout-ms N]
   agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace close-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace move-window [--id ID] WINDOW_ID X Y
-  agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
+  agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
   agent-workspace-linux workspace resize-window [--id ID] WINDOW_ID WIDTH HEIGHT
-  agent-workspace-linux workspace resize-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] WIDTH HEIGHT
+  agent-workspace-linux workspace resize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] WIDTH HEIGHT
   agent-workspace-linux workspace raise-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace raise-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace raise-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace minimize-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace minimize-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace minimize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace show-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace click [--id ID] [--button N] [--count N] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y
-  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--count N] [--timeout-ms N] X Y
+  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--count N] [--timeout-ms N] X Y
   agent-workspace-linux workspace move-pointer [--id ID] X Y
   agent-workspace-linux workspace move-pointer-window [--id ID] WINDOW_ID X Y
-  agent-workspace-linux workspace move-pointer-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
+  agent-workspace-linux workspace move-pointer-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
   agent-workspace-linux workspace drag [--id ID] [--button N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace drag-window [--id ID] [--button N] WINDOW_ID FROM_X FROM_Y TO_X TO_Y
-  agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
+  agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace scroll [--id ID] [--amount N] X Y up|down|left|right
   agent-workspace-linux workspace scroll-window [--id ID] [--amount N] WINDOW_ID X Y up|down|left|right
-  agent-workspace-linux workspace scroll-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--amount N] [--timeout-ms N] X Y up|down|left|right
+  agent-workspace-linux workspace scroll-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--amount N] [--timeout-ms N] X Y up|down|left|right
   agent-workspace-linux workspace key [--id ID] KEY
   agent-workspace-linux workspace key-window [--id ID] WINDOW_ID KEY
-  agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY
+  agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY
   agent-workspace-linux workspace type [--id ID] TEXT
   agent-workspace-linux workspace type-window [--id ID] WINDOW_ID TEXT
-  agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] TEXT
+  agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] TEXT
   agent-workspace-linux workspace clipboard-set [--id ID] TEXT
   agent-workspace-linux workspace clipboard-get [--id ID]
   agent-workspace-linux workspace paste [--id ID] [--key KEY] TEXT
   agent-workspace-linux workspace paste-window [--id ID] [--key KEY] WINDOW_ID TEXT
-  agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--key KEY] [--timeout-ms N] TEXT
+  agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--key KEY] [--timeout-ms N] TEXT
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID
   agent-workspace-linux workspace events [--id ID] [--tail N]

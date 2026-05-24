@@ -60,13 +60,14 @@ cargo run -- workspace active-window
 cargo run -- workspace observe --screenshot --output /tmp/agent-observe.png
 cargo run -- workspace observe --all-windows
 cargo run -- workspace wait-window --title xterm --timeout-ms 10000
+cargo run -- workspace wait-window --class xterm --timeout-ms 10000
 cargo run -- workspace screenshot --output /tmp/agent-workspace.png
-cargo run -- workspace screenshot-window --title xterm --output /tmp/agent-window.png
+cargo run -- workspace screenshot-window --class xterm --output /tmp/agent-window.png
 cargo run -- workspace focus-window 4194316
-cargo run -- workspace focus-window --title xterm --timeout-ms 10000
+cargo run -- workspace focus-window --class xterm --timeout-ms 10000
 cargo run -- workspace close-window 4194316
 cargo run -- workspace close-window --title xterm --timeout-ms 10000
-cargo run -- workspace move-window --title xterm 80 60
+cargo run -- workspace move-window --class xterm 80 60
 cargo run -- workspace resize-window --title xterm 800 500
 cargo run -- workspace raise-window --title xterm
 cargo run -- workspace minimize-window --title xterm
@@ -170,7 +171,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   hidden-window listing as `windows --all`. `focus-window`, `screenshot-window`,
   `close-window`, `move-window`, `resize-window`, `raise-window`,
   `minimize-window`, `key-window`, and `type-window` can use either a raw X11
-  window id or the same title/pid/app filters as `wait-window`; app filters
+  window id or the same title/class/pid/app filters as `wait-window`; class
+  filters match `wm_class` and `wm_instance`, while app filters
   match the launched process and its child processes. `move-window` and
   `resize-window` update the returned window geometry so screenshots and
   interactions can be staged predictably. `raise-window`, `minimize-window`,
@@ -226,7 +228,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_type_window`, `workspace_set_clipboard`, `workspace_get_clipboard`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
-`workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` can filter
-by title, class, pid, or app id and accepts `include_hidden=true` to return
-minimized/hidden windows as well as visible windows. `workspace_observe` also
-accepts `include_hidden=true`.
+`workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` and
+window-targeted tools can filter by title, class, pid, or app id, with class
+matching `wm_class` and `wm_instance`. `workspace_list_windows` accepts
+`include_hidden=true` to return minimized/hidden windows as well as visible
+windows. `workspace_observe` also accepts `include_hidden=true`.

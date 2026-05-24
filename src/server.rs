@@ -512,6 +512,7 @@ impl AgentWorkspaceLinux {
         Json(result_response(workspace::wait_window(
             &id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.timeout_ms,
@@ -543,7 +544,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_screenshot_window",
-        description = "Capture a screenshot of a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters.",
+        description = "Capture a screenshot of a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -562,6 +563,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.output_path,
@@ -594,7 +596,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_focus_matching_window",
-        description = "Wait for and focus a visible window inside an isolated agent workspace, filtered by title substring, pid, or launched app id/pid.",
+        description = "Wait for and focus a visible window inside an isolated agent workspace, filtered by title substring, class substring, pid, or launched app id/pid.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -612,6 +614,7 @@ impl AgentWorkspaceLinux {
         Json(result_response(workspace::focus_matching_window(
             &id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.timeout_ms,
@@ -643,7 +646,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_close_matching_window",
-        description = "Wait for and request close of a visible window inside an isolated agent workspace, filtered by title substring, pid, or launched app id/pid.",
+        description = "Wait for and request close of a visible window inside an isolated agent workspace, filtered by title substring, class substring, pid, or launched app id/pid.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
@@ -661,6 +664,7 @@ impl AgentWorkspaceLinux {
         Json(result_response(workspace::close_matching_window(
             &id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.timeout_ms,
@@ -669,7 +673,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_move_window",
-        description = "Move a visible window inside an isolated agent workspace by X11 id or by title/pid/app filters. Coordinates are workspace-local top-left pixels.",
+        description = "Move a visible window inside an isolated agent workspace by X11 id or by title/class/pid/app filters. Coordinates are workspace-local top-left pixels.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -688,6 +692,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.x,
@@ -698,7 +703,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_resize_window",
-        description = "Resize a visible window inside an isolated agent workspace by X11 id or by title/pid/app filters. Size is in pixels.",
+        description = "Resize a visible window inside an isolated agent workspace by X11 id or by title/class/pid/app filters. Size is in pixels.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -717,6 +722,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.width,
@@ -727,7 +733,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_raise_window",
-        description = "Raise a visible window inside an isolated agent workspace above other windows, targeted by X11 id or title/pid/app filters.",
+        description = "Raise a visible window inside an isolated agent workspace above other windows, targeted by X11 id or title/class/pid/app filters.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -746,6 +752,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.timeout_ms,
@@ -754,7 +761,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_minimize_window",
-        description = "Minimize a visible window inside an isolated agent workspace, targeted by X11 id or title/pid/app filters.",
+        description = "Minimize a visible window inside an isolated agent workspace, targeted by X11 id or title/class/pid/app filters.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -773,6 +780,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.timeout_ms,
@@ -830,7 +838,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_click_window",
-        description = "Click a coordinate relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters, optionally setting button and repeat count.",
+        description = "Click a coordinate relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, optionally setting button and repeat count.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -849,6 +857,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.x,
@@ -883,7 +892,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_move_pointer_window",
-        description = "Move the pointer to coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters, without clicking.",
+        description = "Move the pointer to coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, without clicking.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -902,6 +911,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.x,
@@ -939,7 +949,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_drag_window",
-        description = "Drag between coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters, optionally setting the mouse button.",
+        description = "Drag between coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters, optionally setting the mouse button.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -958,6 +968,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.from_x,
@@ -997,7 +1008,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_scroll_window",
-        description = "Scroll at coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters. Direction is up, down, left, or right; amount is wheel ticks.",
+        description = "Scroll at coordinates relative to a visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Direction is up, down, left, or right; amount is wheel ticks.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1016,6 +1027,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.x,
@@ -1048,7 +1060,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_key_window",
-        description = "Send a key chord to a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters.",
+        description = "Send a key chord to a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1067,6 +1079,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.key,
@@ -1096,7 +1109,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_type_window",
-        description = "Type literal text into a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/pid/app filters.",
+        description = "Type literal text into a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1115,6 +1128,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.text,
@@ -1188,7 +1202,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_paste_window",
-        description = "Set the isolated workspace clipboard to text, focus a visible window by X11 id/title/pid/app filter, then send a paste key chord. Defaults to ctrl+v. Event logs store only size metadata, not the raw text.",
+        description = "Set the isolated workspace clipboard to text, focus a visible window by X11 id/title/class/pid/app filter, then send a paste key chord. Defaults to ctrl+v. Event logs store only size metadata, not the raw text.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1207,6 +1221,7 @@ impl AgentWorkspaceLinux {
             &id,
             params.window_id,
             params.title_contains,
+            params.class_contains,
             params.pid,
             params.app_id,
             params.text,
@@ -1414,7 +1429,7 @@ impl AgentWorkspaceLinux {
 #[tool_handler(
     name = "agent-workspace-linux",
     version = "0.1.0",
-    instructions = "Use workspace_doctor to check runtime readiness and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_template/profile_put/profile_delete to manage saved environment profiles. profile_template can generate starter JSON such as project-dev before saving with profile_put. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when bubblewrap is available; network allowlists are still declared but not enforced by the X11 runtime. workspace_status reports the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_open_profile to start a profile-backed workspace, optionally run setup, and open startup apps in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_focus_matching_window, workspace_close_window, workspace_close_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click, workspace_click_window, workspace_move_pointer, workspace_move_pointer_window, workspace_drag, workspace_drag_window, workspace_scroll, workspace_scroll_window, workspace_key, workspace_key_window, workspace_type_text, workspace_type_window, workspace_set_clipboard, workspace_get_clipboard, workspace_paste_text, and workspace_paste_window run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_wait_window, workspace_active_window, workspace_observe, workspace_focus_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click_window, workspace_move_pointer_window, workspace_drag_window, workspace_scroll_window, workspace_key_window, workspace_type_window, or workspace_paste_window after launching GUI apps. Prefer window-targeted tools when acting on a specific app window rather than the workspace root or current focus. Use workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, and workspace_show_window to arrange app windows before screenshots or repeated QA interactions. Use workspace_list_windows with title_contains, class_contains, pid, or app_id filters to inspect specific current app windows. Use workspace_list_windows or workspace_observe with include_hidden=true when a minimized or hidden app needs to be found again; returned windows include wm_class, wm_instance, and app_id when X11/process metadata is available. Use workspace_paste_text or workspace_paste_window when inserting long text is more reliable than synthetic typing. Use workspace_run_profile_setup with wait=true when setup command completion matters. Use workspace_observe, workspace_screenshot, workspace_screenshot_window, workspace_list_windows, workspace_active_window, workspace_wait_app, workspace_read_app_log, workspace_get_clipboard, and workspace_events to inspect the workspace before acting. workspace_screenshot_window captures a specific app window by id/title/pid/app filters. workspace_events records IPC activity without storing raw typed text, raw clipboard-set text, or raw pasted text. workspace_close_window, workspace_close_matching_window, workspace_kill_app, workspace_minimize_window, and workspace_show_window affect only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
+    instructions = "Use workspace_doctor to check runtime readiness and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_template/profile_put/profile_delete to manage saved environment profiles. profile_template can generate starter JSON such as project-dev before saving with profile_put. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when bubblewrap is available; network allowlists are still declared but not enforced by the X11 runtime. workspace_status reports the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale to remove unreachable runtime directories. Use workspace_open_profile to start a profile-backed workspace, optionally run setup, and open startup apps in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_focus_matching_window, workspace_close_window, workspace_close_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click, workspace_click_window, workspace_move_pointer, workspace_move_pointer_window, workspace_drag, workspace_drag_window, workspace_scroll, workspace_scroll_window, workspace_key, workspace_key_window, workspace_type_text, workspace_type_window, workspace_set_clipboard, workspace_get_clipboard, workspace_paste_text, and workspace_paste_window run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_wait_window, workspace_active_window, workspace_observe, workspace_focus_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click_window, workspace_move_pointer_window, workspace_drag_window, workspace_scroll_window, workspace_key_window, workspace_type_window, or workspace_paste_window after launching GUI apps. Prefer window-targeted tools when acting on a specific app window rather than the workspace root or current focus. Window match filters accept title_contains, class_contains, pid, or app_id; class_contains matches wm_class and wm_instance. Use workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, and workspace_show_window to arrange app windows before screenshots or repeated QA interactions. Use workspace_list_windows with title_contains, class_contains, pid, or app_id filters to inspect specific current app windows. Use workspace_list_windows or workspace_observe with include_hidden=true when a minimized or hidden app needs to be found again; returned windows include wm_class, wm_instance, and app_id when X11/process metadata is available. Use workspace_paste_text or workspace_paste_window when inserting long text is more reliable than synthetic typing. Use workspace_run_profile_setup with wait=true when setup command completion matters. Use workspace_observe, workspace_screenshot, workspace_screenshot_window, workspace_list_windows, workspace_active_window, workspace_wait_app, workspace_read_app_log, workspace_get_clipboard, and workspace_events to inspect the workspace before acting. workspace_screenshot_window captures a specific app window by id/title/class/pid/app filters. workspace_events records IPC activity without storing raw typed text, raw clipboard-set text, or raw pasted text. workspace_close_window, workspace_close_matching_window, workspace_kill_app, workspace_minimize_window, and workspace_show_window affect only workspace-local windows/apps. workspace_stop terminates the workspace and apps launched inside it."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
 
@@ -1725,6 +1740,7 @@ struct WorkspaceScreenshotWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1748,6 +1764,7 @@ struct WorkspaceWaitWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1764,6 +1781,7 @@ struct WorkspaceMoveWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1782,6 +1800,7 @@ struct WorkspaceResizeWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1800,6 +1819,7 @@ struct WorkspaceTargetedWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1828,6 +1848,7 @@ struct WorkspaceClickWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1858,6 +1879,7 @@ struct WorkspacePointerWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1888,6 +1910,7 @@ struct WorkspaceDragWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1921,6 +1944,7 @@ struct WorkspaceScrollWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1949,6 +1973,7 @@ struct WorkspaceKeyWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -1973,6 +1998,7 @@ struct WorkspaceTypeWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
@@ -2006,6 +2032,7 @@ struct WorkspacePasteWindowParams {
     #[serde(default)]
     title_contains: Option<String>,
     #[serde(default)]
+    class_contains: Option<String>,
     pid: Option<u32>,
     #[serde(default)]
     app_id: Option<String>,
