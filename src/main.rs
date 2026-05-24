@@ -135,8 +135,15 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             )?)
         }
         "windows" => {
-            let (id, include_hidden) = parse_windows_options(&args[1..])?;
-            print_json(&workspace::list_windows(&id, include_hidden)?)
+            let (id, include_hidden, title_contains, pid, app_id) =
+                parse_windows_options(&args[1..])?;
+            print_json(&workspace::list_windows(
+                &id,
+                include_hidden,
+                title_contains,
+                pid,
+                app_id,
+            )?)
         }
         "active-window" => {
             let id = parse_id_option(&args[1..])?;
@@ -621,9 +628,14 @@ fn parse_id_option(args: &[String]) -> Result<String> {
     Ok(id)
 }
 
-fn parse_windows_options(args: &[String]) -> Result<(String, bool)> {
+fn parse_windows_options(
+    args: &[String],
+) -> Result<(String, bool, Option<String>, Option<u32>, Option<String>)> {
     let mut id = workspace::default_workspace_id();
     let mut include_hidden = false;
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -635,10 +647,26 @@ fn parse_windows_options(args: &[String]) -> Result<(String, bool)> {
                 include_hidden = true;
                 index += 1;
             }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
             flag => bail!("unknown workspace windows option '{flag}'"),
         }
     }
-    Ok((id, include_hidden))
+    Ok((id, include_hidden, title_contains, pid, app_id))
 }
 
 fn parse_no_options(args: &[String], command: &str) -> Result<()> {
@@ -2533,8 +2561,7 @@ Usage:
   agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
-  agent-workspace-linux workspace windows [--id ID]
-  agent-workspace-linux workspace windows [--id ID] --all
+  agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]
   agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]

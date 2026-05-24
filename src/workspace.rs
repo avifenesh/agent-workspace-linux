@@ -330,6 +330,9 @@ pub enum IpcRequest {
     ListWindows {
         #[serde(default)]
         include_hidden: bool,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
     },
     ActiveWindow,
     Observe {
@@ -817,11 +820,23 @@ fn validate_launch_policy_ack(spec: &LaunchSpec) -> Result<()> {
     Ok(())
 }
 
-pub fn list_windows(id: &str, include_hidden: bool) -> Result<IpcResponse> {
+pub fn list_windows(
+    id: &str,
+    include_hidden: bool,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
+    validate_window_match_options(&title_contains, pid, &app_id, false)?;
     request(
         &workspace_socket_path(&id),
-        IpcRequest::ListWindows { include_hidden },
+        IpcRequest::ListWindows {
+            include_hidden,
+            title_contains,
+            pid,
+            app_id,
+        },
     )
 }
 
@@ -1810,8 +1825,26 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
-        IpcRequest::ListWindows { include_hidden } => {
-            match list_workspace_windows(&state.status, include_hidden) {
+        IpcRequest::ListWindows {
+            include_hidden,
+            title_contains,
+            pid,
+            app_id,
+        } => {
+            let criteria = WindowMatchCriteria {
+                title_contains,
+                pid,
+                app_id,
+            };
+            match validate_window_match_options(
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+                false,
+            )
+            .and_then(|()| refresh_apps(state))
+            .and_then(|()| list_matching_workspace_windows(state, include_hidden, &criteria))
+            {
                 Ok(windows) => {
                     record_event(
                         state,
@@ -1819,6 +1852,9 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         serde_json::json!({
                             "count": windows.len(),
                             "include_hidden": include_hidden,
+                            "title_contains": criteria.title_contains.as_deref(),
+                            "pid": criteria.pid,
+                            "app_id": criteria.app_id.as_deref(),
                         }),
                     )?;
                     let mut response =
@@ -3655,6 +3691,12 @@ fn observe_workspace(
     })
 }
 
+struct WindowMatchCriteria {
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+}
+
 struct WindowWaitCriteria {
     title_contains: Option<String>,
     pid: Option<u32>,
@@ -3686,6 +3728,19 @@ fn matching_workspace_windows(
     state: &DaemonState,
     criteria: &WindowWaitCriteria,
 ) -> Result<Vec<WorkspaceWindow>> {
+    let match_criteria = WindowMatchCriteria {
+        title_contains: criteria.title_contains.clone(),
+        pid: criteria.pid,
+        app_id: criteria.app_id.clone(),
+    };
+    list_matching_workspace_windows(state, false, &match_criteria)
+}
+
+fn list_matching_workspace_windows(
+    state: &DaemonState,
+    include_hidden: bool,
+    criteria: &WindowMatchCriteria,
+) -> Result<Vec<WorkspaceWindow>> {
     let app_root_pid = criteria.app_id.as_ref().and_then(|app_id| {
         state
             .status
@@ -3694,7 +3749,7 @@ fn matching_workspace_windows(
             .find(|app| matches_app_id(app, app_id))
             .map(|app| app.pid)
     });
-    Ok(list_workspace_windows(&state.status, false)?
+    Ok(list_workspace_windows(&state.status, include_hidden)?
         .into_iter()
         .filter(|window| {
             criteria
