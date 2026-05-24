@@ -171,6 +171,8 @@ pub struct WorkspaceStatus {
     pub xauthority_path: PathBuf,
     pub x_server_pid: u32,
     pub window_manager_pid: Option<u32>,
+    #[serde(default)]
+    pub last_event_sequence: u64,
     pub apps: Vec<WorkspaceApp>,
 }
 
@@ -1710,6 +1712,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
             xauthority_path: options.xauthority_path,
             x_server_pid: x_server.id(),
             window_manager_pid: window_manager.as_ref().map(Child::id),
+            last_event_sequence: 0,
             apps: Vec::new(),
         },
         apps: Vec::new(),
@@ -1894,6 +1897,7 @@ fn record_event(
         detail,
     };
     state.next_event_sequence += 1;
+    state.status.last_event_sequence = event.sequence;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)

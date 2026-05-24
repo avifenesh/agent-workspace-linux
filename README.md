@@ -238,10 +238,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   profile ids when a profile shaped the workspace or app. It also reports the
   start timestamp, hidden-workspace acknowledgement, unenforced-policy
   acknowledgement, applied policy snapshot, policy backend candidates discovered
-  at start time, and which parts are currently enforced. `workspace status` and
-  `workspace stop` talk to the same socket. `workspace stop` waits for the
-  daemon IPC socket to close before returning; `--timeout-ms` overrides the
-  default 30000ms wait.
+  at start time, which parts are currently enforced, and the last event sequence
+  for incremental event polling. `workspace status` and `workspace stop` talk to
+  the same socket. `workspace stop` waits for the daemon IPC socket to close
+  before returning; `--timeout-ms` overrides the default 30000ms wait.
 - `workspace ipc-info` reports daemon IPC protocol metadata for the workspace,
   including protocol version, Unix socket path, framing, and encoding.
 
