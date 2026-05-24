@@ -4215,9 +4215,10 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         command.args(&spec.command[1..]);
         command
     };
+    for env_var in workspace_environment(&state.status).variables {
+        child_command.env(env_var.name, env_var.value);
+    }
     child_command
-        .env("DISPLAY", &state.status.display)
-        .env("XAUTHORITY", &state.status.xauthority_path)
         .stdin(Stdio::null())
         .stdout(Stdio::from(
             fs::File::create(&log_paths.stdout)

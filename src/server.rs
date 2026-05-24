@@ -398,7 +398,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_app",
-        description = "Launch an optionally named app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. Set screenshot_window=true to also capture the first visible launched-app window; this implies waiting for a window. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
+        description = "Launch an optionally named app inside an isolated agent workspace. The command runs with the workspace attachment environment, including DISPLAY, XAUTHORITY, AGENT_WORKSPACE_ID, AGENT_WORKSPACE_RUNTIME_DIR, and AGENT_WORKSPACE_SOCKET. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. Set screenshot_window=true to also capture the first visible launched-app window; this implies waiting for a window. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
