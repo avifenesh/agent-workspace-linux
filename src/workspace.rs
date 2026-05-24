@@ -319,6 +319,39 @@ pub struct WorkspaceStartPreview {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceLaunchPreview {
+    pub id: String,
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<EnvVar>,
+    pub wait_window: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_timeout_ms: Option<u64>,
+    pub screenshot_window: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub user_acknowledged_unenforced_policy: bool,
+    pub requires_unenforced_policy_ack: bool,
+    pub missing_unenforced_policy_ack: bool,
+    pub can_acknowledge_unenforced_policy: bool,
+    pub blocks_unenforced_policy: bool,
+    pub workspace_running: bool,
+    pub ok_to_launch: bool,
+    pub would_launch: bool,
+    pub mount_isolation: String,
+    pub network_isolation: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blockers: Vec<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceApp {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -773,6 +806,8 @@ pub struct IpcResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_preview: Option<WorkspaceStartPreview>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_preview: Option<WorkspaceLaunchPreview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ipc: Option<WorkspaceIpcInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<WorkspaceEnvironment>,
@@ -878,6 +913,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             apps: Some(status.apps.clone()),
             status: Some(status),
             start_preview: None,
+            launch_preview: None,
             ipc: None,
             environment: None,
             windows: None,
@@ -903,6 +939,7 @@ pub fn preview_workspace_start(options: WorkspaceStartOptions) -> Result<IpcResp
         message: "workspace start dry run returned".to_string(),
         status: None,
         start_preview: Some(preview),
+        launch_preview: None,
         ipc: None,
         environment: None,
         apps: None,
@@ -1275,6 +1312,129 @@ pub fn launch_app_with_options(
             screenshot_window,
         },
     )
+}
+
+pub fn preview_launch_app(
+    id: &str,
+    spec: LaunchSpec,
+    wait_window: bool,
+    window_timeout_ms: Option<u64>,
+    screenshot_window: bool,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_launch_spec(&spec)?;
+
+    let launch_policy = spec.applied_policy.clone();
+    let blocks_unenforced_policy = launch_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::blocks_requested_unenforced_policy);
+    let can_acknowledge_unenforced_policy = launch_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::can_acknowledge_unenforced_policy);
+    let requires_unenforced_policy_ack = can_acknowledge_unenforced_policy;
+    let missing_unenforced_policy_ack =
+        requires_unenforced_policy_ack && !spec.user_acknowledged_unenforced_policy;
+
+    let mut blockers = Vec::new();
+    if blocks_unenforced_policy {
+        blockers.push(
+            "launch profile requires full policy enforcement, but this runtime cannot enforce all requested policy"
+                .to_string(),
+        );
+    }
+    if missing_unenforced_policy_ack {
+        blockers.push(
+            "launch profile requests unenforced policy and requires acknowledgement".to_string(),
+        );
+    }
+
+    let mut workspace_running = false;
+    let mut status = None;
+    let mut applied_policy = launch_policy.clone();
+    let (mut mount_isolation, mut network_isolation) =
+        launch_isolation_labels_for_policy(applied_policy.as_ref());
+
+    match status_workspace(&id) {
+        Ok(running_status) => {
+            workspace_running = true;
+            applied_policy = spec
+                .applied_policy
+                .clone()
+                .or_else(|| running_status.applied_policy.clone());
+            (mount_isolation, network_isolation) =
+                launch_isolation_labels_for_policy(applied_policy.as_ref());
+            if !blocks_unenforced_policy && !missing_unenforced_policy_ack {
+                match bubblewrap_sandbox_for_launch(
+                    &running_status,
+                    applied_policy.as_ref(),
+                    spec.cwd.as_deref(),
+                ) {
+                    Ok(sandbox) => {
+                        (mount_isolation, network_isolation) =
+                            launch_isolation_labels_from_sandbox(sandbox.as_ref());
+                    }
+                    Err(error) => {
+                        blockers.push(format!("launch isolation validation failed: {error}"));
+                    }
+                }
+            }
+            status = Some(running_status);
+        }
+        Err(error) => {
+            blockers.push(format!("workspace is not running: {error}"));
+        }
+    }
+
+    let ok_to_launch = workspace_running && blockers.is_empty();
+    let would_launch = ok_to_launch;
+    let message = if would_launch {
+        "workspace launch would spawn app".to_string()
+    } else if let Some(blocker) = blockers.first() {
+        format!("workspace launch dry run blocked: {blocker}")
+    } else {
+        "workspace launch dry run blocked".to_string()
+    };
+
+    Ok(IpcResponse {
+        ok: true,
+        message: "workspace launch dry run returned".to_string(),
+        status,
+        start_preview: None,
+        launch_preview: Some(WorkspaceLaunchPreview {
+            id,
+            command: spec.command,
+            name: spec.name,
+            profile_id: spec.profile_id,
+            cwd: spec.cwd,
+            env: spec.env,
+            wait_window,
+            window_timeout_ms,
+            screenshot_window,
+            applied_policy,
+            user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
+            requires_unenforced_policy_ack,
+            missing_unenforced_policy_ack,
+            can_acknowledge_unenforced_policy,
+            blocks_unenforced_policy,
+            workspace_running,
+            ok_to_launch,
+            would_launch,
+            mount_isolation,
+            network_isolation,
+            blockers,
+            message,
+        }),
+        ipc: None,
+        environment: None,
+        apps: None,
+        windows: None,
+        active_window: None,
+        pointer: None,
+        screenshot: None,
+        app_log: None,
+        clipboard: None,
+        events: None,
+    })
 }
 
 fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
@@ -2659,6 +2819,7 @@ fn read_events_from_workspace_log(
         message: "workspace events returned from saved event log".to_string(),
         status: None,
         start_preview: None,
+        launch_preview: None,
         ipc: None,
         environment: None,
         apps,
@@ -2704,6 +2865,7 @@ fn read_app_log_from_workspace_manifest(
         message: "workspace app log read from saved manifest".to_string(),
         status: None,
         start_preview: None,
+        launch_preview: None,
         ipc: None,
         environment: None,
         apps: Some(vec![app]),
@@ -2743,6 +2905,7 @@ fn list_apps_from_workspace_manifest(
         message: "workspace apps listed from saved manifest".to_string(),
         status: None,
         start_preview: None,
+        launch_preview: None,
         ipc: None,
         environment: None,
         apps: Some(apps),
@@ -2766,6 +2929,7 @@ fn response_with_status(
         message: message.into(),
         status: Some(status.clone()),
         start_preview: None,
+        launch_preview: None,
         ipc: None,
         environment: None,
         apps: None,
@@ -4955,14 +5119,8 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         .or(state.status.applied_policy.as_ref());
     let sandbox =
         bubblewrap_sandbox_for_launch(&state.status, effective_policy, spec.cwd.as_deref())?;
-    let mount_isolation = sandbox
-        .as_ref()
-        .map(|sandbox| sandbox.mount_isolation.clone())
-        .unwrap_or_else(|| "host".to_string());
-    let network_isolation = sandbox
-        .as_ref()
-        .map(|sandbox| sandbox.network_isolation.clone())
-        .unwrap_or_else(|| "host".to_string());
+    let (mount_isolation, network_isolation) =
+        launch_isolation_labels_from_sandbox(sandbox.as_ref());
     let mut child_command = if let Some(sandbox) = &sandbox {
         let mut command = Command::new("bwrap");
         command
@@ -5094,6 +5252,29 @@ fn bubblewrap_sandbox_for_launch(
             network_isolation: network.isolation_label().to_string(),
         }))
     }
+}
+
+fn launch_isolation_labels_from_sandbox(sandbox: Option<&BubblewrapSandbox>) -> (String, String) {
+    sandbox
+        .map(|sandbox| {
+            (
+                sandbox.mount_isolation.clone(),
+                sandbox.network_isolation.clone(),
+            )
+        })
+        .unwrap_or_else(|| ("host".to_string(), "host".to_string()))
+}
+
+fn launch_isolation_labels_for_policy(policy: Option<&AppliedWorkspacePolicy>) -> (String, String) {
+    let mount_isolation = if uses_bubblewrap_mount_isolation(policy) {
+        "bubblewrap_mount_namespace"
+    } else {
+        "host"
+    };
+    (
+        mount_isolation.to_string(),
+        launch_network_plan(policy).isolation_label().to_string(),
+    )
 }
 
 fn launch_network_plan(policy: Option<&AppliedWorkspacePolicy>) -> LaunchNetworkPlan {
@@ -5367,6 +5548,7 @@ fn observe_workspace(
         apps: Some(state.status.apps.clone()),
         status: Some(state.status.clone()),
         start_preview: None,
+        launch_preview: None,
         ipc: None,
         environment: None,
         windows: Some(windows),
@@ -7498,5 +7680,92 @@ mod tests {
         let policy = policy(NetworkPolicy::default(), true, true);
 
         assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+    }
+
+    #[test]
+    fn launch_preview_for_stopped_workspace_does_not_spawn() {
+        let id = format!("launch-preview-stopped-{}", std::process::id());
+        let response = preview_launch_app(
+            &id,
+            LaunchSpec {
+                command: vec!["/bin/true".to_string()],
+                name: Some("probe".to_string()),
+                profile_id: None,
+                applied_policy: None,
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: vec![EnvVar {
+                    name: "AGENT_WORKSPACE_TEST".to_string(),
+                    value: "1".to_string(),
+                }],
+            },
+            true,
+            Some(123),
+            true,
+        )
+        .expect("launch preview should return a structured response");
+
+        assert!(response.ok);
+        assert!(response.status.is_none());
+        let preview = response
+            .launch_preview
+            .expect("dry run should include launch preview");
+        assert_eq!(preview.id, id);
+        assert_eq!(preview.command, vec!["/bin/true".to_string()]);
+        assert_eq!(preview.name.as_deref(), Some("probe"));
+        assert!(preview.wait_window);
+        assert_eq!(preview.window_timeout_ms, Some(123));
+        assert!(preview.screenshot_window);
+        assert_eq!(preview.mount_isolation, "host");
+        assert_eq!(preview.network_isolation, "host");
+        assert!(!preview.workspace_running);
+        assert!(!preview.ok_to_launch);
+        assert!(!preview.would_launch);
+        assert!(preview
+            .blockers
+            .iter()
+            .any(|blocker| blocker.contains("workspace is not running")));
+    }
+
+    #[test]
+    fn launch_preview_reports_missing_unenforced_policy_ack() {
+        let id = format!("launch-preview-ack-{}", std::process::id());
+        let launch_policy = policy(
+            NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string()],
+            },
+            true,
+            true,
+        );
+        let response = preview_launch_app(
+            &id,
+            LaunchSpec {
+                command: vec!["/bin/true".to_string()],
+                name: None,
+                profile_id: Some("local-only".to_string()),
+                applied_policy: Some(launch_policy),
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: Vec::new(),
+            },
+            false,
+            None,
+            false,
+        )
+        .expect("launch preview should return acknowledgement fields");
+
+        let preview = response
+            .launch_preview
+            .expect("dry run should include launch preview");
+        assert!(preview.can_acknowledge_unenforced_policy);
+        assert!(preview.requires_unenforced_policy_ack);
+        assert!(preview.missing_unenforced_policy_ack);
+        assert!(!preview.blocks_unenforced_policy);
+        assert_eq!(preview.network_isolation, "host");
+        assert!(preview
+            .blockers
+            .iter()
+            .any(|blocker| blocker.contains("requires acknowledgement")));
     }
 }

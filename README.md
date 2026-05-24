@@ -70,6 +70,7 @@ cargo run -- workspace artifacts --existing
 cargo run -- workspace ipc-info
 cargo run -- workspace env
 cargo run -- workspace env --shell
+cargo run -- workspace launch --dry-run --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
@@ -222,6 +223,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace cleanup --dry-run` previews stale workspace runtime directories in
   `candidates` without deleting them. `workspace cleanup` removes those stale
   runtime directories while skipping running workspaces.
+- `workspace launch --dry-run` previews the command, cwd/env overrides, launch
+  profile policy, acknowledgement requirements, mount/network isolation labels,
+  and whether the app would launch without spawning a process or adding an app
+  record.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   attachment environment: `DISPLAY`, `XAUTHORITY`, `AGENT_WORKSPACE_ID`,
   `AGENT_WORKSPACE_RUNTIME_DIR`, and `AGENT_WORKSPACE_SOCKET`. It can also set
@@ -409,6 +414,9 @@ removed without deleting it.
 `workspace_start` accepts `dry_run=true` to preview hidden-workspace
 acknowledgement, runtime readiness, profile policy acknowledgement, strict
 policy blocks, and whether a new workspace would be created.
+`workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
+profile policy acknowledgement, isolation labels, blockers, and whether an app
+would be launched without spawning it.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
