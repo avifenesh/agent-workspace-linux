@@ -302,10 +302,13 @@ exiting.
   require `--ack-unenforced-policy` and report the limitation in
   `applied_policy.enforcement.network`.
   It then chooses a free X11 display, creates an `xauth` file, starts `Xvfb`,
-  starts a lightweight window manager, and binds a control socket under
-  `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
-  profile width/height are applied unless explicit flags override them, and the
-  profile's mounts/network/setup intent is snapshotted into status.
+  starts a lightweight window manager, and binds a control socket under the
+  runtime base. `XDG_RUNTIME_DIR` is preferred; if a desktop app or MCP launcher
+  omits it, the runtime falls back to `/run/user/<uid>` when that user-owned
+  directory exists before using `/tmp/agent-workspace-linux-$USER`. With
+  `--profile`, profile width/height are applied unless explicit flags override
+  them, and the profile's mounts/network/setup intent is snapshotted into
+  status.
 - `profile validate --json PATH` parses and validates a shared profile file
   without saving it, and returns the same policy, warning, and acknowledgement
   preflight shape used by `profile check`.

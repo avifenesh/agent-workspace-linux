@@ -13,7 +13,7 @@ use std::{
     io::{self, BufRead, BufReader, Read, Write},
     os::unix::{
         ffi::OsStrExt,
-        fs::{FileTypeExt, PermissionsExt},
+        fs::{FileTypeExt, MetadataExt, PermissionsExt},
         net::{UnixListener, UnixStream},
         process::{CommandExt, ExitStatusExt},
     },
@@ -7806,13 +7806,57 @@ fn workspace_dir(id: &str) -> PathBuf {
 }
 
 fn runtime_base_dir() -> PathBuf {
-    env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let user = env::var("USER").unwrap_or_else(|_| "user".to_string());
-            PathBuf::from(format!("/tmp/agent-workspace-linux-{user}"))
-        })
+    runtime_base_dir_from_candidates(
+        env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+        discover_systemd_runtime_dir(),
+        temp_runtime_dir(),
+    )
+}
+
+fn runtime_base_dir_from_candidates(
+    xdg_runtime_dir: Option<PathBuf>,
+    systemd_runtime_dir: Option<PathBuf>,
+    temp_runtime_dir: PathBuf,
+) -> PathBuf {
+    xdg_runtime_dir
+        .or(systemd_runtime_dir)
+        .unwrap_or(temp_runtime_dir)
         .join("agent-workspace-linux")
+}
+
+fn discover_systemd_runtime_dir() -> Option<PathBuf> {
+    let uid = current_effective_uid()?;
+    let path = PathBuf::from(format!("/run/user/{uid}"));
+    let metadata = fs::metadata(&path).ok()?;
+    if metadata.is_dir() && metadata.uid() == uid {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn current_effective_uid() -> Option<u32> {
+    fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| parse_effective_uid_from_proc_status(&status))
+        .or_else(|| env::var("EUID").ok().and_then(|uid| uid.parse().ok()))
+        .or_else(|| env::var("UID").ok().and_then(|uid| uid.parse().ok()))
+}
+
+fn parse_effective_uid_from_proc_status(status: &str) -> Option<u32> {
+    status.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        if parts.next()? != "Uid:" {
+            return None;
+        }
+        let _real_uid = parts.next()?;
+        parts.next()?.parse().ok()
+    })
+}
+
+fn temp_runtime_dir() -> PathBuf {
+    let user = env::var("USER").unwrap_or_else(|_| "user".to_string());
+    PathBuf::from(format!("/tmp/agent-workspace-linux-{user}"))
 }
 
 fn sanitize_workspace_id(id: &str) -> Result<String> {
@@ -8304,6 +8348,49 @@ mod tests {
             .expect_err("too-long socket path should fail before daemon spawn");
 
         assert!(error.to_string().contains("Unix socket paths"));
+    }
+
+    #[test]
+    fn runtime_base_dir_prefers_xdg_runtime_dir() {
+        assert_eq!(
+            runtime_base_dir_from_candidates(
+                Some(PathBuf::from("/custom-runtime")),
+                Some(PathBuf::from("/run/user/1000")),
+                PathBuf::from("/tmp/agent-workspace-linux-me"),
+            ),
+            PathBuf::from("/custom-runtime/agent-workspace-linux")
+        );
+    }
+
+    #[test]
+    fn runtime_base_dir_uses_systemd_runtime_dir_without_xdg() {
+        assert_eq!(
+            runtime_base_dir_from_candidates(
+                None,
+                Some(PathBuf::from("/run/user/1000")),
+                PathBuf::from("/tmp/agent-workspace-linux-me"),
+            ),
+            PathBuf::from("/run/user/1000/agent-workspace-linux")
+        );
+    }
+
+    #[test]
+    fn runtime_base_dir_falls_back_to_temp_last() {
+        assert_eq!(
+            runtime_base_dir_from_candidates(
+                None,
+                None,
+                PathBuf::from("/tmp/agent-workspace-linux-me"),
+            ),
+            PathBuf::from("/tmp/agent-workspace-linux-me/agent-workspace-linux")
+        );
+    }
+
+    #[test]
+    fn parses_effective_uid_from_proc_status() {
+        let status = "Name:\tagent-workspace-linux\nUid:\t1000\t1001\t1002\t1003\n";
+
+        assert_eq!(parse_effective_uid_from_proc_status(status), Some(1001));
     }
 
     fn daemon_state_for_test(name: &str) -> DaemonState {

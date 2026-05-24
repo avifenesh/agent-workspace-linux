@@ -282,3 +282,9 @@ Previous post-patch verification:
   include its own process-scanning helper in the match list. `install.sh
   --skip-build --no-doctor` now reports only the actual
   `agent-workspace-linux mcp` process that must be restarted.
+- Codex-spawned MCP dogfood found a second launcher lifecycle issue: if the MCP
+  process starts without `XDG_RUNTIME_DIR`, it used to look under
+  `/tmp/agent-workspace-linux-$USER` while desktop/shell-launched workspaces
+  lived under `/run/user/<uid>`. The runtime now discovers `/run/user/<uid>` as
+  the fallback before `/tmp`, so MCP tools, the app bridge, and shell commands
+  converge on the same active workspace directory.
