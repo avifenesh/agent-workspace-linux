@@ -131,21 +131,24 @@ under real usage:
 
 Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
 
-- Start Chrome inside the agent workspace and verify it is controllable without
-  stealing the host desktop.
-- Run workspace QA against several real user projects, including apps that need
-  local dev servers, build tools, and browser testing.
-- Verify `network.mode=disabled` really blocks external network access from
-  workspace-launched commands and browsers.
-- Verify `network.mode=local_only` allows loopback inside the workspace while
-  blocking internet access, and document the current host-localhost bridging
+- Validated: Chrome/Chromium launches inside the agent workspace and is
+  controllable through workspace-local window, keyboard, and paste operations
+  without stealing the host desktop.
+- Validated: workspace QA has run against this repo, Codex for Linux, and
+  `agent-chrome-bridge`, including local dev server/browser paths and
+  project-mounted test commands.
+- Validated: `network.mode=disabled` blocks external socket/DNS access from
+  workspace-launched commands and browser windows when bubblewrap is available.
+- Validated: `network.mode=local_only` allows sandbox loopback while blocking
+  external network access. Host-localhost bridging remains a documented
   limitation.
-- Verify mount policies with both read-only and read-write paths, including
-  failed writes to read-only mounts.
-- Verify screenshots, window listing, input, clipboard, app logs, events, and
-  cleanup across both successful and failed app launches.
-- Verify daemon-crash recovery cleans manifest-recorded orphan app process
-  groups and X11 runtime processes before hard permission enforcement.
+- Validated: read-write mounts accept writes and read-only mounts reject writes
+  through the bubblewrap mount namespace.
+- Validated: screenshots, window listing, input, clipboard, app logs, events,
+  artifacts, stop, stale cleanup, and stopped-manifest inspection work across
+  successful and failed app launches.
+- Validated: daemon-crash recovery removes manifest-recorded orphan app process
+  groups and X11 runtime processes.
 - Keep network allowlist marked as declared intent until a real filtering
   backend exists and is tested.
 

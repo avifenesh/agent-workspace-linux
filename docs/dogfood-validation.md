@@ -19,6 +19,12 @@ Environment:
   installed, disabled-network browser launch coverage when Chrome/Chromium is
   installed, crashed-daemon stale cleanup, and self-stop from inside a workspace
   app.
+- The same smoke was rerun against the installed user-facing binary with
+  `BIN=/home/avifenesh/.local/bin/agent-workspace-linux scripts/integration_smoke.sh`.
+  It passed, confirming the installed CLI path used by the Codex app/MCP has
+  the same current behavior as the repo build for permission ceilings, network
+  isolation, mount enforcement, browser QA, screenshots/input/clipboard, events,
+  cleanup, daemon-crash recovery, and self-stop.
 - `cargo test` passed 38 tests, including permission-ceiling checks,
   local-only/disabled network policy planning, launch-preview daemon
   requirements, workspace socket-path validation, stop behavior, and profile
@@ -35,10 +41,12 @@ Environment:
   hidden app. It appears in the conversation view with live screenshot,
   workspace metadata, Refresh, Stop, and Revoke. It now hides on Settings pages,
   where the dedicated Agent Workspaces page already shows the active workspace
-  and controls.
+  and controls. A follow-up side-by-side dev-app pass confirmed the panel hides
+  within the Settings transition and reappears after Back to app, using both
+  Chrome DevTools Protocol DOM checks and hidden-workspace screenshots.
 - The Agent Workspaces settings page in the dev app showed the MCP permissions
   card, one active-workspace card, saved-workspaces section, and a working
-  Status/Hide status toggle. The corresponding feature tests passed 11 tests.
+  Status/Hide status toggle. The corresponding feature tests now pass 12 tests.
 
 Remaining gaps from this pass:
 
