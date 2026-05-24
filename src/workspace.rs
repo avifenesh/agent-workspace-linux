@@ -1028,16 +1028,27 @@ pub fn list_apps(
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     validate_app_list_filters(&app_id, &name_contains, &command_contains, &profile_id)?;
-    request(
+    match request(
         &workspace_socket_path(&id),
         IpcRequest::ListApps {
-            app_id,
-            name_contains,
-            command_contains,
-            profile_id,
+            app_id: app_id.clone(),
+            name_contains: name_contains.clone(),
+            command_contains: command_contains.clone(),
+            profile_id: profile_id.clone(),
             running,
         },
-    )
+    ) {
+        Ok(response) => Ok(response),
+        Err(ipc_error) => list_apps_from_workspace_manifest(
+            &id,
+            &app_id,
+            &name_contains,
+            &command_contains,
+            &profile_id,
+            running,
+        )?
+        .ok_or(ipc_error),
+    }
 }
 
 pub fn list_windows(
@@ -2223,6 +2234,44 @@ fn read_app_log_from_workspace_manifest(
     }))
 }
 
+fn list_apps_from_workspace_manifest(
+    id: &str,
+    app_id: &Option<String>,
+    name_contains: &Option<String>,
+    command_contains: &Option<String>,
+    profile_id: &Option<String>,
+    running: Option<bool>,
+) -> Result<Option<IpcResponse>> {
+    let runtime_dir = workspace_dir(id);
+    let Some(manifest) = read_workspace_manifest(&runtime_dir)? else {
+        return Ok(None);
+    };
+    let apps = filter_workspace_apps(
+        &manifest.apps,
+        app_id,
+        name_contains,
+        command_contains,
+        profile_id,
+        running,
+    );
+
+    Ok(Some(IpcResponse {
+        ok: true,
+        message: "workspace apps listed from saved manifest".to_string(),
+        status: None,
+        ipc: None,
+        environment: None,
+        apps: Some(apps),
+        windows: None,
+        active_window: None,
+        pointer: None,
+        screenshot: None,
+        app_log: None,
+        clipboard: None,
+        events: None,
+    }))
+}
+
 fn response_with_status(
     ok: bool,
     message: impl Into<String>,
@@ -2505,7 +2554,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 .and_then(|()| refresh_apps(state))
                 .map(|()| {
                     filter_workspace_apps(
-                        &state.status,
+                        &state.status.apps,
                         &app_id,
                         &name_contains,
                         &command_contains,
@@ -4729,16 +4778,14 @@ fn observe_workspace(
 }
 
 fn filter_workspace_apps(
-    status: &WorkspaceStatus,
+    apps: &[WorkspaceApp],
     app_id: &Option<String>,
     name_contains: &Option<String>,
     command_contains: &Option<String>,
     profile_id: &Option<String>,
     running: Option<bool>,
 ) -> Vec<WorkspaceApp> {
-    status
-        .apps
-        .iter()
+    apps.iter()
         .filter(|app| {
             app_id
                 .as_ref()

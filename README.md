@@ -195,7 +195,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--kill-on-timeout` terminates the launched app process group if the timeout
   elapses, while preserving stdout/stderr logs in the response.
 - `workspace apps` lists launched apps from the daemon IPC state without dumping
-  the full workspace status. It can filter by `--app APP_ID_OR_PID_OR_NAME`,
+  the full workspace status. If the daemon has stopped, it falls back to the
+  saved manifest app snapshot. It can filter by `--app APP_ID_OR_PID_OR_NAME`,
   app `--name TEXT`, `--command TEXT`, `--profile PROFILE`, `--running`, or
   `--stopped`.
 - `workspace windows`, `workspace active-window`, `workspace pointer`,
@@ -327,7 +328,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
 `workspace_kill_app`, and `workspace_stop`. `workspace_list_apps` can filter by
 app id/pid/name, app name substring, command substring, profile id, or
-running/stopped state.
+running/stopped state, including against saved manifest app snapshots after a
+workspace stops.
 `workspace_stop` accepts `timeout_ms` to control how long it waits for the
 daemon IPC socket to close after requesting shutdown.
 `workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app
