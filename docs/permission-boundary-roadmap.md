@@ -26,7 +26,8 @@ apps through its own UI approval flow.
 
 ### MCP-Locked Mode
 
-When the MCP is spawned with permission fields, those fields become a hard
+When the MCP is spawned with permission fields through
+`agent-workspace-linux mcp --permissions PATH`, those fields become a hard
 ceiling for the lifetime of that MCP server process. Codex for Linux may show
 the policy, request narrower access, and operate inside it, but it must not
 broaden or rewrite it.
@@ -82,9 +83,16 @@ Rules:
   downgrade read-write to read-only, but cannot add broader paths or upgrade
   access.
 - Prefilled app allowlists limit launchable commands. The UI may show friendlier
-  app pickers, but launches outside the ceiling are rejected.
+  app pickers, but launches outside the ceiling are rejected. The allowlist
+  matches the launched program, not its arguments; allowing shells, package
+  managers, or browsers delegates follow-on behavior to that program inside the
+  workspace policy.
 - Spawn-time MCP permissions are immutable. Changing them requires restarting
   the MCP server with new config.
+- The active ceiling is visible through the read-only `mcp_permissions` tool.
+- Enforcement currently covers MCP profile template/check/validate/put/import,
+  workspace start/open-profile, direct launch/run, and profile setup/startup
+  launches. The standalone CLI remains a developer/admin surface.
 
 ## Gates Before Hard Enforcement
 
@@ -104,8 +112,9 @@ Current gate status on 2026-05-24:
   repeated live app runs before it should become a hard trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, and recovery/inspection flows work at the primitive level.
-  Authenticated browser-profile sharing, MCP-locked permission ceilings, app
-  allowlists, and user-friendly environment/profile creation are still open.
+  MCP-locked permission ceilings and app allowlists have a first MCP-enforced
+  slice. Authenticated browser-profile sharing and user-friendly
+  environment/profile creation are still open.
 
 ### A. Prove Runtime Claims With Real Workloads
 

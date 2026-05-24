@@ -165,3 +165,16 @@ Post-patch verification:
   The profile was not saved; profile list remained empty after the pass. The
   embedded panel Stop button again stopped the workspace and stale cleanup
   removed the runtime.
+- MCP-locked permission ceilings now have a first implementation and smoke
+  pass. Unit coverage verifies that a disabled-network ceiling rejects
+  unprofiled host-network launches, allows a disabled-network profile launch,
+  enforces local-only/allowlist host subsets, caps mounts to same-or-child paths
+  without read-only to read-write upgrades, and rejects launch commands outside
+  the app allowlist. CLI smoke verified `mcp --help`, missing permission-file
+  errors, invalid app allowlist errors, and that a valid permissions file loads
+  and starts the stdio MCP server when stdin stays open.
+- Full `scripts/integration_smoke.sh` still passes after the MCP ceiling patch,
+  covering profile import/export, open-profile dry-run/setup/startup, local-only
+  and disabled-network enforcement, read-only/read-write mounts, screenshots,
+  input/clipboard, artifacts, browser local-dev QA, crashed-daemon cleanup, and
+  workspace self-stop.

@@ -44,17 +44,19 @@ For the current bubblewrap runtime, profile mount sources must use absolute host
 paths, and mount destinations must be non-overlapping absolute paths under
 `/workspace/`.
 
-Permission hardening is intentionally deferred until the dogfood flows are
-validated. See [Permission Boundary Roadmap](docs/permission-boundary-roadmap.md)
-for the target authority model and the validation gates required before final
-enforcement, and [Dogfood Validation](docs/dogfood-validation.md) for the
-current evidence log.
+The MCP server can run in open host-controlled mode, or with an optional
+spawn-time permission ceiling loaded from JSON. The richer human approval
+boundary in Codex for Linux is still being dogfooded. See
+[Permission Boundary Roadmap](docs/permission-boundary-roadmap.md) for the
+authority model and validation gates, and
+[Dogfood Validation](docs/dogfood-validation.md) for the current evidence log.
 
 ## Commands
 
 ```bash
 cargo run -- doctor
 cargo run -- guardrails
+cargo run -- mcp --permissions ./permissions.json
 cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
@@ -183,6 +185,44 @@ The installer writes this Codex MCP entry automatically and is safe to rerun:
 command = "/home/YOU/.local/bin/agent-workspace-linux"
 args = ["mcp"]
 ```
+
+That default registration is intentionally open at the MCP layer so Codex for
+Linux can own the approval UI. For MCP hosts or auto-loop agents that need fixed
+permissions at server spawn, pass a ceiling file:
+
+```toml
+[mcp_servers.agent-workspace-linux]
+command = "/home/YOU/.local/bin/agent-workspace-linux"
+args = ["mcp", "--permissions", "/home/YOU/.config/agent-workspace-linux/permissions.json"]
+```
+
+Example ceiling file:
+
+```json
+{
+  "network": {
+    "mode": "local_only",
+    "allow_hosts": ["localhost:3000"]
+  },
+  "mounts": [
+    {
+      "host_path": "/home/YOU/project",
+      "workspace_path": "/workspace/project",
+      "mode": "read_write"
+    }
+  ],
+  "apps": {
+    "allow": ["/usr/bin/google-chrome", "/usr/bin/npm"]
+  }
+}
+```
+
+Omitted or empty dimensions are open. Populated dimensions are hard ceilings for
+that MCP process: profiles and launches may narrow access, but they cannot
+broaden network mode, mount paths/access, or launch programs. Call
+`mcp_permissions` after connecting to see the active ceiling. App allowlists
+match the launched program only; allowing shells, package managers, or browsers
+delegates whatever those programs can do inside the workspace policy.
 
 After installation or upgrade, restart Codex or reload MCP servers so new
 workspace tools, parameters, profile templates, and runtime behavior become
@@ -492,8 +532,8 @@ exiting.
   the hidden workspace explicitly.
   `--shell` prints shell-safe `export` lines for manual attachment.
 
-The MCP server currently exposes the same control surface: `workspace_doctor`,
-`workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`,
+The MCP server currently exposes the same control surface: `mcp_permissions`,
+`workspace_doctor`, `workspace_guardrails`, `profile_path`, `profile_list`, `profile_get`,
 `profile_check`, `profile_validate`, `profile_template`, `profile_put`,
 `profile_import`, `profile_export`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,

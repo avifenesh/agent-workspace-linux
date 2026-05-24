@@ -1,5 +1,6 @@
 mod approval;
 mod guardrails;
+mod permissions;
 mod policy;
 mod profile;
 mod server;
@@ -20,7 +21,13 @@ async fn main() -> Result<()> {
             print_json(&report)
         }
         Some("guardrails") => print_json(&guardrails::guardrail_summary()),
-        Some("mcp") => server::serve_mcp().await,
+        Some("mcp") => {
+            args.remove(0);
+            match parse_mcp_options(&args)? {
+                Some(permissions) => server::serve_mcp(permissions).await,
+                None => Ok(()),
+            }
+        }
         Some("profile") => {
             args.remove(0);
             handle_profile(args)
@@ -98,6 +105,43 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, validate, template, put, import, export, delete")
         }
+    }
+}
+
+fn parse_mcp_options(args: &[String]) -> Result<Option<permissions::McpPermissionState>> {
+    let mut permissions_path = None;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if let Some(path) = arg.strip_prefix("--permissions=") {
+            if path.is_empty() {
+                bail!("--permissions requires a path");
+            }
+            permissions_path = Some(PathBuf::from(path));
+            index += 1;
+            continue;
+        }
+        match arg.as_str() {
+            "--permissions" => {
+                index += 1;
+                let Some(path) = args.get(index) else {
+                    bail!("--permissions requires a path");
+                };
+                permissions_path = Some(PathBuf::from(path));
+                index += 1;
+            }
+            "--help" | "-h" => {
+                print_mcp_help();
+                return Ok(None);
+            }
+            unknown => {
+                bail!("unknown mcp option '{unknown}'. Expected: --permissions PATH, --help")
+            }
+        }
+    }
+    match permissions_path {
+        Some(path) => Ok(Some(permissions::load_mcp_permission_state(path)?)),
+        None => Ok(Some(permissions::McpPermissionState::default())),
     }
 }
 
@@ -3453,7 +3497,7 @@ fn print_help() {
 Usage:
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
-  agent-workspace-linux mcp
+  agent-workspace-linux mcp [--permissions PATH]
   agent-workspace-linux profile path|list|get|check|validate|template|put|import|export|delete
   agent-workspace-linux profile validate --json PATH
   agent-workspace-linux profile put --json PATH [--replace] [--dry-run]
@@ -3526,5 +3570,19 @@ Usage:
   agent-workspace-linux workspace setup [--dry-run] [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] [--dry-run] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace stop [--id ID] [--timeout-ms N] [--dry-run]"#
+    );
+}
+
+fn print_mcp_help() {
+    println!(
+        "{}",
+        r#"agent-workspace-linux mcp
+
+Usage:
+  agent-workspace-linux mcp [--permissions PATH]
+
+Options:
+  --permissions PATH  Load a spawn-time MCP permission ceiling JSON file. Empty or omitted fields leave that dimension open; populated network, mounts, or app allowlist fields cap every MCP tool for this process.
+"#
     );
 }
