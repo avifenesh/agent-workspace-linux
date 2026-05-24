@@ -470,3 +470,46 @@ Previous post-patch verification:
   PID-less window, and app-targeted `minimize-window`, `show-window`,
   `move-window`, and `screenshot-window` succeeding. The temporary workspace was
   stopped and cleaned afterward.
+- 2026-05-25 Codex-spawned MCP A-gate pass revalidated real workloads after the
+  embedded viewer v12 polish. `mcp_permissions` reported no spawn-time ceiling,
+  `workspace_doctor` reported ready X11 runtime dependencies plus bubblewrap
+  support for mounts, disabled networking, and local-only networking, and both
+  `workspace_list` and `profile_list` started empty. A temporary
+  `dogfood-project-qa` profile from the `project-dev` template mounted this
+  repository read-write at `/workspace/project`, mounted Cargo shims and rustup
+  read-only, and kept host networking. `workspace_open_profile --dry-run`
+  returned the hidden-workspace approval bundle without creating a daemon; the
+  real `workspace_open_profile` then started the workspace on `:90`.
+  Daemon-attached `workspace_run_app --dry-run` previewed the launch policy, the
+  real preflight command saw `/workspace/project`, Rust `1.95.0`, Cargo
+  `1.95.0`, the mounted rustup tree, and a writable project mount, and
+  `cargo test --locked` passed 54/54 from inside the hidden workspace.
+- The same pass launched `xterm` as `dogfood-xterm` through
+  `workspace_launch_app --wait-window --screenshot-window`, focused it by title,
+  typed shell commands with workspace-local IPC, sent `Return`, captured window
+  and root screenshots, and verified the typed command wrote `typed-ok` through
+  the mounted project path. `workspace_observe`, `workspace_events`,
+  `workspace_list_windows`, `workspace_ipc_info`, `workspace_artifacts`,
+  `workspace_stop --dry-run`, real `workspace_stop`, and
+  `workspace_cleanup_stale` all returned useful state. Cleanup preview and
+  actual cleanup reported the stopped daemon as already defunct and removed the
+  stale runtime, matching the defunct-PID cleanup fix.
+- The same pass created strict temporary `dogfood-net-disabled` and
+  `dogfood-net-local` profiles with `require_enforced_policy=true`.
+  `profile_check` reported `backend=bubblewrap_unshare_net` for disabled
+  networking and `backend=bubblewrap_loopback_only` for local-only networking.
+  In disabled mode, `curl https://example.com` failed with `BLOCKED:6` and
+  `Could not resolve host`. In local-only mode, a Python HTTP server and curl
+  running inside one launch namespace returned `LOCAL:loopback-ok`, while the
+  same command still blocked external DNS with `EXTERNAL_BLOCKED:6`.
+- The same pass created `dogfood-restricted-chrome` from the
+  `restricted-chrome` template and used only an isolated throwaway Chrome
+  profile under `/tmp`, not the user's browser profile. `workspace_open_profile
+  --dry-run` showed one declared startup app without launching a daemon. The
+  real open launched Google Chrome with
+  `network_isolation=bubblewrap_unshare_net`, found the visible
+  `about:blank - Google Chrome` window, and captured a screenshot. Workspace
+  input then navigated Chrome to `example.com`; `workspace_observe` captured the
+  Chrome page titled `example.com - Google Chrome` showing
+  `ERR_INTERNET_DISCONNECTED`. The Chrome workspace was stopped and stale
+  cleanup removed the runtime afterward.
