@@ -3215,10 +3215,18 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         IpcRequest::MovePointer { x, y } => match move_workspace_pointer(&state.status, x, y) {
             Ok(()) => {
                 record_event(state, "move_pointer", serde_json::json!({ "x": x, "y": y }))?;
-                (
-                    response_with_status(true, "workspace pointer moved", &state.status),
-                    false,
-                )
+                match workspace_pointer(&state.status) {
+                    Ok(pointer) => {
+                        let mut response =
+                            response_with_status(true, "workspace pointer moved", &state.status);
+                        response.pointer = Some(pointer);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
@@ -3269,7 +3277,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             serde_json::json!({
                                 "window_id": &moved.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
-                                    "class_contains": criteria.class_contains.as_deref(),
+                                "class_contains": criteria.class_contains.as_deref(),
                                 "pid": criteria.pid,
                                 "app_id": criteria.app_id.as_deref(),
                                 "relative_x": x,
@@ -3284,8 +3292,17 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             "workspace window pointer moved",
                             &state.status,
                         );
-                        response.windows = Some(vec![moved.window]);
-                        (response, false)
+                        match workspace_pointer(&state.status) {
+                            Ok(pointer) => {
+                                response.pointer = Some(pointer);
+                                response.windows = Some(vec![moved.window]);
+                                (response, false)
+                            }
+                            Err(error) => (
+                                response_with_status(false, error.to_string(), &state.status),
+                                false,
+                            ),
+                        }
                     }
                     Ok(None) => {
                         let mut response = response_with_status(

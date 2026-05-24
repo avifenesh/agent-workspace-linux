@@ -221,8 +221,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   can restore an app by class, title, pid, or app id without first listing a raw
   X11 id.
   `move-pointer` and
-  `move-pointer-window` move the workspace pointer without clicking. `click` and
-  `click-window` can set button/count for right-clicks and double-clicks.
+  `move-pointer-window` move the workspace pointer without clicking and return
+  the resulting pointer coordinates. `click` and `click-window` can set
+  button/count for right-clicks and double-clicks.
   `drag` and `drag-window` can set the mouse button for press/move/release
   gestures. `scroll` and `scroll-window` send wheel ticks in the requested
   direction. Window-targeted pointer tools resolve the same targets and use
