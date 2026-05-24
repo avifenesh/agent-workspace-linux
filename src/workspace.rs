@@ -945,7 +945,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     }
     let request: IpcRequest =
         serde_json::from_str(line.trim()).context("failed to parse workspace IPC request")?;
-    refresh_apps(state);
+    refresh_apps(state)?;
 
     let (response, should_stop) = match request {
         IpcRequest::Status => (
@@ -1685,7 +1685,7 @@ fn read_workspace_app_log(
     stream: &str,
     tail_bytes: Option<u64>,
 ) -> Result<WorkspaceAppLog> {
-    refresh_apps(state);
+    refresh_apps(state)?;
     let stream = validate_log_stream(stream)?;
     let app = state
         .status
@@ -1720,7 +1720,7 @@ fn wait_workspace_app(state: &mut DaemonState, app_id: &str, timeout_ms: u64) ->
     let timeout = Duration::from_millis(timeout_ms);
     let started = Instant::now();
     loop {
-        refresh_apps(state);
+        refresh_apps(state)?;
         let app = state
             .status
             .apps
@@ -1755,7 +1755,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
         bail!("app id cannot be empty");
     }
 
-    let message = {
+    let (message, exit_detail) = {
         let app = state
             .apps
             .iter_mut()
@@ -1763,14 +1763,20 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
             .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
 
         if !app.info.running {
-            format!("workspace app {} is already stopped", app.info.id)
+            (
+                format!("workspace app {} is already stopped", app.info.id),
+                None,
+            )
         } else if let Some(status) = app
             .child
             .try_wait()
             .context("failed to check app process status")?
         {
             apply_app_exit_status(&mut app.info, status);
-            format!("workspace app {} is already stopped", app.info.id)
+            (
+                format!("workspace app {} is already stopped", app.info.id),
+                Some(app_exit_event_detail(&app.info)),
+            )
         } else {
             app.child
                 .kill()
@@ -1780,11 +1786,17 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
                 .wait()
                 .with_context(|| format!("failed to wait for workspace app {}", app.info.id))?;
             apply_app_exit_status(&mut app.info, status);
-            format!("workspace app {} killed", app.info.id)
+            (
+                format!("workspace app {} killed", app.info.id),
+                Some(app_exit_event_detail(&app.info)),
+            )
         }
     };
 
     state.status.apps = state.apps.iter().map(|app| app.info.clone()).collect();
+    if let Some(detail) = exit_detail {
+        record_event(state, "app_exit", detail)?;
+    }
     Ok(message)
 }
 
@@ -1804,6 +1816,18 @@ fn mark_app_exit_error(app: &mut WorkspaceApp, error: impl ToString) {
     app.exit_status = Some(error.to_string());
     app.exit_code = None;
     app.exit_signal = None;
+}
+
+fn app_exit_event_detail(app: &WorkspaceApp) -> serde_json::Value {
+    serde_json::json!({
+        "app_id": &app.id,
+        "pid": app.pid,
+        "command": &app.command,
+        "profile_id": app.profile_id.as_deref(),
+        "exit_status": app.exit_status.as_deref(),
+        "exit_code": app.exit_code,
+        "exit_signal": app.exit_signal,
+    })
 }
 
 fn workspace_command(status: &WorkspaceStatus, program: &str) -> Command {
@@ -1826,21 +1850,28 @@ fn output_text(output: std::process::Output, description: &str) -> Result<String
     }
 }
 
-fn refresh_apps(state: &mut DaemonState) {
+fn refresh_apps(state: &mut DaemonState) -> Result<()> {
+    let mut exit_events = Vec::new();
     for app in &mut state.apps {
         if app.info.running {
             match app.child.try_wait() {
                 Ok(Some(status)) => {
                     apply_app_exit_status(&mut app.info, status);
+                    exit_events.push(app_exit_event_detail(&app.info));
                 }
                 Ok(None) => {}
                 Err(error) => {
                     mark_app_exit_error(&mut app.info, error);
+                    exit_events.push(app_exit_event_detail(&app.info));
                 }
             }
         }
     }
     state.status.apps = state.apps.iter().map(|app| app.info.clone()).collect();
+    for detail in exit_events {
+        record_event(state, "app_exit", detail)?;
+    }
+    Ok(())
 }
 
 fn request(socket_path: &Path, request: IpcRequest) -> Result<IpcResponse> {

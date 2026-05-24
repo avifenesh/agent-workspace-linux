@@ -113,7 +113,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   and `workspace kill-app` inspect or act through the same daemon, scoped to the
   workspace display.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
-  Typed text is logged as metadata such as character count, not raw text.
+  App launches and exits are recorded with structured metadata. Typed text is
+  logged as metadata such as character count, not raw text.
 - `workspace setup --profile` launches the profile's setup commands as ordinary
   workspace apps; their status and logs are available through the same app
   status/log tools.
