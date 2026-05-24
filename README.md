@@ -58,6 +58,7 @@ cargo run -- guardrails
 cargo run -- profile path
 cargo run -- profile list
 cargo run -- profile template project-dev --host-path "$PWD"
+cargo run -- profile template restricted-chrome --browser-path /usr/bin/google-chrome
 cargo run -- profile validate --json ./profile.json
 cargo run -- profile put --json ./profile.json --dry-run
 cargo run -- profile put --json ./profile.json
@@ -257,6 +258,14 @@ exiting.
 - `profile validate --json PATH` parses and validates a shared profile file
   without saving it, and returns the same policy, warning, and acknowledgement
   preflight shape used by `profile check`.
+- `profile template project-dev` creates a starter project QA profile. `profile
+  template restricted-chrome` creates a browser starter profile with
+  `network.mode=disabled`, `require_enforced_policy=true`, an isolated Chrome
+  user-data dir, and an explicit `--no-sandbox` startup command. That flag is
+  visible in the generated profile because Chrome's SUID sandbox can abort
+  before opening a window inside the bubblewrap network namespace; use this
+  template with an isolated browser profile and edit the browser path or command
+  before saving when needed.
 - `profile put --json --dry-run` previews whether the profile would be created,
   replaced, or rejected without writing. Its response includes the requested
   profile and, when the id already exists, the existing saved profile.

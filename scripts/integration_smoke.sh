@@ -136,6 +136,15 @@ run_awl profile delete import-smoke > "$SMOKE_DIR/profile-delete.json"
 assert_json '.dry_run == false and .would_delete == true and .deleted == true and .profile.id == "import-smoke"' "$SMOKE_DIR/profile-delete.json"
 run_awl profile list > "$SMOKE_DIR/profile-list-after-delete.json"
 assert_json 'all(.profiles[]; .id != "import-smoke")' "$SMOKE_DIR/profile-list-after-delete.json"
+CHROME_TEMPLATE_ARGS=(restricted-chrome --id restricted-chrome-smoke)
+EXPECTED_BROWSER_BIN="${BROWSER_BIN:-google-chrome}"
+if [[ -n "$BROWSER_BIN" ]]; then
+  CHROME_TEMPLATE_ARGS+=(--browser-path "$BROWSER_BIN")
+fi
+run_awl profile template "${CHROME_TEMPLATE_ARGS[@]}" > "$SMOKE_DIR/restricted-chrome-template.json"
+assert_json '.id == "restricted-chrome-smoke" and .network.mode == "disabled" and .require_enforced_policy == true and (.description | contains("--no-sandbox")) and .startup_apps[0].command[0] == $browser and (.startup_apps[0].command | index("--no-sandbox"))' "$SMOKE_DIR/restricted-chrome-template.json" --arg browser "$EXPECTED_BROWSER_BIN"
+run_awl profile validate --json "$SMOKE_DIR/restricted-chrome-template.json" > "$SMOKE_DIR/restricted-chrome-template-validate.json"
+assert_json '.ok == true and .profile.id == "restricted-chrome-smoke" and .check.applied_policy.enforcement.network.enforced == true' "$SMOKE_DIR/restricted-chrome-template-validate.json"
 
 echo "== open-profile dry-run =="
 OPEN_PROFILE="$SMOKE_DIR/open-profile.json"

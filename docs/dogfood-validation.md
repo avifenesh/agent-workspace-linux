@@ -120,3 +120,8 @@ Post-patch verification:
   `example.com`. `workspace_observe`, `workspace_screenshot_window`, event
   history, `workspace_stop`, stale cleanup, and profile deletion all worked
   after the browser run.
+- The Chrome sandbox caveat is now captured as a first-class
+  `restricted-chrome` profile template. The generated JSON visibly includes
+  `network.mode=disabled`, `require_enforced_policy=true`, an isolated
+  user-data dir, and `--no-sandbox`; the integration smoke validates that
+  generated profile before the browser launch coverage.

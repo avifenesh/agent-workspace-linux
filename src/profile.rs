@@ -409,6 +409,7 @@ pub fn template_profile(
     kind: &str,
     id: Option<String>,
     host_path: Option<PathBuf>,
+    browser_path: Option<PathBuf>,
 ) -> Result<WorkspaceProfile> {
     let kind = kind.trim();
     let profile = match kind {
@@ -438,7 +439,48 @@ pub fn template_profile(
                 startup_apps: Vec::new(),
             }
         }
-        _ => bail!("unknown profile template {kind:?}. Expected: project-dev"),
+        "restricted-chrome"
+        | "restricted_chrome"
+        | "chrome-disabled-network"
+        | "chrome_disabled_network" => {
+            let id = id.unwrap_or_else(|| "restricted-chrome".to_string());
+            let browser = browser_path
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "google-chrome".to_string());
+            WorkspaceProfile {
+                id,
+                description: Some(
+                    "Chrome with workspace networking disabled. Uses --no-sandbox because Chrome's SUID sandbox may abort inside the bubblewrap network namespace; use an isolated browser profile and edit the browser path if needed.".to_string(),
+                ),
+                width: Some(1280),
+                height: Some(800),
+                cwd: Some(PathBuf::from("/tmp")),
+                env: Vec::new(),
+                mounts: Vec::new(),
+                network: NetworkPolicy {
+                    mode: NetworkMode::Disabled,
+                    allow_hosts: Vec::new(),
+                },
+                require_enforced_policy: true,
+                setup_commands: Vec::new(),
+                startup_apps: vec![ProfileStartupApp {
+                    name: Some("restricted-chrome-no-sandbox".to_string()),
+                    command: vec![
+                        browser,
+                        "--user-data-dir=/tmp/agent-workspace-chrome-restricted".to_string(),
+                        "--no-sandbox".to_string(),
+                        "--disable-dev-shm-usage".to_string(),
+                        "--no-first-run".to_string(),
+                        "--no-default-browser-check".to_string(),
+                        "--new-window".to_string(),
+                        "about:blank".to_string(),
+                    ],
+                    cwd: Some(PathBuf::from("/tmp")),
+                    env: Vec::new(),
+                }],
+            }
+        }
+        _ => bail!("unknown profile template {kind:?}. Expected: project-dev or restricted-chrome"),
     };
     validate_profile(&profile)?;
     Ok(profile)
@@ -1486,5 +1528,29 @@ mod tests {
             NetworkMode::Disabled
         ));
         let _ = fs::remove_file(validation.json_path);
+    }
+
+    #[test]
+    fn restricted_chrome_template_is_explicit_about_network_and_sandbox() {
+        let profile = template_profile(
+            "restricted-chrome",
+            Some("chrome-smoke".to_string()),
+            None,
+            Some(PathBuf::from("/usr/bin/google-chrome")),
+        )
+        .expect("restricted chrome template");
+
+        assert_eq!(profile.id, "chrome-smoke");
+        assert!(matches!(profile.network.mode, NetworkMode::Disabled));
+        assert!(profile.require_enforced_policy);
+        let description = profile.description.as_deref().unwrap_or_default();
+        assert!(description.contains("networking disabled"));
+        assert!(description.contains("--no-sandbox"));
+        assert_eq!(profile.startup_apps.len(), 1);
+        let app = &profile.startup_apps[0];
+        assert_eq!(app.name.as_deref(), Some("restricted-chrome-no-sandbox"));
+        assert_eq!(app.command[0], "/usr/bin/google-chrome");
+        assert!(app.command.iter().any(|arg| arg == "--no-sandbox"));
+        assert!(app.command.iter().any(|arg| arg == "about:blank"));
     }
 }
