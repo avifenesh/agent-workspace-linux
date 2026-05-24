@@ -461,6 +461,7 @@ pub fn launch_profile_setup(
     profile_id: &str,
     options: ProfileSetupOptions,
 ) -> Result<ProfileSetupRun> {
+    let wait = options.wait || options.timeout_ms.is_some() || options.kill_on_timeout;
     let mut specs = setup_launch_specs(profile_id)?;
     let mut launched = Vec::new();
     let mut waited = Vec::new();
@@ -475,7 +476,7 @@ pub fn launch_profile_setup(
             launched.push(launch);
             break;
         }
-        if options.wait {
+        if wait {
             let app_id = launched_app_id(&launch)
                 .context("profile setup launch did not return an app id")?;
             let wait = workspace::wait_app(workspace_id, app_id.clone(), options.timeout_ms)?;
@@ -489,12 +490,12 @@ pub fn launch_profile_setup(
         }
         launched.push(launch);
     }
-    let completed = options.wait.then(|| {
+    let completed = wait.then(|| {
         launched.iter().all(|response| response.ok)
             && waited.iter().all(|response| response.ok)
             && waited.len() == launched.len()
     });
-    let succeeded = options.wait.then(|| {
+    let succeeded = wait.then(|| {
         completed.unwrap_or(false)
             && waited
                 .iter()
@@ -504,7 +505,7 @@ pub fn launch_profile_setup(
     Ok(ProfileSetupRun {
         workspace_id: workspace_id.to_string(),
         profile_id: profile_id.to_string(),
-        wait: options.wait,
+        wait,
         kill_on_timeout: options.kill_on_timeout,
         timeout_ms: options.timeout_ms,
         launched,

@@ -1640,9 +1640,13 @@ impl WorkspaceOpenProfileParams {
 
     fn into_open_options(&self) -> profile::ProfileWorkspaceOpenOptions {
         profile::ProfileWorkspaceOpenOptions {
-            run_setup: self.run_setup || self.setup_timeout_ms.is_some(),
+            run_setup: self.run_setup
+                || self.setup_timeout_ms.is_some()
+                || self.setup_kill_on_timeout,
             setup: profile::ProfileSetupOptions {
-                wait: self.run_setup || self.setup_timeout_ms.is_some(),
+                wait: self.run_setup
+                    || self.setup_timeout_ms.is_some()
+                    || self.setup_kill_on_timeout,
                 timeout_ms: self.setup_timeout_ms,
                 kill_on_timeout: self.setup_kill_on_timeout,
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
