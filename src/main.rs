@@ -3131,6 +3131,10 @@ fn parse_workspace_setup_options(
                 options.wait = true;
                 index += 1;
             }
+            "--dry-run" => {
+                options.dry_run = true;
+                index += 1;
+            }
             "--ack-unenforced-policy" => {
                 options.acknowledge_unenforced_policy = true;
                 index += 1;
@@ -3433,7 +3437,7 @@ Usage:
   agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] [--kill-on-timeout] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace events [--id ID] [--tail N] [--since SEQUENCE]
-  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
+  agent-workspace-linux workspace setup [--dry-run] [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--kill-on-timeout] [--ack-unenforced-policy]
   agent-workspace-linux workspace kill-app [--id ID] [--dry-run] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace stop [--id ID] [--timeout-ms N] [--dry-run]"#
     );

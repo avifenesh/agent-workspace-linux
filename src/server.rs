@@ -1554,7 +1554,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_run_profile_setup",
-        description = "Launch setup commands declared by a saved profile inside an already running isolated workspace. Set wait=true or timeout_ms to supervise setup in sequence and report completion/success; set kill_on_timeout=true to terminate timed-out setup commands.",
+        description = "Launch setup commands declared by a saved profile inside an already running isolated workspace. Set dry_run=true to preview each setup launch without spawning processes. Set wait=true or timeout_ms to supervise setup in sequence and report completion/success; set kill_on_timeout=true to terminate timed-out setup commands.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1573,6 +1573,7 @@ impl AgentWorkspaceLinux {
                     .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
                 &params.profile,
                 profile::ProfileSetupOptions {
+                    dry_run: params.dry_run,
                     wait: params.wait || params.timeout_ms.is_some(),
                     timeout_ms: params.timeout_ms,
                     kill_on_timeout: params.kill_on_timeout,
@@ -1581,7 +1582,9 @@ impl AgentWorkspaceLinux {
             ) {
                 Ok(run) => ProfileSetupResult {
                     ok: true,
-                    message: if run.succeeded == Some(true) {
+                    message: if run.dry_run {
+                        "profile setup dry run returned".to_string()
+                    } else if run.succeeded == Some(true) {
                         "profile setup completed successfully".to_string()
                     } else if run.completed == Some(true) {
                         "profile setup completed with failures".to_string()
@@ -1920,6 +1923,7 @@ impl WorkspaceOpenProfileParams {
                 || self.setup_timeout_ms.is_some()
                 || self.setup_kill_on_timeout,
             setup: profile::ProfileSetupOptions {
+                dry_run: false,
                 wait: self.run_setup
                     || self.setup_timeout_ms.is_some()
                     || self.setup_kill_on_timeout,
@@ -2493,6 +2497,8 @@ struct WorkspaceSetupParams {
     #[serde(default)]
     id: Option<String>,
     profile: String,
+    #[serde(default)]
+    dry_run: bool,
     #[serde(default)]
     wait: bool,
     #[serde(default)]

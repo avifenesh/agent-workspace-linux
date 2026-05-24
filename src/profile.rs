@@ -152,6 +152,9 @@ pub struct ProfileCheck {
 pub struct ProfileSetupRun {
     pub workspace_id: String,
     pub profile_id: String,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub would_launch_all: Option<bool>,
     pub wait: bool,
     pub kill_on_timeout: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -205,6 +208,7 @@ pub struct ProfileWorkspaceOpenOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProfileSetupOptions {
+    pub dry_run: bool,
     pub wait: bool,
     pub timeout_ms: Option<u64>,
     pub kill_on_timeout: bool,
@@ -704,7 +708,15 @@ pub fn launch_profile_setup(
         spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
     }
     for spec in specs {
-        let launch = workspace::launch_app_with_spec(workspace_id, spec)?;
+        let launch = if options.dry_run {
+            workspace::preview_launch_app(workspace_id, spec, false, None, false)?
+        } else {
+            workspace::launch_app_with_spec(workspace_id, spec)?
+        };
+        if options.dry_run {
+            launched.push(launch);
+            continue;
+        }
         if !launch.ok {
             launched.push(launch);
             break;
@@ -724,12 +736,20 @@ pub fn launch_profile_setup(
         }
         launched.push(launch);
     }
-    let completed = wait.then(|| {
+    let would_launch_all = options.dry_run.then(|| {
+        launched.iter().all(|response| {
+            response
+                .launch_preview
+                .as_ref()
+                .is_some_and(|preview| preview.would_launch)
+        })
+    });
+    let completed = (!options.dry_run && wait).then(|| {
         launched.iter().all(|response| response.ok)
             && waited.iter().all(|response| response.ok)
             && waited.len() == launched.len()
     });
-    let succeeded = wait.then(|| {
+    let succeeded = (!options.dry_run && wait).then(|| {
         completed.unwrap_or(false)
             && waited
                 .iter()
@@ -739,6 +759,8 @@ pub fn launch_profile_setup(
     Ok(ProfileSetupRun {
         workspace_id: workspace_id.to_string(),
         profile_id: profile_id.to_string(),
+        dry_run: options.dry_run,
+        would_launch_all,
         wait,
         kill_on_timeout: options.kill_on_timeout,
         timeout_ms: options.timeout_ms,

@@ -132,6 +132,7 @@ cargo run -- workspace wait-app --timeout-ms 30000 terminal
 cargo run -- workspace events --tail 20
 cargo run -- workspace events --since 42
 cargo run -- workspace observe --events-since 42 --events-tail 20
+cargo run -- workspace setup --dry-run --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000 --kill-on-timeout
 cargo run -- workspace kill-app --dry-run app-12345
 cargo run -- workspace kill-app app-12345
@@ -346,8 +347,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   result reports whether they completed and exited successfully. Their status
   and logs are available through the same app status/log tools. If setup uses a
   profile with policy that remains unenforced, it requires
-  `--ack-unenforced-policy`. `--kill-on-timeout` terminates a timed-out setup
-  command process group and records the kill response in the setup result.
+  `--ack-unenforced-policy`. `--dry-run` returns one launch preview per setup
+  command without spawning any app processes. `--kill-on-timeout` terminates a
+  timed-out setup command process group and records the kill response in the setup
+  result.
 - `workspace launch-profile-apps --profile` launches the profile's declared
   startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
   `--dry-run` returns one launch preview per startup app without spawning any app
@@ -427,6 +430,8 @@ would be launched without spawning it.
 log-tail, and kill-on-timeout options without spawning the command.
 `workspace_launch_profile_apps` accepts `dry_run=true` to return one launch
 preview per startup app declared by the profile without spawning any of them.
+`workspace_run_profile_setup` accepts `dry_run=true` to return one launch preview
+per setup command declared by the profile without spawning any of them.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
