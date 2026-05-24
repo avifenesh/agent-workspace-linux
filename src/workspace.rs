@@ -1946,7 +1946,12 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     }),
                 )?;
                 (
-                    response_with_status(true, "app launched in workspace", &state.status),
+                    {
+                        let mut response =
+                            response_with_status(true, "app launched in workspace", &state.status);
+                        response.apps = Some(vec![app]);
+                        response
+                    },
                     false,
                 )
             }
@@ -3525,7 +3530,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         },
         IpcRequest::WaitApp { app_id, timeout_ms } => {
             match wait_workspace_app(state, &app_id, timeout_ms) {
-                Ok(stopped) => {
+                Ok((stopped, app)) => {
                     record_event(
                         state,
                         "wait_app",
@@ -3540,7 +3545,9 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     } else {
                         "workspace app still running after timeout"
                     };
-                    (response_with_status(stopped, message, &state.status), false)
+                    let mut response = response_with_status(stopped, message, &state.status);
+                    response.apps = Some(vec![app]);
+                    (response, false)
                 }
                 Err(error) => (
                     response_with_status(false, error.to_string(), &state.status),
@@ -3561,13 +3568,15 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             ),
         },
         IpcRequest::KillApp { app_id } => match kill_workspace_app(state, &app_id) {
-            Ok(message) => {
+            Ok((message, app)) => {
                 record_event(
                     state,
                     "kill_app",
                     serde_json::json!({ "target": &app_id, "message": &message }),
                 )?;
-                (response_with_status(true, message, &state.status), false)
+                let mut response = response_with_status(true, message, &state.status);
+                response.apps = Some(vec![app]);
+                (response, false)
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),
@@ -5056,7 +5065,11 @@ fn read_workspace_app_log(
     })
 }
 
-fn wait_workspace_app(state: &mut DaemonState, app_id: &str, timeout_ms: u64) -> Result<bool> {
+fn wait_workspace_app(
+    state: &mut DaemonState,
+    app_id: &str,
+    timeout_ms: u64,
+) -> Result<(bool, WorkspaceApp)> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         bail!("app id cannot be empty");
@@ -5068,10 +5081,10 @@ fn wait_workspace_app(state: &mut DaemonState, app_id: &str, timeout_ms: u64) ->
         refresh_apps(state)?;
         let app = resolve_workspace_app(&state.status.apps, app_id)?;
         if !app.running {
-            return Ok(true);
+            return Ok((true, app.clone()));
         }
         if started.elapsed() >= timeout {
-            return Ok(false);
+            return Ok((false, app.clone()));
         }
         let remaining = timeout.saturating_sub(started.elapsed());
         thread::sleep(remaining.min(Duration::from_millis(100)));
@@ -5138,19 +5151,20 @@ fn signal_process_group(pgid: u32, signal: i32) -> Result<()> {
     Err(error).with_context(|| format!("failed to signal process group {pgid}"))
 }
 
-fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
+fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<(String, WorkspaceApp)> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         bail!("app id cannot be empty");
     }
 
-    let (message, exit_detail) = {
+    let (message, exit_detail, app_info) = {
         let app = resolve_workspace_app_process_mut(&mut state.apps, app_id)?;
 
         if !app.info.running {
             (
                 format!("workspace app {} is already stopped", app.info.id),
                 None,
+                app.info.clone(),
             )
         } else if let Some(status) = app
             .child
@@ -5161,6 +5175,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
             (
                 format!("workspace app {} is already stopped", app.info.id),
                 Some(app_exit_event_detail(&app.info)),
+                app.info.clone(),
             )
         } else {
             let status = terminate_app_process(&app.info.id, &mut app.child)?;
@@ -5168,6 +5183,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
             (
                 format!("workspace app {} killed", app.info.id),
                 Some(app_exit_event_detail(&app.info)),
+                app.info.clone(),
             )
         }
     };
@@ -5176,7 +5192,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
     if let Some(detail) = exit_detail {
         record_event(state, "app_exit", detail)?;
     }
-    Ok(message)
+    Ok((message, app_info))
 }
 
 fn resolve_workspace_app<'a>(apps: &'a [WorkspaceApp], app_id: &str) -> Result<&'a WorkspaceApp> {
@@ -5231,6 +5247,9 @@ fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
 }
 
 fn response_last_app_id(response: &IpcResponse) -> Option<String> {
+    if let Some(app) = response.apps.as_ref().and_then(|apps| apps.last()) {
+        return Some(app.id.clone());
+    }
     response
         .status
         .as_ref()?
@@ -5240,6 +5259,13 @@ fn response_last_app_id(response: &IpcResponse) -> Option<String> {
 }
 
 fn response_app<'a>(response: &'a IpcResponse, app_id: &str) -> Option<&'a WorkspaceApp> {
+    if let Some(app) = response
+        .apps
+        .as_ref()
+        .and_then(|apps| apps.iter().find(|app| matches_app_id(app, app_id)))
+    {
+        return Some(app);
+    }
     response
         .status
         .as_ref()?
