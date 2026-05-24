@@ -253,6 +253,8 @@ pub struct WorkspaceManifest {
     pub started_at_unix: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stopped_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_seconds: Option<u64>,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -2259,6 +2261,8 @@ fn workspace_manifest(status: &WorkspaceStatus, stopped_at_unix: Option<u64>) ->
         ready: status.ready,
         started_at_unix: status.started_at_unix,
         stopped_at_unix,
+        runtime_seconds: stopped_at_unix
+            .and_then(|stopped| stopped.checked_sub(status.started_at_unix)),
         display: status.display.clone(),
         width: status.width,
         height: status.height,
