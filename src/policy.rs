@@ -62,23 +62,50 @@ pub struct AppliedWorkspacePolicy {
     #[serde(default)]
     pub network: NetworkPolicy,
     pub setup_command_count: usize,
+    #[serde(default)]
+    pub runtime_capabilities: PolicyRuntimeCapabilities,
     pub enforcement: PolicyEnforcement,
 }
 
 impl AppliedWorkspacePolicy {
-    pub fn new(
+    pub fn new_with_capabilities(
         profile_id: String,
         mounts: Vec<ProfileMount>,
         network: NetworkPolicy,
         setup_command_count: usize,
+        runtime_capabilities: PolicyRuntimeCapabilities,
     ) -> Self {
         let mount_policy_requested = !mounts.is_empty();
         let restricted_network_requested = !matches!(network.mode, NetworkMode::InheritHost);
+        let mount_detail = if mount_policy_requested {
+            if let Some(backend) = &runtime_capabilities.preferred_mount_backend {
+                format!(
+                    "mounts are declared; {backend} is available as a candidate but is not active"
+                )
+            } else {
+                "mounts are declared but no mount namespace backend is available".to_string()
+            }
+        } else {
+            "no mount policy requested".to_string()
+        };
+        let network_detail = if restricted_network_requested {
+            if let Some(backend) = &runtime_capabilities.preferred_network_backend {
+                format!(
+                    "network policy is declared; {backend} is available as a candidate but is not active"
+                )
+            } else {
+                "network policy is declared but no network isolation backend is available"
+                    .to_string()
+            }
+        } else {
+            "profile inherits the host network by policy".to_string()
+        };
         Self {
             profile_id,
             mounts,
             network,
             setup_command_count,
+            runtime_capabilities,
             enforcement: PolicyEnforcement {
                 display_isolation: PolicyCapabilityStatus {
                     requested: true,
@@ -94,21 +121,12 @@ impl AppliedWorkspacePolicy {
                 mounts: PolicyCapabilityStatus {
                     requested: mount_policy_requested,
                     enforced: !mount_policy_requested,
-                    detail: if mount_policy_requested {
-                        "mounts are declared but no mount namespace backend is active".to_string()
-                    } else {
-                        "no mount policy requested".to_string()
-                    },
+                    detail: mount_detail,
                 },
                 network: PolicyCapabilityStatus {
                     requested: restricted_network_requested,
                     enforced: !restricted_network_requested,
-                    detail: if restricted_network_requested {
-                        "network policy is declared but no network isolation backend is active"
-                            .to_string()
-                    } else {
-                        "profile inherits the host network by policy".to_string()
-                    },
+                    detail: network_detail,
                 },
             },
         }
@@ -117,6 +135,97 @@ impl AppliedWorkspacePolicy {
     pub fn has_requested_unenforced_policy(&self) -> bool {
         requested_but_unenforced(&self.enforcement.mounts)
             || requested_but_unenforced(&self.enforcement.network)
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PolicyRuntimeCapabilities {
+    pub bubblewrap: PolicyToolCheck,
+    pub firejail: PolicyToolCheck,
+    pub unshare: PolicyToolCheck,
+    pub slirp4netns: PolicyToolCheck,
+    pub can_candidate_mounts: bool,
+    pub can_candidate_disable_network: bool,
+    pub can_candidate_network_allowlist: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_mount_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_network_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+impl PolicyRuntimeCapabilities {
+    pub fn from_tools(
+        bubblewrap: PolicyToolCheck,
+        firejail: PolicyToolCheck,
+        unshare: PolicyToolCheck,
+        slirp4netns: PolicyToolCheck,
+    ) -> Self {
+        let preferred_mount_backend = if bubblewrap.ok {
+            Some("bubblewrap".to_string())
+        } else if firejail.ok {
+            Some("firejail".to_string())
+        } else if unshare.ok {
+            Some("unshare".to_string())
+        } else {
+            None
+        };
+        let preferred_network_backend = if bubblewrap.ok {
+            Some("bubblewrap".to_string())
+        } else if firejail.ok {
+            Some("firejail".to_string())
+        } else if unshare.ok {
+            Some("unshare".to_string())
+        } else {
+            None
+        };
+        let can_candidate_mounts = preferred_mount_backend.is_some();
+        let can_candidate_disable_network = preferred_network_backend.is_some();
+        let can_candidate_network_allowlist = firejail.ok || slirp4netns.ok;
+        let mut notes = Vec::new();
+        if bubblewrap.ok {
+            notes.push(
+                "bubblewrap is the preferred candidate for mount and network namespace enforcement"
+                    .to_string(),
+            );
+        } else {
+            notes.push(
+                "install bubblewrap to unlock the preferred unprivileged policy backend candidate"
+                    .to_string(),
+            );
+        }
+        if can_candidate_network_allowlist {
+            notes.push("network allowlists still need a concrete rules backend before they can be enforced".to_string());
+        }
+
+        Self {
+            bubblewrap,
+            firejail,
+            unshare,
+            slirp4netns,
+            can_candidate_mounts,
+            can_candidate_disable_network,
+            can_candidate_network_allowlist,
+            preferred_mount_backend,
+            preferred_network_backend,
+            notes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PolicyToolCheck {
+    pub ok: bool,
+    pub detail: String,
+}
+
+impl Default for PolicyToolCheck {
+    fn default() -> Self {
+        Self {
+            ok: false,
+            detail: "not checked".to_string(),
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::policy::AppliedWorkspacePolicy;
+use crate::policy::{AppliedWorkspacePolicy, PolicyRuntimeCapabilities, PolicyToolCheck};
 use anyhow::{anyhow, bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,7 @@ pub struct RuntimeReport {
     pub window_manager: Check,
     pub xdotool: Check,
     pub screenshot: Check,
+    pub policy: PolicyRuntimeCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -291,6 +292,7 @@ pub fn doctor_report() -> DoctorReport {
         window_manager: first_available_command(&["openbox", "i3", "fluxbox"]),
         xdotool: command_path_check("xdotool"),
         screenshot: first_available_command(&["import", "scrot"]),
+        policy: policy_runtime_capabilities(),
     };
 
     let mut blockers = Vec::new();
@@ -334,6 +336,15 @@ pub fn doctor_report() -> DoctorReport {
         blockers,
         recommended_next_step,
     }
+}
+
+pub fn policy_runtime_capabilities() -> PolicyRuntimeCapabilities {
+    PolicyRuntimeCapabilities::from_tools(
+        policy_tool_check("bwrap"),
+        policy_tool_check("firejail"),
+        policy_tool_check("unshare"),
+        policy_tool_check("slirp4netns"),
+    )
 }
 
 pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
@@ -1713,6 +1724,14 @@ fn first_available_command(commands: &[&str]) -> Check {
     Check {
         ok: false,
         detail: format!("missing all of: {}", commands.join(", ")),
+    }
+}
+
+fn policy_tool_check(command: &str) -> PolicyToolCheck {
+    let check = command_path_check(command);
+    PolicyToolCheck {
+        ok: check.ok,
+        detail: check.detail,
     }
 }
 

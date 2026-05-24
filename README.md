@@ -65,8 +65,9 @@ sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick
 ```
 
 `doctor` is implemented first so missing runtime dependencies are visible before
-the workspace runtime grows. The workspace commands use a small local Unix
-socket daemon:
+the workspace runtime grows. It also reports optional policy backend candidates
+such as bubblewrap, firejail, unshare, and slirp4netns without treating them as
+active enforcement. The workspace commands use a small local Unix socket daemon:
 
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.
@@ -104,8 +105,9 @@ socket daemon:
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
   hidden-workspace acknowledgement, unenforced-policy acknowledgement, applied
-  policy snapshot, and which parts are currently enforced. `workspace status`
-  and `workspace stop` talk to the same socket.
+  policy snapshot, policy backend candidates discovered at start time, and
+  which parts are currently enforced. `workspace status` and `workspace stop`
+  talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_put`, `profile_delete`,
