@@ -364,6 +364,24 @@ pub enum IpcRequest {
         app_id: Option<String>,
         timeout_ms: u64,
     },
+    MoveWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        x: i32,
+        y: i32,
+        timeout_ms: u64,
+    },
+    ResizeWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        width: u32,
+        height: u32,
+        timeout_ms: u64,
+    },
     Click {
         x: i32,
         y: i32,
@@ -892,6 +910,59 @@ pub fn close_matching_window(
             title_contains,
             pid,
             app_id,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn move_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    x: i32,
+    y: i32,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::MoveWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            x,
+            y,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn resize_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    width: u32,
+    height: u32,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_window_size(width, height)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ResizeWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            width,
+            height,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
@@ -1984,6 +2055,142 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             "workspace matching window close requested",
                             &state.status,
                         );
+                        response.windows = Some(vec![window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
+        IpcRequest::MoveWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            x,
+            y,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| validate_workspace_coordinates(&state.status, x, y, "window move"))
+            {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => {
+                    match move_workspace_window_target(state, window_id.as_deref(), &criteria, x, y)
+                    {
+                        Ok(Some(window)) => {
+                            record_event(
+                                state,
+                                "move_window",
+                                serde_json::json!({
+                                    "window_id": &window.id,
+                                    "title_contains": criteria.title_contains.as_deref(),
+                                    "pid": criteria.pid,
+                                    "app_id": criteria.app_id.as_deref(),
+                                    "x": x,
+                                    "y": y,
+                                    "timeout_ms": criteria.timeout_ms,
+                                }),
+                            )?;
+                            let mut response =
+                                response_with_status(true, "workspace window moved", &state.status);
+                            response.windows = Some(vec![window]);
+                            (response, false)
+                        }
+                        Ok(None) => {
+                            let mut response = response_with_status(
+                                false,
+                                "workspace window not found before timeout",
+                                &state.status,
+                            );
+                            response.windows = Some(Vec::new());
+                            (response, false)
+                        }
+                        Err(error) => (
+                            response_with_status(false, error.to_string(), &state.status),
+                            false,
+                        ),
+                    }
+                }
+            }
+        }
+        IpcRequest::ResizeWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            width,
+            height,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| validate_window_size(width, height))
+            .and_then(|()| validate_window_size_for_workspace(&state.status, width, height))
+            {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match resize_workspace_window_target(
+                    state,
+                    window_id.as_deref(),
+                    &criteria,
+                    width,
+                    height,
+                ) {
+                    Ok(Some(window)) => {
+                        record_event(
+                            state,
+                            "resize_window",
+                            serde_json::json!({
+                                "window_id": &window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "width": width,
+                                "height": height,
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response =
+                            response_with_status(true, "workspace window resized", &state.status);
                         response.windows = Some(vec![window]);
                         (response, false)
                     }
@@ -3278,6 +3485,39 @@ fn close_matching_workspace_window(
     Ok(Some(window))
 }
 
+fn move_workspace_window_target(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    x: i32,
+    y: i32,
+) -> Result<Option<WorkspaceWindow>> {
+    validate_workspace_coordinates(&state.status, x, y, "window move")?;
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    move_workspace_window(&state.status, &window.id, x, y)
+        .map(Some)
+        .with_context(|| format!("failed to move workspace window {}", window.id))
+}
+
+fn resize_workspace_window_target(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    width: u32,
+    height: u32,
+) -> Result<Option<WorkspaceWindow>> {
+    validate_window_size(width, height)?;
+    validate_window_size_for_workspace(&state.status, width, height)?;
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    resize_workspace_window(&state.status, &window.id, width, height)
+        .map(Some)
+        .with_context(|| format!("failed to resize workspace window {}", window.id))
+}
+
 struct WindowClickResult {
     window: WorkspaceWindow,
     x: i32,
@@ -3753,6 +3993,51 @@ fn close_workspace_window(status: &WorkspaceStatus, window_id: &str) -> Result<(
         .context("failed to run xdotool windowclose")?;
     output_text(output, "xdotool windowclose")?;
     Ok(())
+}
+
+fn move_workspace_window(
+    status: &WorkspaceStatus,
+    window_id: &str,
+    x: i32,
+    y: i32,
+) -> Result<WorkspaceWindow> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    validate_workspace_coordinates(status, x, y, "window move")?;
+    let output = workspace_command(status, "xdotool")
+        .args([
+            "windowmove",
+            "--sync",
+            &window_id,
+            &x.to_string(),
+            &y.to_string(),
+        ])
+        .output()
+        .context("failed to run xdotool windowmove")?;
+    output_text(output, "xdotool windowmove")?;
+    window_info(status, &window_id)
+}
+
+fn resize_workspace_window(
+    status: &WorkspaceStatus,
+    window_id: &str,
+    width: u32,
+    height: u32,
+) -> Result<WorkspaceWindow> {
+    let window_id = sanitize_x11_id(window_id, "window id")?;
+    validate_window_size(width, height)?;
+    validate_window_size_for_workspace(status, width, height)?;
+    let output = workspace_command(status, "xdotool")
+        .args([
+            "windowsize",
+            "--sync",
+            &window_id,
+            &width.to_string(),
+            &height.to_string(),
+        ])
+        .output()
+        .context("failed to run xdotool windowsize")?;
+    output_text(output, "xdotool windowsize")?;
+    window_info(status, &window_id)
 }
 
 fn click_workspace(status: &WorkspaceStatus, x: i32, y: i32, button: u8, count: u8) -> Result<()> {
@@ -4398,6 +4683,30 @@ fn validate_workspace_coordinates(
     if x < 0 || y < 0 || x as u32 >= status.width || y as u32 >= status.height {
         bail!(
             "{label} coordinates {x},{y} are outside workspace bounds {}x{}",
+            status.width,
+            status.height
+        );
+    }
+    Ok(())
+}
+
+fn validate_window_size(width: u32, height: u32) -> Result<()> {
+    if width == 0 || height == 0 {
+        bail!("window size must be positive");
+    }
+    Ok(())
+}
+
+fn validate_window_size_for_workspace(
+    status: &WorkspaceStatus,
+    width: u32,
+    height: u32,
+) -> Result<()> {
+    if width > status.width || height > status.height {
+        bail!(
+            "window size {}x{} is outside workspace bounds {}x{}",
+            width,
+            height,
             status.width,
             status.height
         );

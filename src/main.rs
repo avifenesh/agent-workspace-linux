@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -213,6 +213,34 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                     timeout_ms,
                 )?),
             }
+        }
+        "move-window" => {
+            let (id, window_id, title_contains, pid, app_id, x, y, timeout_ms) =
+                parse_move_window_options(&args[1..])?;
+            print_json(&workspace::move_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                x,
+                y,
+                timeout_ms,
+            )?)
+        }
+        "resize-window" => {
+            let (id, window_id, title_contains, pid, app_id, width, height, timeout_ms) =
+                parse_resize_window_options(&args[1..])?;
+            print_json(&workspace::resize_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                width,
+                height,
+                timeout_ms,
+            )?)
         }
         "click" => {
             let (id, x, y, button, count) = parse_click_options(&args[1..])?;
@@ -392,7 +420,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1167,6 +1195,91 @@ fn parse_close_window_options(args: &[String]) -> Result<(String, CloseWindowTar
             app_id,
             timeout_ms,
         },
+    ))
+}
+
+type MoveWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    i32,
+    i32,
+    Option<u64>,
+);
+
+fn parse_move_window_options(args: &[String]) -> Result<MoveWindowOptions> {
+    let (id, title_contains, pid, app_id, timeout_ms, values) =
+        parse_window_target_values(args, "workspace move-window")?;
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, x_value, y_value) = if has_match_filter {
+        if values.len() != 2 {
+            bail!("workspace move-window with match filters requires X and Y coordinates");
+        }
+        (None, &values[0], &values[1])
+    } else {
+        if values.len() != 3 {
+            bail!("workspace move-window requires WINDOW_ID X Y or match filters with X Y");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace move-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), &values[1], &values[2])
+    };
+    let x = x_value
+        .parse()
+        .context("move-window X must be an integer")?;
+    let y = y_value
+        .parse()
+        .context("move-window Y must be an integer")?;
+    Ok((id, window_id, title_contains, pid, app_id, x, y, timeout_ms))
+}
+
+type ResizeWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    u32,
+    u32,
+    Option<u64>,
+);
+
+fn parse_resize_window_options(args: &[String]) -> Result<ResizeWindowOptions> {
+    let (id, title_contains, pid, app_id, timeout_ms, values) =
+        parse_window_target_values(args, "workspace resize-window")?;
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, width_value, height_value) = if has_match_filter {
+        if values.len() != 2 {
+            bail!("workspace resize-window with match filters requires WIDTH and HEIGHT");
+        }
+        (None, &values[0], &values[1])
+    } else {
+        if values.len() != 3 {
+            bail!("workspace resize-window requires WINDOW_ID WIDTH HEIGHT or match filters with WIDTH HEIGHT");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace resize-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), &values[1], &values[2])
+    };
+    let width = width_value
+        .parse()
+        .context("resize-window WIDTH must be a positive integer")?;
+    let height = height_value
+        .parse()
+        .context("resize-window HEIGHT must be a positive integer")?;
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        pid,
+        app_id,
+        width,
+        height,
+        timeout_ms,
     ))
 }
 
@@ -2338,6 +2451,10 @@ Usage:
   agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
   agent-workspace-linux workspace close-window [--id ID] WINDOW_ID
   agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace move-window [--id ID] WINDOW_ID X Y
+  agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
+  agent-workspace-linux workspace resize-window [--id ID] WINDOW_ID WIDTH HEIGHT
+  agent-workspace-linux workspace resize-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] WIDTH HEIGHT
   agent-workspace-linux workspace click [--id ID] [--button N] [--count N] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y
