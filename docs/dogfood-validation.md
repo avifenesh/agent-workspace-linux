@@ -165,6 +165,12 @@ Findings:
   using a throwaway workspace `CARGO_HOME` so Cargo credentials and registry
   cache state are not mounted by default. Other user-local toolchains still need
   explicit mounts or future template support.
+- MCP dogfood verified the same profile shape by saving a temporary
+  `dogfood-project-dev` profile, launching a command in the existing
+  `mcp-visible` workspace with `mount_isolation=bubblewrap_mount_namespace`,
+  and confirming `PWD=/workspace/project`, `cargo --version`, `rustc --version`,
+  mounted rust directories, and absence of `/workspace/rust/credentials.toml`.
+  The temporary profile was deleted after the run.
 - Existing limitation: `local_only` is a sandbox-local loopback namespace. It
   does not bridge host localhost services into the workspace.
 - Current product boundary: do not expand the network gate into broad host

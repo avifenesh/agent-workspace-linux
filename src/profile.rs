@@ -549,8 +549,11 @@ fn project_dev_rust_toolchain() -> ProjectDevRustToolchain {
     let rustup_home = env::var_os("RUSTUP_HOME")
         .map(PathBuf::from)
         .or_else(|| home.as_ref().map(|path| path.join(".rustup")));
-    let base_path = env::var("PATH").unwrap_or_else(|_| DEFAULT_WORKSPACE_PATH.to_string());
-    project_dev_rust_toolchain_from_paths(cargo_home.as_deref(), rustup_home.as_deref(), &base_path)
+    project_dev_rust_toolchain_from_paths(
+        cargo_home.as_deref(),
+        rustup_home.as_deref(),
+        DEFAULT_WORKSPACE_PATH,
+    )
 }
 
 fn project_dev_rust_toolchain_from_paths(

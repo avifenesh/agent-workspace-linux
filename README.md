@@ -316,9 +316,10 @@ exiting.
 - `profile template project-dev` creates a starter project QA profile. It
   mounts the selected project read-write and, when detected, mounts Cargo's
   `bin` shims plus rustup toolchains read-only. It deliberately uses a
-  throwaway `CARGO_HOME` inside the workspace instead of mounting Cargo
-  credentials or registry/cache state. `profile template restricted-chrome`
-  creates a browser starter profile with
+  throwaway `CARGO_HOME` and a small system `PATH` inside the workspace instead
+  of mounting Cargo credentials, registry/cache state, or volatile host shell
+  paths. `profile template restricted-chrome` creates a browser starter profile
+  with
   `network.mode=disabled`, `require_enforced_policy=true`, an isolated Chrome
   user-data dir, and an explicit `--no-sandbox` startup command. `profile
   template browser-session --user-data-dir PATH` creates an authenticated-browser
