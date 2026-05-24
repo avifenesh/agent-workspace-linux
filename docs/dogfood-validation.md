@@ -63,13 +63,16 @@ Findings:
 
 Post-patch verification:
 
-- Local `cargo test` passes 24 tests, including coverage for active profile
+- Local `cargo test` passes 26 tests, including coverage for active profile
   cwd/env inheritance and explicit per-launch profile override.
 - The installed CLI was rebuilt with `./install.sh`. A regression dogfood
   launched a workspace app that invoked `workspace stop` from inside its own
   workspace process group. Even though that stop client was terminated before it
   could receive the response, the daemon still marked the workspace stopped and
   wrote `ready=false` plus `stopped_at_unix` to the manifest.
+- The installed CLI status shape was checked after reinstall and reports
+  `daemon_pid`, `x_server_pid`, and `window_manager_pid` for process-aware stale
+  cleanup.
 - `scripts/integration_smoke.sh` now covers profile validation, invalid-profile
   rejection, and that self-stop lost-client case in addition to doctor,
   profile import/export, open-profile dry-run,
@@ -78,3 +81,10 @@ Post-patch verification:
   listing, clipboard, keyboard input, app wait, artifact inspection, event
   history, stopped manifests, and daemon-crash recovery where stale cleanup
   removes manifest-recorded orphan app and X11 runtime processes.
+- MCP dogfood covered the local-dev browser QA path: a hidden workspace launched
+  `python3 -m http.server` from this repo, a workspace command fetched
+  `README.md` over `127.0.0.1`, Chrome opened the served page with
+  `wait_window` plus `screenshot_window`, targeted `ctrl+l`, paste, and
+  `Return` navigated to `docs/dogfood-validation.md`, `workspace_observe`
+  captured a screenshot/events snapshot, and `workspace_stop` terminated both
+  the dev server and Chrome before stale cleanup removed the runtime directory.
