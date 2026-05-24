@@ -269,7 +269,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_start",
-        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when available; local_only and allowlist network profiles are declared intent until dedicated backends exist. Profiles with require_enforced_policy=true reject unenforced policy instead of accepting acknowledgement.",
+        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set dry_run=true to preview acknowledgement, runtime, and policy requirements without creating the hidden environment. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount profiles and disabled-network profiles are enforced with bubblewrap when available; local_only and allowlist network profiles are declared intent until dedicated backends exist. Profiles with require_enforced_policy=true reject unenforced policy instead of accepting acknowledgement.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -281,9 +281,15 @@ impl AgentWorkspaceLinux {
         &self,
         Parameters(params): Parameters<WorkspaceStartParams>,
     ) -> Json<IpcResponse> {
-        Json(result_response(
-            params.into_options().and_then(workspace::start_workspace),
-        ))
+        let dry_run = params.dry_run;
+        let result = params.into_options().and_then(|options| {
+            if dry_run {
+                workspace::preview_workspace_start(options)
+            } else {
+                workspace::start_workspace(options)
+            }
+        });
+        Json(result_response(result))
     }
 
     #[tool(
@@ -341,6 +347,7 @@ impl AgentWorkspaceLinux {
                 message: "workspace status returned".to_string(),
                 apps: Some(status.apps.clone()),
                 status: Some(status),
+                start_preview: None,
                 ipc: None,
                 environment: None,
                 windows: None,
@@ -1779,6 +1786,8 @@ struct WorkspaceStartParams {
     #[serde(default)]
     acknowledge_unenforced_policy: bool,
     #[serde(default)]
+    dry_run: bool,
+    #[serde(default)]
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
@@ -2489,6 +2498,7 @@ fn error_response(message: String, status: Option<WorkspaceStatus>) -> IpcRespon
         ok: false,
         message,
         status,
+        start_preview: None,
         ipc: None,
         environment: None,
         apps: None,

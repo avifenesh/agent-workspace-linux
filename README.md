@@ -58,6 +58,7 @@ cargo run -- profile check project-dev
 cargo run -- profile export project-dev --output ./profile-export.json
 cargo run -- profile delete --dry-run project-dev
 cargo run -- profile delete project-dev
+cargo run -- workspace start --dry-run --profile project-dev
 cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-unenforced-policy --profile project-dev
 cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window
 cargo run -- workspace start --ack-hidden-workspace --foreground
@@ -150,6 +151,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 
 - `workspace start` requires `--ack-hidden-workspace` so the user explicitly
   acknowledges that a separate agent-controlled environment is being created.
+  `--dry-run` returns a start preview without creating a runtime directory,
+  Xauthority file, X server, window manager, or daemon socket.
   `--purpose TEXT` records a human-readable reason in status and the start event
   so an app UI can explain why the unseen workspace exists.
   If the profile asks for mounts or restricted networking, the current X11
@@ -403,6 +406,9 @@ created, replaced, or rejected. It rejects existing profile ids by default; set
 existing files require `replace=true` before they are overwritten.
 `profile_delete` accepts `dry_run=true` to return the profile that would be
 removed without deleting it.
+`workspace_start` accepts `dry_run=true` to preview hidden-workspace
+acknowledgement, runtime readiness, profile policy acknowledgement, strict
+policy blocks, and whether a new workspace would be created.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime

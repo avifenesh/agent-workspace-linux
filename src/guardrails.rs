@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 5,
+        version: 6,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -57,6 +57,14 @@ pub fn guardrail_summary() -> GuardrailSummary {
             ),
         ],
         previews: vec![
+            rule(
+                "workspace-start-preview",
+                "dry_run",
+                &["workspace start", "workspace_start"],
+                "Workspace start creates a hidden runtime only when dry_run is false.",
+                "--dry-run or dry_run=true",
+                "Returns acknowledgement, runtime readiness, profile policy, and would-start status without creating X11 runtime state.",
+            ),
             rule(
                 "profile-put-preview",
                 "dry_run",

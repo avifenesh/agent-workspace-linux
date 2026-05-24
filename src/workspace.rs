@@ -293,6 +293,32 @@ pub struct WorkspaceCleanupEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceStartPreview {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    pub ok_to_start: bool,
+    pub would_start: bool,
+    pub already_running: bool,
+    pub runtime_ready: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_blockers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_policy: Option<AppliedWorkspacePolicy>,
+    pub user_acknowledged_hidden_workspace: bool,
+    pub requires_hidden_workspace_ack: bool,
+    pub missing_hidden_workspace_ack: bool,
+    pub user_acknowledged_unenforced_policy: bool,
+    pub requires_unenforced_policy_ack: bool,
+    pub missing_unenforced_policy_ack: bool,
+    pub can_acknowledge_unenforced_policy: bool,
+    pub blocks_unenforced_policy: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceApp {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -745,6 +771,8 @@ pub struct IpcResponse {
     pub message: String,
     pub status: Option<WorkspaceStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_preview: Option<WorkspaceStartPreview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ipc: Option<WorkspaceIpcInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<WorkspaceEnvironment>,
@@ -849,6 +877,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             message: format!("workspace {:?} is already running", status.id),
             apps: Some(status.apps.clone()),
             status: Some(status),
+            start_preview: None,
             ipc: None,
             environment: None,
             windows: None,
@@ -865,6 +894,26 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             request(&daemon_options.socket_path, IpcRequest::Status)
         }
     }
+}
+
+pub fn preview_workspace_start(options: WorkspaceStartOptions) -> Result<IpcResponse> {
+    let preview = workspace_start_preview(options)?;
+    Ok(IpcResponse {
+        ok: true,
+        message: "workspace start dry run returned".to_string(),
+        status: None,
+        start_preview: Some(preview),
+        ipc: None,
+        environment: None,
+        apps: None,
+        windows: None,
+        active_window: None,
+        pointer: None,
+        screenshot: None,
+        app_log: None,
+        clipboard: None,
+        events: None,
+    })
 }
 
 pub fn start_workspace_foreground(options: WorkspaceStartOptions) -> Result<()> {
@@ -2214,6 +2263,70 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     Ok(())
 }
 
+fn workspace_start_preview(options: WorkspaceStartOptions) -> Result<WorkspaceStartPreview> {
+    let id = sanitize_workspace_id(&options.id)?;
+    let purpose = normalize_workspace_purpose(options.purpose)?;
+    let already_running = status_workspace(&id).is_ok();
+    let runtime = doctor_report();
+    let applied_policy = options.applied_policy.clone();
+    let blocks_unenforced_policy = applied_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::blocks_requested_unenforced_policy);
+    let can_acknowledge_unenforced_policy = applied_policy
+        .as_ref()
+        .is_some_and(AppliedWorkspacePolicy::can_acknowledge_unenforced_policy);
+    let requires_hidden_workspace_ack = !already_running;
+    let missing_hidden_workspace_ack =
+        requires_hidden_workspace_ack && !options.user_acknowledged_hidden_workspace;
+    let requires_unenforced_policy_ack = can_acknowledge_unenforced_policy;
+    let missing_unenforced_policy_ack =
+        requires_unenforced_policy_ack && !options.user_acknowledged_unenforced_policy;
+    let ok_to_start = already_running
+        || (runtime.ready_for_x11_workspace
+            && !missing_hidden_workspace_ack
+            && !missing_unenforced_policy_ack
+            && !blocks_unenforced_policy);
+    let would_start = !already_running && ok_to_start;
+    let message = if already_running {
+        format!("workspace {id:?} is already running")
+    } else if missing_hidden_workspace_ack {
+        "workspace start would require hidden-workspace acknowledgement".to_string()
+    } else if blocks_unenforced_policy {
+        "workspace start would be blocked because the profile requires full policy enforcement"
+            .to_string()
+    } else if missing_unenforced_policy_ack {
+        "workspace start would require unenforced-policy acknowledgement".to_string()
+    } else if !runtime.ready_for_x11_workspace {
+        format!(
+            "workspace runtime is not ready: {}",
+            runtime.blockers.join("; ")
+        )
+    } else {
+        "workspace start would create a new hidden workspace".to_string()
+    };
+
+    Ok(WorkspaceStartPreview {
+        id,
+        purpose,
+        ok_to_start,
+        would_start,
+        already_running,
+        runtime_ready: runtime.ready_for_x11_workspace,
+        runtime_blockers: runtime.blockers,
+        profile_id: options.profile_id,
+        applied_policy,
+        user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
+        requires_hidden_workspace_ack,
+        missing_hidden_workspace_ack,
+        user_acknowledged_unenforced_policy: options.user_acknowledged_unenforced_policy,
+        requires_unenforced_policy_ack,
+        missing_unenforced_policy_ack,
+        can_acknowledge_unenforced_policy,
+        blocks_unenforced_policy,
+        message,
+    })
+}
+
 enum WorkspaceStartPlan {
     AlreadyRunning(WorkspaceStatus),
     Start(DaemonOptions),
@@ -2545,6 +2658,7 @@ fn read_events_from_workspace_log(
         ok: true,
         message: "workspace events returned from saved event log".to_string(),
         status: None,
+        start_preview: None,
         ipc: None,
         environment: None,
         apps,
@@ -2589,6 +2703,7 @@ fn read_app_log_from_workspace_manifest(
         ok: true,
         message: "workspace app log read from saved manifest".to_string(),
         status: None,
+        start_preview: None,
         ipc: None,
         environment: None,
         apps: Some(vec![app]),
@@ -2627,6 +2742,7 @@ fn list_apps_from_workspace_manifest(
         ok: true,
         message: "workspace apps listed from saved manifest".to_string(),
         status: None,
+        start_preview: None,
         ipc: None,
         environment: None,
         apps: Some(apps),
@@ -2649,6 +2765,7 @@ fn response_with_status(
         ok,
         message: message.into(),
         status: Some(status.clone()),
+        start_preview: None,
         ipc: None,
         environment: None,
         apps: None,
@@ -5249,6 +5366,7 @@ fn observe_workspace(
         message: "workspace observed".to_string(),
         apps: Some(state.status.apps.clone()),
         status: Some(state.status.clone()),
+        start_preview: None,
         ipc: None,
         environment: None,
         windows: Some(windows),

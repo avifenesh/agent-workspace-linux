@@ -96,7 +96,9 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
     match command {
         "start" => {
             let start = parse_start_options(&args[1..])?;
-            if start.foreground {
+            if start.dry_run {
+                print_json(&workspace::preview_workspace_start(start.options)?)
+            } else if start.foreground {
                 workspace::start_workspace_foreground(start.options)
             } else {
                 print_json(&workspace::start_workspace(start.options)?)
@@ -606,11 +608,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
 struct ParsedStartOptions {
     options: WorkspaceStartOptions,
     foreground: bool,
+    dry_run: bool,
 }
 
 fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
     let mut options = WorkspaceStartOptions::default();
     let mut foreground = false;
+    let mut dry_run = false;
     let mut profile_id = None;
     let mut width_explicit = false;
     let mut height_explicit = false;
@@ -619,6 +623,10 @@ fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
         match args[index].as_str() {
             "--foreground" => {
                 foreground = true;
+                index += 1;
+            }
+            "--dry-run" => {
+                dry_run = true;
                 index += 1;
             }
             "--ack-hidden-workspace" => {
@@ -669,6 +677,7 @@ fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
     Ok(ParsedStartOptions {
         options,
         foreground,
+        dry_run,
     })
 }
 
@@ -776,6 +785,7 @@ fn parse_open_profile_options(
         ParsedStartOptions {
             options,
             foreground: false,
+            dry_run: false,
         },
         profile_id,
         open_options,
@@ -3287,7 +3297,7 @@ Usage:
   agent-workspace-linux profile export ID [--output PATH] [--replace]
   agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
-  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
+  agent-workspace-linux workspace start [--dry-run] --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--startup-screenshot-window] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace list
   agent-workspace-linux workspace cleanup [--id ID] [--dry-run]
