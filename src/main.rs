@@ -113,8 +113,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::ipc_info(&id)?)
         }
         "env" => {
-            let id = parse_id_option(&args[1..])?;
-            print_json(&workspace::environment(&id)?)
+            let (id, shell) = parse_workspace_env_options(&args[1..])?;
+            let response = workspace::environment(&id)?;
+            if shell {
+                print_workspace_env_shell(&response)
+            } else {
+                print_json(&response)
+            }
         }
         "list" => {
             parse_no_options(&args[1..], "workspace list")?;
@@ -776,6 +781,26 @@ fn parse_id_option(args: &[String]) -> Result<String> {
         }
     }
     Ok(id)
+}
+
+fn parse_workspace_env_options(args: &[String]) -> Result<(String, bool)> {
+    let mut id = workspace::default_workspace_id();
+    let mut shell = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--shell" => {
+                shell = true;
+                index += 1;
+            }
+            flag => bail!("unknown workspace env option '{flag}'"),
+        }
+    }
+    Ok((id, shell))
 }
 
 struct ParsedAppsOptions {
@@ -3066,6 +3091,21 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 
+fn print_workspace_env_shell(response: &workspace::IpcResponse) -> Result<()> {
+    let environment = response
+        .environment
+        .as_ref()
+        .context("workspace env response did not include environment")?;
+    for env_var in &environment.variables {
+        println!("export {}={}", env_var.name, shell_quote(&env_var.value));
+    }
+    Ok(())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn print_help() {
     println!(
         "{}",
@@ -3082,7 +3122,7 @@ Usage:
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace ipc-info [--id ID]
-  agent-workspace-linux workspace env [--id ID]
+  agent-workspace-linux workspace env [--id ID] [--shell]
   agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] [--screenshot-window] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N] [--screenshot-window]
