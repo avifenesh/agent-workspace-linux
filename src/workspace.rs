@@ -100,6 +100,7 @@ pub struct WorkspaceStatus {
     pub user_acknowledged_hidden_workspace: bool,
     pub user_acknowledged_unenforced_policy: bool,
     pub ready: bool,
+    pub started_at_unix: u64,
     pub display: String,
     pub width: u32,
     pub height: u32,
@@ -725,6 +726,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
     let listener = UnixListener::bind(&options.socket_path)
         .with_context(|| format!("failed to bind {}", options.socket_path.display()))?;
     let event_path = options.runtime_dir.join(EVENT_LOG_FILE);
+    let started_at_unix = unix_now();
     let mut state = DaemonState {
         status: WorkspaceStatus {
             id,
@@ -733,6 +735,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
             user_acknowledged_hidden_workspace: options.user_acknowledged_hidden_workspace,
             user_acknowledged_unenforced_policy: options.user_acknowledged_unenforced_policy,
             ready: true,
+            started_at_unix,
             display: options.display,
             width: options.width,
             height: options.height,
@@ -752,6 +755,7 @@ pub fn run_daemon(options: DaemonOptions) -> Result<()> {
         "width": state.status.width,
         "height": state.status.height,
         "profile_id": state.status.profile_id.as_deref(),
+        "started_at_unix": state.status.started_at_unix,
         "user_acknowledged_hidden_workspace": state.status.user_acknowledged_hidden_workspace,
         "user_acknowledged_unenforced_policy": state.status.user_acknowledged_unenforced_policy,
     });

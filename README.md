@@ -132,10 +132,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   require `--ack-unenforced-policy`.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
-  hidden-workspace acknowledgement, unenforced-policy acknowledgement, applied
-  policy snapshot, policy backend candidates discovered at start time, and
-  which parts are currently enforced. `workspace status` and `workspace stop`
-  talk to the same socket.
+  start timestamp, hidden-workspace acknowledgement, unenforced-policy
+  acknowledgement, applied policy snapshot, policy backend candidates discovered
+  at start time, and which parts are currently enforced. `workspace status` and
+  `workspace stop` talk to the same socket.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
