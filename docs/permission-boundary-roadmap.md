@@ -88,6 +88,24 @@ Rules:
 
 ## Gates Before Hard Enforcement
 
+Current gate status on 2026-05-24:
+
+- A is mostly validated for the current X11/bubblewrap runtime. Real MCP dogfood
+  has covered Chrome, local-dev browser QA, Codex desktop feature tests, disabled
+  networking, local-only networking, read-only/read-write mounts, setup/startup
+  commands, screenshots, window targeting, input, clipboard, app logs, events,
+  manifests, stop, stale cleanup, and daemon-crash recovery.
+- A still has known product gaps: host-localhost bridging for `local_only`,
+  network allowlist enforcement, and more varied real-project coverage.
+- B has a first Codex for Linux slice: the conversation surface can show a live
+  active-workspace panel with screenshot, profile/policy/app metadata, Stop, and
+  Revoke. It still needs more live app QA inside the installed Codex app before
+  it should become a hard trust boundary.
+- C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
+  app configuration, and recovery/inspection flows work at the primitive level.
+  Authenticated browser-profile sharing, MCP-locked permission ceilings, app
+  allowlists, and user-friendly environment/profile creation are still open.
+
 ### A. Prove Runtime Claims With Real Workloads
 
 Before making permissions hard, validate that the current claims actually hold
