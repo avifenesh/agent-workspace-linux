@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -266,6 +266,26 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
                 timeout_ms,
             )?)
         }
+        "scroll" => {
+            let (id, x, y, direction, amount) = parse_scroll_options(&args[1..])?;
+            print_json(&workspace::scroll(&id, x, y, direction, amount)?)
+        }
+        "scroll-window" => {
+            let (id, window_id, title_contains, pid, app_id, x, y, direction, amount, timeout_ms) =
+                parse_scroll_window_options(&args[1..])?;
+            print_json(&workspace::scroll_window(
+                &id,
+                window_id,
+                title_contains,
+                pid,
+                app_id,
+                x,
+                y,
+                direction,
+                amount,
+                timeout_ms,
+            )?)
+        }
         "key" => {
             let (id, key) = parse_one_arg_command(&args[1..], "workspace key requires a key")?;
             print_json(&workspace::key(&id, key)?)
@@ -328,7 +348,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, active-window, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, click, click-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1418,6 +1438,153 @@ fn parse_drag_window_options(args: &[String]) -> Result<DragWindowOptions> {
     ))
 }
 
+fn parse_scroll_options(
+    args: &[String],
+) -> Result<(String, i32, i32, workspace::ScrollDirection, Option<u8>)> {
+    let mut id = workspace::default_workspace_id();
+    let mut amount = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--amount" => {
+                amount = Some(
+                    value_after(args, index, "--amount")?
+                        .parse()
+                        .context("--amount must be an integer between 1 and 100")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => bail!("unknown workspace scroll option '{value}'"),
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    if values.len() != 3 {
+        bail!("workspace scroll requires X Y DIRECTION");
+    }
+    let x = values[0].parse().context("scroll X must be an integer")?;
+    let y = values[1].parse().context("scroll Y must be an integer")?;
+    let direction = values[2]
+        .parse()
+        .context("scroll DIRECTION must be up, down, left, or right")?;
+    Ok((id, x, y, direction, amount))
+}
+
+type ScrollWindowOptions = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<String>,
+    i32,
+    i32,
+    workspace::ScrollDirection,
+    Option<u8>,
+    Option<u64>,
+);
+
+fn parse_scroll_window_options(args: &[String]) -> Result<ScrollWindowOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut title_contains = None;
+    let mut pid = None;
+    let mut app_id = None;
+    let mut timeout_ms = None;
+    let mut amount = None;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--pid" => {
+                pid = Some(
+                    value_after(args, index, "--pid")?
+                        .parse()
+                        .context("--pid must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--amount" => {
+                amount = Some(
+                    value_after(args, index, "--amount")?
+                        .parse()
+                        .context("--amount must be an integer between 1 and 100")?,
+                );
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown workspace scroll-window option '{value}'")
+            }
+            value => {
+                values.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let has_match_filter = title_contains.is_some() || pid.is_some() || app_id.is_some();
+    let (window_id, x_value, y_value, direction_value) = if has_match_filter {
+        if values.len() != 3 {
+            bail!("workspace scroll-window with match filters requires X Y DIRECTION");
+        }
+        (None, &values[0], &values[1], &values[2])
+    } else {
+        if values.len() != 4 {
+            bail!("workspace scroll-window requires WINDOW_ID X Y DIRECTION or match filters with X Y DIRECTION");
+        }
+        if timeout_ms.is_some() {
+            bail!("workspace scroll-window accepts --timeout-ms only with match filters");
+        }
+        (Some(values[0].clone()), &values[1], &values[2], &values[3])
+    };
+    let x = x_value
+        .parse()
+        .context("scroll-window X must be an integer")?;
+    let y = y_value
+        .parse()
+        .context("scroll-window Y must be an integer")?;
+    let direction = direction_value
+        .parse()
+        .context("scroll-window DIRECTION must be up, down, left, or right")?;
+    Ok((
+        id,
+        window_id,
+        title_contains,
+        pid,
+        app_id,
+        x,
+        y,
+        direction,
+        amount,
+        timeout_ms,
+    ))
+}
+
 type WindowTargetValues = (
     String,
     Option<String>,
@@ -1893,6 +2060,9 @@ Usage:
   agent-workspace-linux workspace drag [--id ID] [--button N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace drag-window [--id ID] [--button N] WINDOW_ID FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
+  agent-workspace-linux workspace scroll [--id ID] [--amount N] X Y up|down|left|right
+  agent-workspace-linux workspace scroll-window [--id ID] [--amount N] WINDOW_ID X Y up|down|left|right
+  agent-workspace-linux workspace scroll-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--amount N] [--timeout-ms N] X Y up|down|left|right
   agent-workspace-linux workspace key [--id ID] KEY
   agent-workspace-linux workspace key-window [--id ID] WINDOW_ID KEY
   agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY

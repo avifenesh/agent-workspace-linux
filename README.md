@@ -68,6 +68,8 @@ cargo run -- workspace click-window --title xterm 24 32
 cargo run -- workspace click-window --title xterm --count 2 24 32
 cargo run -- workspace drag 100 120 180 180
 cargo run -- workspace drag-window --title xterm 24 32 180 32
+cargo run -- workspace scroll --amount 3 100 120 down
+cargo run -- workspace scroll-window --title xterm --amount 3 24 32 down
 cargo run -- workspace key Return
 cargo run -- workspace key-window --title xterm Return
 cargo run -- workspace type "hello from the agent workspace"
@@ -134,7 +136,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `workspace wait-window`, `workspace screenshot`, `workspace screenshot-window`,
   `workspace focus-window`, `workspace close-window`, `workspace click`,
   `workspace click-window`, `workspace drag`, `workspace drag-window`,
-  `workspace key`, `workspace key-window`,
+  `workspace scroll`, `workspace scroll-window`, `workspace key`,
+  `workspace key-window`,
   `workspace type`, `workspace type-window`, `workspace logs`,
   `workspace wait-app`, `workspace events`, `workspace setup`, and
   `workspace kill-app` inspect or act through the same daemon, scoped to the
@@ -146,8 +149,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   match the launched process and its child processes. `click` and
   `click-window` can set button/count for right-clicks and double-clicks.
   `drag` and `drag-window` can set the mouse button for press/move/release
-  gestures. `click-window` and `drag-window` resolve the same targets and use
-  window-relative coordinates.
+  gestures. `scroll` and `scroll-window` send wheel ticks in the requested
+  direction. `click-window`, `drag-window`, and `scroll-window` resolve the
+  same targets and use window-relative coordinates.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   App launches and exits are recorded with structured metadata. Typed text is
   logged as metadata such as character count, not raw text.
@@ -178,7 +182,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
 `workspace_focus_matching_window`, `workspace_close_window`, `workspace_click`,
 `workspace_close_matching_window`, `workspace_click_window`, `workspace_drag`,
-`workspace_drag_window`, `workspace_key`, `workspace_key_window`,
-`workspace_type_text`, `workspace_type_window`,
+`workspace_drag_window`, `workspace_scroll`, `workspace_scroll_window`,
+`workspace_key`, `workspace_key_window`, `workspace_type_text`,
+`workspace_type_window`,
 `workspace_read_app_log`, `workspace_wait_app`, `workspace_events`,
 `workspace_run_profile_setup`, `workspace_kill_app`, and `workspace_stop`.

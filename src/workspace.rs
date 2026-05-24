@@ -12,6 +12,7 @@ use std::{
     os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
+    str::FromStr,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -20,11 +21,56 @@ pub const DEFAULT_WORKSPACE_ID: &str = "default";
 const DEFAULT_APP_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_CLICK_BUTTON: u8 = 1;
 const DEFAULT_CLICK_COUNT: u8 = 1;
+const DEFAULT_SCROLL_AMOUNT: u8 = 1;
+const MAX_SCROLL_AMOUNT: u8 = 100;
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DISPLAY_RANGE: std::ops::Range<u32> = 90..180;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrollDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl ScrollDirection {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    fn x11_button(self) -> u8 {
+        match self {
+            Self::Up => 4,
+            Self::Down => 5,
+            Self::Left => 6,
+            Self::Right => 7,
+        }
+    }
+}
+
+impl FromStr for ScrollDirection {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "up" => Ok(Self::Up),
+            "down" => Ok(Self::Down),
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            _ => bail!("scroll direction must be up, down, left, or right"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DoctorReport {
@@ -342,6 +388,23 @@ pub enum IpcRequest {
         to_x: i32,
         to_y: i32,
         button: u8,
+        timeout_ms: u64,
+    },
+    Scroll {
+        x: i32,
+        y: i32,
+        direction: ScrollDirection,
+        amount: u8,
+    },
+    ScrollWindow {
+        window_id: Option<String>,
+        title_contains: Option<String>,
+        pid: Option<u32>,
+        app_id: Option<String>,
+        x: i32,
+        y: i32,
+        direction: ScrollDirection,
+        amount: u8,
         timeout_ms: u64,
     },
     Key {
@@ -900,6 +963,60 @@ pub fn drag_window(
             to_x,
             to_y,
             button,
+            timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
+        },
+    )
+}
+
+pub fn scroll(
+    id: &str,
+    x: i32,
+    y: i32,
+    direction: ScrollDirection,
+    amount: Option<u8>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let amount = amount.unwrap_or(DEFAULT_SCROLL_AMOUNT);
+    validate_scroll_options(direction, amount)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::Scroll {
+            x,
+            y,
+            direction,
+            amount,
+        },
+    )
+}
+
+pub fn scroll_window(
+    id: &str,
+    window_id: Option<String>,
+    title_contains: Option<String>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    x: i32,
+    y: i32,
+    direction: ScrollDirection,
+    amount: Option<u8>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    let amount = amount.unwrap_or(DEFAULT_SCROLL_AMOUNT);
+    validate_window_target_options(&window_id, &title_contains, pid, &app_id)?;
+    validate_relative_click_coordinates(x, y)?;
+    validate_scroll_options(direction, amount)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::ScrollWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            x,
+            y,
+            direction,
+            amount,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
         },
     )
@@ -1972,6 +2089,114 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 },
             }
         }
+        IpcRequest::Scroll {
+            x,
+            y,
+            direction,
+            amount,
+        } => match scroll_workspace(&state.status, x, y, direction, amount) {
+            Ok(()) => {
+                record_event(
+                    state,
+                    "scroll",
+                    serde_json::json!({
+                        "x": x,
+                        "y": y,
+                        "direction": direction.as_str(),
+                        "amount": amount,
+                    }),
+                )?;
+                (
+                    response_with_status(true, "workspace scroll sent", &state.status),
+                    false,
+                )
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::ScrollWindow {
+            window_id,
+            title_contains,
+            pid,
+            app_id,
+            x,
+            y,
+            direction,
+            amount,
+            timeout_ms,
+        } => {
+            let criteria = WindowWaitCriteria {
+                title_contains,
+                pid,
+                app_id,
+                timeout_ms,
+            };
+            match validate_window_target_options(
+                &window_id,
+                &criteria.title_contains,
+                criteria.pid,
+                &criteria.app_id,
+            )
+            .and_then(|()| validate_relative_click_coordinates(x, y))
+            .and_then(|()| validate_scroll_options(direction, amount))
+            {
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+                Ok(()) => match scroll_workspace_window(
+                    state,
+                    window_id.as_deref(),
+                    &criteria,
+                    x,
+                    y,
+                    direction,
+                    amount,
+                ) {
+                    Ok(Some(scrolled)) => {
+                        record_event(
+                            state,
+                            "scroll_window",
+                            serde_json::json!({
+                                "window_id": &scrolled.window.id,
+                                "title_contains": criteria.title_contains.as_deref(),
+                                "pid": criteria.pid,
+                                "app_id": criteria.app_id.as_deref(),
+                                "relative_x": x,
+                                "relative_y": y,
+                                "x": scrolled.x,
+                                "y": scrolled.y,
+                                "direction": direction.as_str(),
+                                "amount": amount,
+                                "timeout_ms": criteria.timeout_ms,
+                            }),
+                        )?;
+                        let mut response = response_with_status(
+                            true,
+                            "workspace window scroll sent",
+                            &state.status,
+                        );
+                        response.windows = Some(vec![scrolled.window]);
+                        (response, false)
+                    }
+                    Ok(None) => {
+                        let mut response = response_with_status(
+                            false,
+                            "workspace window not found before timeout",
+                            &state.status,
+                        );
+                        response.windows = Some(Vec::new());
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                },
+            }
+        }
         IpcRequest::Key { key } => {
             let logged_key = key.trim().to_string();
             match key_workspace(&state.status, key) {
@@ -2696,6 +2921,12 @@ struct WindowDragResult {
     to_y: i32,
 }
 
+struct WindowScrollResult {
+    window: WorkspaceWindow,
+    x: i32,
+    y: i32,
+}
+
 fn click_workspace_window(
     state: &mut DaemonState,
     window_id: Option<&str>,
@@ -2801,6 +3032,46 @@ fn drag_workspace_window(
         from_y: absolute_from_y,
         to_x: absolute_to_x,
         to_y: absolute_to_y,
+    }))
+}
+
+fn scroll_workspace_window(
+    state: &mut DaemonState,
+    window_id: Option<&str>,
+    criteria: &WindowWaitCriteria,
+    x: i32,
+    y: i32,
+    direction: ScrollDirection,
+    amount: u8,
+) -> Result<Option<WindowScrollResult>> {
+    validate_relative_click_coordinates(x, y)?;
+    validate_scroll_options(direction, amount)?;
+    let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
+        return Ok(None);
+    };
+    if x as u32 >= window.geometry.width || y as u32 >= window.geometry.height {
+        bail!(
+            "window scroll coordinates {x},{y} are outside window bounds {}x{}",
+            window.geometry.width,
+            window.geometry.height
+        );
+    }
+    let absolute_x = window
+        .geometry
+        .x
+        .checked_add(x)
+        .context("window scroll X coordinate overflow")?;
+    let absolute_y = window
+        .geometry
+        .y
+        .checked_add(y)
+        .context("window scroll Y coordinate overflow")?;
+    focus_workspace_window(&state.status, &window.id)?;
+    scroll_workspace(&state.status, absolute_x, absolute_y, direction, amount)?;
+    Ok(Some(WindowScrollResult {
+        window,
+        x: absolute_x,
+        y: absolute_y,
     }))
 }
 
@@ -3085,6 +3356,26 @@ fn drag_workspace(
         .output()
         .context("failed to run xdotool drag")?;
     output_text(output, "xdotool drag")?;
+    Ok(())
+}
+
+fn scroll_workspace(
+    status: &WorkspaceStatus,
+    x: i32,
+    y: i32,
+    direction: ScrollDirection,
+    amount: u8,
+) -> Result<()> {
+    validate_workspace_coordinates(status, x, y, "scroll")?;
+    validate_scroll_options(direction, amount)?;
+    let button = direction.x11_button().to_string();
+    let amount = amount.to_string();
+    let output = workspace_command(status, "xdotool")
+        .args(["mousemove", "--sync", &x.to_string(), &y.to_string()])
+        .args(["click", "--repeat", &amount, &button])
+        .output()
+        .context("failed to run xdotool scroll")?;
+    output_text(output, "xdotool scroll")?;
     Ok(())
 }
 
@@ -3580,6 +3871,13 @@ fn validate_click_options(button: u8, count: u8) -> Result<()> {
     }
     if count == 0 || count > 20 {
         bail!("click count must be between 1 and 20");
+    }
+    Ok(())
+}
+
+fn validate_scroll_options(_direction: ScrollDirection, amount: u8) -> Result<()> {
+    if amount == 0 || amount > MAX_SCROLL_AMOUNT {
+        bail!("scroll amount must be between 1 and {MAX_SCROLL_AMOUNT}");
     }
     Ok(())
 }
