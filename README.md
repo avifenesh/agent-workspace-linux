@@ -48,6 +48,7 @@ cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
+cargo run -- workspace manifest
 cargo run -- workspace ipc-info
 cargo run -- workspace env
 cargo run -- workspace env --shell
@@ -160,6 +161,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   the final IPC event sequence and app snapshot, so stopped workspaces can
   still correlate event history and show what was running when they were torn
   down.
+- `workspace manifest` reads that saved manifest directly from disk without
+  contacting the workspace daemon, making it suitable for stopped workspaces or
+  post-run audit views. `workspace status` remains live IPC state.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
@@ -292,10 +296,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   unenforced-policy acknowledgement, applied policy snapshot, policy backend
   candidates discovered at start time, which parts are currently enforced, and
   the last event sequence for incremental event polling. `workspace status` and
-  `workspace stop` talk to the same socket. `workspace stop` waits for the
-  daemon IPC socket to close before returning; `--timeout-ms` overrides the
-  default 30000ms wait. Its response includes apps terminated by the workspace
-  shutdown.
+  `workspace stop` talk to the same socket; use `workspace manifest` for saved
+  disk state after shutdown. `workspace stop` waits for the daemon IPC socket to
+  close before returning; `--timeout-ms` overrides the default 30000ms wait. Its
+  response includes apps terminated by the workspace shutdown.
 - `workspace ipc-info` reports daemon IPC protocol metadata for the workspace,
   including protocol version, Unix socket path, framing, and encoding. Each
   workspace runtime directory is created with user-only permissions before the
@@ -310,8 +314,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
-`workspace_status`, `workspace_ipc_info`, `workspace_env`, `workspace_launch_app`,
-`workspace_run_app`,
+`workspace_status`, `workspace_manifest`, `workspace_ipc_info`, `workspace_env`,
+`workspace_launch_app`, `workspace_run_app`,
 `workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_list_windows`,
 `workspace_active_window`, `workspace_pointer`, `workspace_observe`,
 `workspace_wait_window`,

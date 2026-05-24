@@ -207,6 +207,17 @@ pub struct WorkspaceListEntry {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct WorkspaceManifestRead {
+    pub ok: bool,
+    pub message: String,
+    pub id: String,
+    pub runtime_dir: PathBuf,
+    pub manifest_path: PathBuf,
+    pub manifest: Option<WorkspaceManifest>,
+    pub manifest_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceManifest {
     pub id: String,
@@ -836,6 +847,54 @@ pub fn status_workspace(id: &str) -> Result<WorkspaceStatus> {
     response
         .status
         .ok_or_else(|| anyhow!("workspace daemon returned no status"))
+}
+
+pub fn read_manifest(id: &str) -> WorkspaceManifestRead {
+    let id = match sanitize_workspace_id(id) {
+        Ok(id) => id,
+        Err(error) => {
+            return WorkspaceManifestRead {
+                ok: false,
+                message: error.to_string(),
+                id: id.to_string(),
+                runtime_dir: PathBuf::new(),
+                manifest_path: PathBuf::new(),
+                manifest: None,
+                manifest_error: Some(error.to_string()),
+            };
+        }
+    };
+    let runtime_dir = workspace_dir(&id);
+    let manifest_path = runtime_dir.join(WORKSPACE_MANIFEST_FILE);
+    match read_workspace_manifest(&runtime_dir) {
+        Ok(Some(manifest)) => WorkspaceManifestRead {
+            ok: true,
+            message: "workspace manifest returned".to_string(),
+            id,
+            runtime_dir,
+            manifest_path,
+            manifest: Some(manifest),
+            manifest_error: None,
+        },
+        Ok(None) => WorkspaceManifestRead {
+            ok: false,
+            message: "workspace manifest not found".to_string(),
+            id,
+            runtime_dir,
+            manifest_path,
+            manifest: None,
+            manifest_error: None,
+        },
+        Err(error) => WorkspaceManifestRead {
+            ok: false,
+            message: error.to_string(),
+            id,
+            runtime_dir,
+            manifest_path,
+            manifest: None,
+            manifest_error: Some(error.to_string()),
+        },
+    }
 }
 
 pub fn ipc_info(id: &str) -> Result<IpcResponse> {
