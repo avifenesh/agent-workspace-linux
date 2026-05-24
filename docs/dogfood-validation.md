@@ -288,3 +288,9 @@ Previous post-patch verification:
   lived under `/run/user/<uid>`. The runtime now discovers `/run/user/<uid>` as
   the fallback before `/tmp`, so MCP tools, the app bridge, and shell commands
   converge on the same active workspace directory.
+- After restarting Codex so the MCP server respawned from the installed binary,
+  the real MCP `workspace_list` and `workspace_status` tools saw
+  `/run/user/1000/agent-workspace-linux/mcp-visible` and connected to the live
+  workspace. The same MCP pass generated a `browser-session` profile by calling
+  `profile_template` with `kind="browser-session"` and `user_data_dir`, proving
+  the installed MCP path exposes the new browser-session behavior after reload.
