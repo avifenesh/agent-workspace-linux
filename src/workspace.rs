@@ -278,6 +278,9 @@ pub struct WorkspaceManifest {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct WorkspaceCleanup {
     pub runtime_base_dir: PathBuf,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<WorkspaceCleanupEntry>,
     pub removed: Vec<WorkspaceCleanupEntry>,
     pub skipped: Vec<WorkspaceCleanupEntry>,
 }
@@ -1133,9 +1136,10 @@ pub fn list_workspaces() -> Result<WorkspaceList> {
     })
 }
 
-pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> {
+pub fn cleanup_stale_workspaces(id: Option<String>, dry_run: bool) -> Result<WorkspaceCleanup> {
     let target_id = id.map(|id| sanitize_workspace_id(&id)).transpose()?;
     let list = list_workspaces()?;
+    let mut candidates = Vec::new();
     let mut removed = Vec::new();
     let mut skipped = Vec::new();
 
@@ -1151,6 +1155,15 @@ pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> 
                 id: workspace.id,
                 runtime_dir: workspace.runtime_dir,
                 reason: "workspace is running".to_string(),
+            });
+            continue;
+        }
+
+        if dry_run {
+            candidates.push(WorkspaceCleanupEntry {
+                id: workspace.id,
+                runtime_dir: workspace.runtime_dir,
+                reason: "would remove stale workspace runtime".to_string(),
             });
             continue;
         }
@@ -1171,6 +1184,8 @@ pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> 
 
     Ok(WorkspaceCleanup {
         runtime_base_dir: list.runtime_base_dir,
+        dry_run,
+        candidates,
         removed,
         skipped,
     })

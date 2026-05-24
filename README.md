@@ -46,7 +46,7 @@ cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-une
 cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
-cargo run -- workspace cleanup
+cargo run -- workspace cleanup --dry-run
 cargo run -- workspace status
 cargo run -- workspace manifest
 cargo run -- workspace artifacts --existing
@@ -172,8 +172,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   captured into the workspace runtime directory. Each artifact reports whether
   the path exists, its filesystem type, and byte size for regular files.
   `--existing` returns only paths that currently exist.
-- `workspace cleanup` removes stale workspace runtime directories while skipping
-  running workspaces.
+- `workspace cleanup --dry-run` previews stale workspace runtime directories in
+  `candidates` without deleting them. `workspace cleanup` removes those stale
+  runtime directories while skipping running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   attachment environment: `DISPLAY`, `XAUTHORITY`, `AGENT_WORKSPACE_ID`,
   `AGENT_WORKSPACE_RUNTIME_DIR`, and `AGENT_WORKSPACE_SOCKET`. It can also set
@@ -342,6 +343,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 app id/pid/name, app name substring, command substring, profile id, or
 running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
+`workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
+directory candidates without deleting them.
 `workspace_stop` accepts `timeout_ms` to control how long it waits for the
 daemon IPC socket to close after requesting shutdown.
 `workspace_run_app` accepts `kill_on_timeout=true` to terminate the launched app

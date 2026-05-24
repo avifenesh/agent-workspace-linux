@@ -134,8 +134,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::list_workspaces()?)
         }
         "cleanup" => {
-            let id = parse_optional_id_option(&args[1..])?;
-            print_json(&workspace::cleanup_stale_workspaces(id)?)
+            let (id, dry_run) = parse_cleanup_options(&args[1..])?;
+            print_json(&workspace::cleanup_stale_workspaces(id, dry_run)?)
         }
         "launch" => {
             let (id, spec, wait_window, window_timeout_ms, screenshot_window) =
@@ -1016,8 +1016,9 @@ fn parse_profile_template_options(
     Ok((kind, id, host_path))
 }
 
-fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {
+fn parse_cleanup_options(args: &[String]) -> Result<(Option<String>, bool)> {
     let mut id = None;
+    let mut dry_run = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -1025,10 +1026,14 @@ fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {
                 id = Some(value_after(args, index, "--id")?.to_string());
                 index += 2;
             }
-            flag => bail!("unknown workspace option '{flag}'"),
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            flag => bail!("unknown workspace cleanup option '{flag}'"),
         }
     }
-    Ok(id)
+    Ok((id, dry_run))
 }
 
 type LaunchOptions = (String, LaunchSpec, bool, Option<u64>, bool);
@@ -3147,7 +3152,7 @@ Usage:
   agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--startup-screenshot-window] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace list
-  agent-workspace-linux workspace cleanup [--id ID]
+  agent-workspace-linux workspace cleanup [--id ID] [--dry-run]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace manifest [--id ID]
   agent-workspace-linux workspace artifacts [--id ID] [--existing]
