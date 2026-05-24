@@ -113,6 +113,10 @@ pub struct ProfileStartupRun {
 pub struct ProfileWorkspaceOpen {
     pub workspace_id: String,
     pub profile_id: String,
+    pub ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_succeeded: Option<bool>,
+    pub startup_launched: bool,
     pub start: IpcResponse,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<ProfileSetupRun>,
@@ -545,9 +549,17 @@ pub fn open_profile_workspace(
     } else {
         (None, None)
     };
+    let setup_succeeded = setup.as_ref().and_then(|setup| setup.succeeded);
+    let startup_launched = startup
+        .as_ref()
+        .is_some_and(|startup| startup.launched.iter().all(|response| response.ok));
+    let ready = start.ok && setup_succeeded.unwrap_or(true) && startup_launched;
     Ok(ProfileWorkspaceOpen {
         workspace_id,
         profile_id: profile_id.to_string(),
+        ready,
+        setup_succeeded,
+        startup_launched,
         start,
         setup,
         startup,
