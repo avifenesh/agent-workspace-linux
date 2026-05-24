@@ -1773,13 +1773,18 @@ pub fn read_events(
     since_sequence: Option<u64>,
 ) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
-    request(
+    match request(
         &workspace_socket_path(&id),
         IpcRequest::ReadEvents {
             tail,
             since_sequence,
         },
-    )
+    ) {
+        Ok(response) => Ok(response),
+        Err(ipc_error) => {
+            read_events_from_workspace_log(&id, tail, since_sequence)?.ok_or(ipc_error)
+        }
+    }
 }
 
 pub fn kill_app(id: &str, app_id: String) -> Result<IpcResponse> {
@@ -2128,6 +2133,46 @@ fn read_event_log(
     } else {
         Ok(events)
     }
+}
+
+fn read_events_from_workspace_log(
+    id: &str,
+    tail: Option<usize>,
+    since_sequence: Option<u64>,
+) -> Result<Option<IpcResponse>> {
+    let runtime_dir = workspace_dir(id);
+    let event_path = runtime_dir.join(EVENT_LOG_FILE);
+    if !event_path.exists() {
+        return Ok(None);
+    }
+
+    let events = read_event_log(&event_path, tail, since_sequence)?;
+    let apps = read_workspace_manifest(&runtime_dir)
+        .ok()
+        .flatten()
+        .and_then(|manifest| {
+            if manifest.apps.is_empty() {
+                None
+            } else {
+                Some(manifest.apps)
+            }
+        });
+
+    Ok(Some(IpcResponse {
+        ok: true,
+        message: "workspace events returned from saved event log".to_string(),
+        status: None,
+        ipc: None,
+        environment: None,
+        apps,
+        windows: None,
+        active_window: None,
+        pointer: None,
+        screenshot: None,
+        app_log: None,
+        clipboard: None,
+        events: Some(events),
+    }))
 }
 
 fn response_with_status(

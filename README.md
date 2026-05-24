@@ -262,10 +262,12 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   size metadata, not the raw pasted text.
 - `workspace events` reads a workspace-local JSONL event log for IPC actions.
   `--since SEQUENCE` returns events after a previously seen sequence, and
-  `--tail N` can cap the returned window. App launches and exits are recorded
-  with structured metadata, including launch log paths, wait/kill results, and
-  app lifecycle timing. Typed text is logged as metadata such as character
-  count, not raw text.
+  `--tail N` can cap the returned window. If the workspace daemon is already
+  stopped but the runtime directory remains, it falls back to the saved event
+  log for read-only history inspection. App launches and exits are recorded with
+  structured metadata, including launch log paths, wait/kill results, and app
+  lifecycle timing. Typed text is logged as metadata such as character count,
+  not raw text.
 - `workspace setup --profile` launches the profile's setup commands as ordinary
   workspace apps; with `--wait`, commands are supervised in sequence and the
   result reports whether they completed and exited successfully. Their status
@@ -331,7 +333,8 @@ process group when its timeout elapses.
 `workspace_wait_app` accepts `kill_on_timeout=true` for the same timeout cleanup
 behavior on an already launched app.
 `workspace_events` accepts `since_sequence` for incremental polling and `tail`
-to cap the returned event list.
+to cap the returned event list, and can read saved event history after a
+workspace has stopped.
 `workspace_run_profile_setup` accepts `kill_on_timeout=true`, and
 `workspace_open_profile` accepts `setup_kill_on_timeout=true`, for the same
 setup-command cleanup behavior.
