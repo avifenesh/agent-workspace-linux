@@ -48,8 +48,8 @@ cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
-cargo run -- workspace launch --profile project-dev -- xterm
-cargo run -- workspace run --timeout-ms 30000 --tail-bytes 65536 -- cargo test
+cargo run -- workspace launch --name terminal --profile project-dev -- xterm
+cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace windows
@@ -91,7 +91,9 @@ cargo run -- workspace clipboard-set "hello from the agent workspace"
 cargo run -- workspace clipboard-get
 cargo run -- workspace paste-window --title Editor "hello from the agent workspace"
 cargo run -- workspace logs --stream stdout app-12345
+cargo run -- workspace logs --stream stdout terminal
 cargo run -- workspace wait-app --timeout-ms 30000 app-12345
+cargo run -- workspace wait-app --timeout-ms 30000 terminal
 cargo run -- workspace events --tail 20
 cargo run -- workspace setup --profile project-dev --wait --timeout-ms 30000
 cargo run -- workspace kill-app app-12345
@@ -137,17 +139,19 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   running workspaces.
 - `workspace launch` asks the daemon to spawn an app with the workspace
   `DISPLAY` and `XAUTHORITY`. It can also set a launch cwd and per-app
-  environment overrides. With `--profile`, profile cwd/env are applied unless
-  explicit flags override them, and profile mounts/network policy apply to that
-  launched app. If a launch profile requests policy that remains unenforced, the
-  launch requires `--ack-unenforced-policy`. Each launched app gets
+  environment overrides. `--name` gives the app a stable workspace-local name
+  that can be used anywhere an app id is accepted, including logs, waits, kills,
+  and window `--app` filters. With `--profile`, profile cwd/env are applied
+  unless explicit flags override them, and profile mounts/network policy apply to
+  that launched app. If a launch profile requests policy that remains unenforced,
+  the launch requires `--ack-unenforced-policy`. Each launched app gets
   workspace-local stdout/stderr log files reported in `workspace status`.
   Profile-backed launches also report the profile id and effective
   mount/network isolation on the app entry. Completed apps report both a human
   `exit_status` string and structured `exit_code`/`exit_signal` fields.
 - `workspace run` is a QA-friendly launch helper that launches an app, waits for
   completion or timeout, and returns stdout/stderr log content with structured
-  completion fields in one response.
+  completion fields in one response. It also accepts `--name`.
 - `workspace windows`, `workspace active-window`, `workspace observe`,
   `workspace wait-window`, `workspace screenshot`, `workspace screenshot-window`,
   `workspace focus-window`, `workspace close-window`, `workspace move-window`,
@@ -205,8 +209,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `--ack-unenforced-policy`.
 - `workspace launch-profile-apps --profile` launches the profile's declared
   startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
-  If startup apps use a profile with policy that remains unenforced, they
-  require `--ack-unenforced-policy`.
+  Profile setup commands and startup apps may include `name` fields, and those
+  names become stable app targets after launch. If startup apps use a profile
+  with policy that remains unenforced, they require `--ack-unenforced-policy`.
 - `workspace status` reports the workspace profile id, launched apps, and app
   profile ids when a profile shaped the workspace or app. It also reports the
   start timestamp, hidden-workspace acknowledgement, unenforced-policy
@@ -233,7 +238,7 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 `workspace_paste_text`, `workspace_paste_window`, `workspace_read_app_log`,
 `workspace_wait_app`, `workspace_events`, `workspace_run_profile_setup`,
 `workspace_kill_app`, and `workspace_stop`. `workspace_list_windows` and
-window-targeted tools can filter by title, class, pid, or app id, with class
-matching `wm_class` and `wm_instance`. `workspace_list_windows` accepts
+window-targeted tools can filter by title, class, pid, app id, or app name, with
+class matching `wm_class` and `wm_instance`. `workspace_list_windows` accepts
 `include_hidden=true` to return minimized/hidden windows as well as visible
 windows. `workspace_observe` also accepts `include_hidden=true`.

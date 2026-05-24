@@ -37,6 +37,8 @@ pub struct WorkspaceProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileSetupCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub command: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
@@ -46,6 +48,8 @@ pub struct ProfileSetupCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileStartupApp {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub command: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
@@ -272,6 +276,7 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
         bail!("allowlist network profiles require at least one host");
     }
     for setup in &profile.setup_commands {
+        workspace::validate_optional_app_name(&setup.name)?;
         if setup.command.is_empty() {
             bail!("profile setup command cannot be empty");
         }
@@ -280,6 +285,7 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
         }
     }
     for app in &profile.startup_apps {
+        workspace::validate_optional_app_name(&app.name)?;
         if app.command.is_empty() {
             bail!("profile startup app command cannot be empty");
         }
@@ -413,6 +419,7 @@ pub fn setup_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
             }
             Ok(LaunchSpec {
                 command: setup.command.clone(),
+                name: setup.name.clone(),
                 profile_id: Some(profile.id.clone()),
                 applied_policy: Some(applied_policy(&profile)),
                 user_acknowledged_unenforced_policy: false,
@@ -434,6 +441,7 @@ pub fn startup_app_launch_specs(profile_id: &str) -> Result<Vec<LaunchSpec>> {
             }
             Ok(LaunchSpec {
                 command: app.command.clone(),
+                name: app.name.clone(),
                 profile_id: Some(profile.id.clone()),
                 applied_policy: Some(applied_policy(&profile)),
                 user_acknowledged_unenforced_policy: false,

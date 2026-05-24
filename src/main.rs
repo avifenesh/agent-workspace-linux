@@ -830,6 +830,7 @@ fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {
 
 fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
     let mut id = workspace::default_workspace_id();
+    let mut name = None;
     let mut profile_id = None;
     let mut cwd = None;
     let mut cwd_explicit = false;
@@ -844,6 +845,10 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
             }
             "--profile" => {
                 profile_id = Some(value_after(args, index, "--profile")?.to_string());
+                index += 2;
+            }
+            "--name" => {
+                name = Some(value_after(args, index, "--name")?.to_string());
                 index += 2;
             }
             "--cwd" => {
@@ -866,6 +871,7 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 }
                 let mut spec = LaunchSpec {
                     command,
+                    name,
                     profile_id: None,
                     applied_policy: None,
                     user_acknowledged_unenforced_policy,
@@ -884,6 +890,7 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 }
                 let mut spec = LaunchSpec {
                     command,
+                    name,
                     profile_id: None,
                     applied_policy: None,
                     user_acknowledged_unenforced_policy,
@@ -902,6 +909,7 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
 
 fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>, Option<u64>)> {
     let mut id = workspace::default_workspace_id();
+    let mut name = None;
     let mut profile_id = None;
     let mut cwd = None;
     let mut cwd_explicit = false;
@@ -918,6 +926,10 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
             }
             "--profile" => {
                 profile_id = Some(value_after(args, index, "--profile")?.to_string());
+                index += 2;
+            }
+            "--name" => {
+                name = Some(value_after(args, index, "--name")?.to_string());
                 index += 2;
             }
             "--cwd" => {
@@ -956,6 +968,7 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
                 }
                 let mut spec = LaunchSpec {
                     command,
+                    name,
                     profile_id: None,
                     applied_policy: None,
                     user_acknowledged_unenforced_policy,
@@ -974,6 +987,7 @@ fn parse_run_options(args: &[String]) -> Result<(String, LaunchSpec, Option<u64>
                 }
                 let mut spec = LaunchSpec {
                     command,
+                    name,
                     profile_id: None,
                     applied_policy: None,
                     user_acknowledged_unenforced_policy,
@@ -2777,58 +2791,58 @@ Usage:
   agent-workspace-linux workspace list
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
-  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
-  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
+  agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
+  agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
-  agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID]
+  agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace observe [--id ID] [--all-windows] [--screenshot] [--output PATH]
-  agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace wait-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace screenshot [--id ID] [--output PATH]
-  agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--output PATH] [--timeout-ms N]
+  agent-workspace-linux workspace screenshot-window [--id ID] [--window WINDOW_ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--output PATH] [--timeout-ms N]
   agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace focus-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace close-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace close-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace move-window [--id ID] WINDOW_ID X Y
-  agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
+  agent-workspace-linux workspace move-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N] X Y
   agent-workspace-linux workspace resize-window [--id ID] WINDOW_ID WIDTH HEIGHT
-  agent-workspace-linux workspace resize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] WIDTH HEIGHT
+  agent-workspace-linux workspace resize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N] WIDTH HEIGHT
   agent-workspace-linux workspace raise-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace raise-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace raise-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace minimize-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace minimize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace minimize-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace show-window [--id ID] WINDOW_ID
-  agent-workspace-linux workspace show-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N]
+  agent-workspace-linux workspace show-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N]
   agent-workspace-linux workspace click [--id ID] [--button N] [--count N] X Y
   agent-workspace-linux workspace click-window [--id ID] WINDOW_ID X Y
   agent-workspace-linux workspace click-window [--id ID] [--button N] [--count N] WINDOW_ID X Y
-  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--count N] [--timeout-ms N] X Y
+  agent-workspace-linux workspace click-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--button N] [--count N] [--timeout-ms N] X Y
   agent-workspace-linux workspace move-pointer [--id ID] X Y
   agent-workspace-linux workspace move-pointer-window [--id ID] WINDOW_ID X Y
-  agent-workspace-linux workspace move-pointer-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] X Y
+  agent-workspace-linux workspace move-pointer-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N] X Y
   agent-workspace-linux workspace drag [--id ID] [--button N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace drag-window [--id ID] [--button N] WINDOW_ID FROM_X FROM_Y TO_X TO_Y
-  agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
+  agent-workspace-linux workspace drag-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--button N] [--timeout-ms N] FROM_X FROM_Y TO_X TO_Y
   agent-workspace-linux workspace scroll [--id ID] [--amount N] X Y up|down|left|right
   agent-workspace-linux workspace scroll-window [--id ID] [--amount N] WINDOW_ID X Y up|down|left|right
-  agent-workspace-linux workspace scroll-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--amount N] [--timeout-ms N] X Y up|down|left|right
+  agent-workspace-linux workspace scroll-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--amount N] [--timeout-ms N] X Y up|down|left|right
   agent-workspace-linux workspace key [--id ID] KEY
   agent-workspace-linux workspace key-window [--id ID] WINDOW_ID KEY
-  agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] KEY
+  agent-workspace-linux workspace key-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N] KEY
   agent-workspace-linux workspace type [--id ID] TEXT
   agent-workspace-linux workspace type-window [--id ID] WINDOW_ID TEXT
-  agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--timeout-ms N] TEXT
+  agent-workspace-linux workspace type-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--timeout-ms N] TEXT
   agent-workspace-linux workspace clipboard-set [--id ID] TEXT
   agent-workspace-linux workspace clipboard-get [--id ID]
   agent-workspace-linux workspace paste [--id ID] [--key KEY] TEXT
   agent-workspace-linux workspace paste-window [--id ID] [--key KEY] WINDOW_ID TEXT
-  agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID] [--key KEY] [--timeout-ms N] TEXT
-  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID
-  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID
+  agent-workspace-linux workspace paste-window [--id ID] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME] [--key KEY] [--timeout-ms N] TEXT
+  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID_OR_NAME
+  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace events [--id ID] [--tail N]
   agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]
-  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID
+  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID_OR_NAME
   agent-workspace-linux workspace stop [--id ID]"#
     );
 }

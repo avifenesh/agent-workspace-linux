@@ -196,6 +196,8 @@ pub struct WorkspaceCleanupEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceApp {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub pid: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
@@ -228,6 +230,8 @@ pub struct EnvVar {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LaunchSpec {
     pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -320,6 +324,8 @@ pub enum IpcRequest {
     Status,
     LaunchApp {
         command: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -792,6 +798,7 @@ pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
         &workspace_socket_path(&id),
         IpcRequest::LaunchApp {
             command: spec.command,
+            name: spec.name,
             profile_id: spec.profile_id,
             applied_policy: spec.applied_policy,
             user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
@@ -805,6 +812,7 @@ fn validate_launch_spec(spec: &LaunchSpec) -> Result<()> {
     if spec.command.is_empty() {
         bail!("launch command cannot be empty");
     }
+    validate_optional_app_name(&spec.name)?;
     if let Some(cwd) = &spec.cwd {
         if !cwd_is_provided_by_bubblewrap_mount(cwd, spec.applied_policy.as_ref()) && !cwd.is_dir()
         {
@@ -1857,6 +1865,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         ),
         IpcRequest::LaunchApp {
             command,
+            name,
             profile_id,
             applied_policy,
             user_acknowledged_unenforced_policy,
@@ -1866,6 +1875,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             state,
             LaunchSpec {
                 command,
+                name,
                 profile_id,
                 applied_policy,
                 user_acknowledged_unenforced_policy,
@@ -1879,6 +1889,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                     "app_launch",
                     serde_json::json!({
                         "app_id": &app.id,
+                        "name": app.name.as_deref(),
                         "pid": app.pid,
                         "command": &app.command,
                         "profile_id": app.profile_id.as_deref(),
@@ -3557,6 +3568,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
     let stderr_path = rename_app_log(&log_paths.stderr, pid, "stderr")?;
     let info = WorkspaceApp {
         id: format!("app-{pid}"),
+        name: spec.name,
         pid,
         profile_id: spec.profile_id,
         mount_isolation,
@@ -5029,7 +5041,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
 }
 
 fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
-    app.id == app_id || app.pid.to_string() == app_id
+    app.id == app_id || app.pid.to_string() == app_id || app.name.as_deref() == Some(app_id)
 }
 
 fn response_last_app_id(response: &IpcResponse) -> Option<String> {
@@ -5067,6 +5079,7 @@ fn mark_app_exit_error(app: &mut WorkspaceApp, error: impl ToString) {
 fn app_exit_event_detail(app: &WorkspaceApp) -> serde_json::Value {
     serde_json::json!({
         "app_id": &app.id,
+        "name": app.name.as_deref(),
         "pid": app.pid,
         "command": &app.command,
         "profile_id": app.profile_id.as_deref(),
@@ -5468,6 +5481,19 @@ fn normalize_paste_key(key: Option<String>) -> Result<String> {
 fn validate_key_text(key: &str) -> Result<()> {
     if key.trim().is_empty() {
         bail!("key cannot be empty");
+    }
+    Ok(())
+}
+
+pub fn validate_optional_app_name(name: &Option<String>) -> Result<()> {
+    let Some(name) = name else {
+        return Ok(());
+    };
+    if name.trim().is_empty() {
+        bail!("app name cannot be empty");
+    }
+    if name.contains('\0') {
+        bail!("app name cannot contain NUL bytes");
     }
     Ok(())
 }
