@@ -18,6 +18,8 @@ use std::{
 };
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
+const IPC_PROTOCOL_NAME: &str = "agent-workspace-linux.ipc";
+const IPC_PROTOCOL_VERSION: u32 = 1;
 const DEFAULT_APP_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_STOP_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_CLICK_BUTTON: u8 = 1;
@@ -296,6 +298,18 @@ pub struct WorkspaceAppLog {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceIpcInfo {
+    pub protocol: String,
+    pub protocol_version: u32,
+    pub server_version: String,
+    pub workspace_id: String,
+    pub socket_path: PathBuf,
+    pub transport: String,
+    pub framing: String,
+    pub encoding: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceClipboard {
     pub selection: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -334,6 +348,7 @@ pub struct WorkspaceEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcRequest {
+    IpcInfo,
     Status,
     LaunchApp {
         command: Vec<String>,
@@ -593,6 +608,8 @@ pub struct IpcResponse {
     pub message: String,
     pub status: Option<WorkspaceStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipc: Option<WorkspaceIpcInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apps: Option<Vec<WorkspaceApp>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<Vec<WorkspaceWindow>>,
@@ -691,6 +708,7 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             message: format!("workspace {:?} is already running", status.id),
             apps: Some(status.apps.clone()),
             status: Some(status),
+            ipc: None,
             windows: None,
             active_window: None,
             screenshot: None,
@@ -725,6 +743,11 @@ pub fn status_workspace(id: &str) -> Result<WorkspaceStatus> {
     response
         .status
         .ok_or_else(|| anyhow!("workspace daemon returned no status"))
+}
+
+pub fn ipc_info(id: &str) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(&workspace_socket_path(&id), IpcRequest::IpcInfo)
 }
 
 pub fn list_workspaces() -> Result<WorkspaceList> {
@@ -1899,6 +1922,7 @@ fn response_with_status(
         ok,
         message: message.into(),
         status: Some(status.clone()),
+        ipc: None,
         apps: None,
         windows: None,
         active_window: None,
@@ -1906,6 +1930,19 @@ fn response_with_status(
         app_log: None,
         clipboard: None,
         events: None,
+    }
+}
+
+fn workspace_ipc_info(status: &WorkspaceStatus) -> WorkspaceIpcInfo {
+    WorkspaceIpcInfo {
+        protocol: IPC_PROTOCOL_NAME.to_string(),
+        protocol_version: IPC_PROTOCOL_VERSION,
+        server_version: env!("CARGO_PKG_VERSION").to_string(),
+        workspace_id: status.id.clone(),
+        socket_path: status.socket_path.clone(),
+        transport: "unix_socket".to_string(),
+        framing: "newline_delimited_json".to_string(),
+        encoding: "utf-8".to_string(),
     }
 }
 
@@ -1932,6 +1969,13 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     refresh_apps(state)?;
 
     let (response, should_stop) = match request {
+        IpcRequest::IpcInfo => {
+            record_event(state, "ipc_info", serde_json::json!({}))?;
+            let mut response =
+                response_with_status(true, "workspace IPC info returned", &state.status);
+            response.ipc = Some(workspace_ipc_info(&state.status));
+            (response, false)
+        }
         IpcRequest::Status => {
             let mut response = response_with_status(true, "workspace is running", &state.status);
             response.apps = Some(state.status.apps.clone());
@@ -4007,6 +4051,7 @@ fn observe_workspace(
         message: "workspace observed".to_string(),
         apps: Some(state.status.apps.clone()),
         status: Some(state.status.clone()),
+        ipc: None,
         windows: Some(windows),
         active_window,
         screenshot,

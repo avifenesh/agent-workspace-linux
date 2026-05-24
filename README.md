@@ -48,6 +48,7 @@ cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
 cargo run -- workspace status
+cargo run -- workspace ipc-info
 cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
 cargo run -- workspace launch-profile-apps --profile project-dev
@@ -236,12 +237,15 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `workspace stop` talk to the same socket. `workspace stop` waits for the
   daemon IPC socket to close before returning; `--timeout-ms` overrides the
   default 30000ms wait.
+- `workspace ipc-info` reports daemon IPC protocol metadata for the workspace,
+  including protocol version, Unix socket path, framing, and encoding.
 
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
 `workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
-`workspace_status`, `workspace_launch_app`, `workspace_run_app`,
+`workspace_status`, `workspace_ipc_info`, `workspace_launch_app`,
+`workspace_run_app`,
 `workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_list_windows`,
 `workspace_active_window`, `workspace_observe`, `workspace_wait_window`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
