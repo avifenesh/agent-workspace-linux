@@ -4046,14 +4046,11 @@ fn list_matching_workspace_windows(
     include_hidden: bool,
     criteria: &WindowMatchCriteria,
 ) -> Result<Vec<WorkspaceWindow>> {
-    let app_root_pid = criteria.app_id.as_ref().and_then(|app_id| {
-        state
-            .status
-            .apps
-            .iter()
-            .find(|app| matches_app_id(app, app_id))
-            .map(|app| app.pid)
-    });
+    let app_root_pid = criteria
+        .app_id
+        .as_ref()
+        .map(|app_id| resolve_workspace_app(&state.status.apps, app_id).map(|app| app.pid))
+        .transpose()?;
     Ok(list_workspace_windows(&state.status, include_hidden)?
         .into_iter()
         .filter(|window| {
@@ -5030,12 +5027,7 @@ fn read_workspace_app_log(
 ) -> Result<WorkspaceAppLog> {
     refresh_apps(state)?;
     let stream = validate_log_stream(stream)?;
-    let app = state
-        .status
-        .apps
-        .iter()
-        .find(|app| matches_app_id(app, app_id))
-        .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
+    let app = resolve_workspace_app(&state.status.apps, app_id)?;
     let path = match stream.as_str() {
         "stdout" => app.stdout_path.as_ref(),
         "stderr" => app.stderr_path.as_ref(),
@@ -5064,12 +5056,7 @@ fn wait_workspace_app(state: &mut DaemonState, app_id: &str, timeout_ms: u64) ->
     let started = Instant::now();
     loop {
         refresh_apps(state)?;
-        let app = state
-            .status
-            .apps
-            .iter()
-            .find(|app| matches_app_id(app, app_id))
-            .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
+        let app = resolve_workspace_app(&state.status.apps, app_id)?;
         if !app.running {
             return Ok(true);
         }
@@ -5148,11 +5135,7 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
     }
 
     let (message, exit_detail) = {
-        let app = state
-            .apps
-            .iter_mut()
-            .find(|app| matches_app_id(&app.info, app_id))
-            .ok_or_else(|| anyhow!("workspace app {app_id:?} was not found"))?;
+        let app = resolve_workspace_app_process_mut(&mut state.apps, app_id)?;
 
         if !app.info.running {
             (
@@ -5184,6 +5167,53 @@ fn kill_workspace_app(state: &mut DaemonState, app_id: &str) -> Result<String> {
         record_event(state, "app_exit", detail)?;
     }
     Ok(message)
+}
+
+fn resolve_workspace_app<'a>(apps: &'a [WorkspaceApp], app_id: &str) -> Result<&'a WorkspaceApp> {
+    let mut matches = apps.iter().filter(|app| matches_app_id(app, app_id));
+    let Some(first) = matches.next() else {
+        bail!("workspace app {app_id:?} was not found");
+    };
+    if let Some(second) = matches.next() {
+        let mut labels = vec![app_label(first), app_label(second)];
+        labels.extend(matches.map(app_label));
+        bail!(
+            "workspace app target {app_id:?} matched multiple apps: {}",
+            labels.join(", ")
+        );
+    }
+    Ok(first)
+}
+
+fn resolve_workspace_app_process_mut<'a>(
+    apps: &'a mut [AppProcess],
+    app_id: &str,
+) -> Result<&'a mut AppProcess> {
+    let matches = apps
+        .iter()
+        .enumerate()
+        .filter(|(_, app)| matches_app_id(&app.info, app_id))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => bail!("workspace app {app_id:?} was not found"),
+        [index] => Ok(&mut apps[*index]),
+        _ => {
+            let labels = matches
+                .iter()
+                .map(|index| app_label(&apps[*index].info))
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!("workspace app target {app_id:?} matched multiple apps: {labels}")
+        }
+    }
+}
+
+fn app_label(app: &WorkspaceApp) -> String {
+    match &app.name {
+        Some(name) => format!("{} (name {name:?}, pid {})", app.id, app.pid),
+        None => format!("{} (pid {})", app.id, app.pid),
+    }
 }
 
 fn matches_app_id(app: &WorkspaceApp, app_id: &str) -> bool {
