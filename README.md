@@ -75,6 +75,7 @@ cargo run -- workspace launch --name terminal --profile project-dev -- xterm
 cargo run -- workspace launch --name terminal --wait-window --screenshot-window --window-timeout-ms 10000 -- xterm
 cargo run -- workspace run --name test-suite --timeout-ms 30000 --tail-bytes 65536 --kill-on-timeout -- cargo test
 cargo run -- workspace run --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
+cargo run -- workspace launch-profile-apps --dry-run --profile project-dev --wait-window --screenshot-window --window-timeout-ms 10000
 cargo run -- workspace launch-profile-apps --profile project-dev --wait-window --screenshot-window --window-timeout-ms 10000
 cargo run -- workspace launch --cwd "$PWD" --env AGENT_WORKSPACE=1 -- env
 cargo run -- workspace apps
@@ -346,6 +347,8 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   command process group and records the kill response in the setup result.
 - `workspace launch-profile-apps --profile` launches the profile's declared
   startup apps as ordinary workspace apps, preserving profile cwd/env and policy.
+  `--dry-run` returns one launch preview per startup app without spawning any app
+  processes.
   Profile setup commands and startup apps may include `name` fields, and those
   names become stable app targets after launch. If startup apps use a profile
   with policy that remains unenforced, they require `--ack-unenforced-policy`.
@@ -417,6 +420,8 @@ policy blocks, and whether a new workspace would be created.
 `workspace_launch_app` accepts `dry_run=true` to preview command, cwd/env,
 profile policy acknowledgement, isolation labels, blockers, and whether an app
 would be launched without spawning it.
+`workspace_launch_profile_apps` accepts `dry_run=true` to return one launch
+preview per startup app declared by the profile without spawning any of them.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime

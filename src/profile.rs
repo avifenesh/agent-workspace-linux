@@ -171,6 +171,9 @@ pub struct ProfileSetupRun {
 pub struct ProfileStartupRun {
     pub workspace_id: String,
     pub profile_id: String,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub would_launch_all: Option<bool>,
     pub wait_window: bool,
     pub screenshot_window: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -210,6 +213,7 @@ pub struct ProfileSetupOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProfileStartupOptions {
+    pub dry_run: bool,
     pub acknowledge_unenforced_policy: bool,
     pub wait_window: bool,
     pub window_timeout_ms: Option<u64>,
@@ -757,17 +761,38 @@ pub fn launch_profile_startup_apps(
         spec.user_acknowledged_unenforced_policy = options.acknowledge_unenforced_policy;
     }
     for spec in specs {
-        launched.push(workspace::launch_app_with_options(
-            workspace_id,
-            spec,
-            options.wait_window,
-            options.window_timeout_ms,
-            options.screenshot_window,
-        )?);
+        let response = if options.dry_run {
+            workspace::preview_launch_app(
+                workspace_id,
+                spec,
+                options.wait_window,
+                options.window_timeout_ms,
+                options.screenshot_window,
+            )?
+        } else {
+            workspace::launch_app_with_options(
+                workspace_id,
+                spec,
+                options.wait_window,
+                options.window_timeout_ms,
+                options.screenshot_window,
+            )?
+        };
+        launched.push(response);
     }
+    let would_launch_all = options.dry_run.then(|| {
+        launched.iter().all(|response| {
+            response
+                .launch_preview
+                .as_ref()
+                .is_some_and(|preview| preview.would_launch)
+        })
+    });
     Ok(ProfileStartupRun {
         workspace_id: workspace_id.to_string(),
         profile_id: profile_id.to_string(),
+        dry_run: options.dry_run,
+        would_launch_all,
         wait_window: options.wait_window,
         screenshot_window: options.screenshot_window,
         window_timeout_ms: options.window_timeout_ms,

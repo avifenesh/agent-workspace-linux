@@ -3145,6 +3145,10 @@ fn parse_profile_launch_options(
                 options.acknowledge_unenforced_policy = true;
                 index += 1;
             }
+            "--dry-run" => {
+                options.dry_run = true;
+                index += 1;
+            }
             "--wait-window" => {
                 options.wait_window = true;
                 index += 1;
@@ -3344,7 +3348,7 @@ Usage:
   agent-workspace-linux workspace env [--id ID] [--shell]
   agent-workspace-linux workspace launch [--dry-run] [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] [--screenshot-window] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
-  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N] [--screenshot-window]
+  agent-workspace-linux workspace launch-profile-apps [--dry-run] [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N] [--screenshot-window]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]

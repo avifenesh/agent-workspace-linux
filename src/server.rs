@@ -1585,7 +1585,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_profile_apps",
-        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set wait_window=true to wait for each startup app's first visible window, or screenshot_window=true to also capture each first startup window.",
+        description = "Launch startup apps declared by a saved profile inside an already running isolated workspace. Set dry_run=true to preview each startup launch without spawning processes. Set wait_window=true to wait for each startup app's first visible window, or screenshot_window=true to also capture each first startup window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1604,6 +1604,7 @@ impl AgentWorkspaceLinux {
                     .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
                 &params.profile,
                 profile::ProfileStartupOptions {
+                    dry_run: params.dry_run,
                     acknowledge_unenforced_policy: params.acknowledge_unenforced_policy,
                     wait_window: params.wait_window,
                     window_timeout_ms: params.window_timeout_ms,
@@ -1612,7 +1613,11 @@ impl AgentWorkspaceLinux {
             ) {
                 Ok(run) => ProfileStartupResult {
                     ok: true,
-                    message: "profile startup apps launched".to_string(),
+                    message: if run.dry_run {
+                        "profile startup apps dry run returned".to_string()
+                    } else {
+                        "profile startup apps launched".to_string()
+                    },
                     run: Some(run),
                 },
                 Err(error) => ProfileStartupResult {
@@ -1903,6 +1908,7 @@ impl WorkspaceOpenProfileParams {
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
             },
             startup: profile::ProfileStartupOptions {
+                dry_run: false,
                 acknowledge_unenforced_policy: self.acknowledge_unenforced_policy,
                 wait_window: self.startup_wait_window
                     || self.startup_window_timeout_ms.is_some()
@@ -2482,6 +2488,8 @@ struct WorkspaceProfileLaunchParams {
     profile: String,
     #[serde(default)]
     acknowledge_unenforced_policy: bool,
+    #[serde(default)]
+    dry_run: bool,
     #[serde(default)]
     wait_window: bool,
     #[serde(default)]

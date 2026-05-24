@@ -24,7 +24,7 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 7,
+        version: 8,
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -72,6 +72,17 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 "Workspace launch spawns a process only when dry_run is false.",
                 "--dry-run or dry_run=true",
                 "Returns command, cwd/env, profile policy, acknowledgement, isolation, and would-launch status without creating an app record.",
+            ),
+            rule(
+                "profile-startup-launch-preview",
+                "dry_run",
+                &[
+                    "workspace launch-profile-apps",
+                    "workspace_launch_profile_apps",
+                ],
+                "Profile startup apps are launched only when dry_run is false.",
+                "--dry-run or dry_run=true",
+                "Returns one launch preview per declared startup app without spawning processes.",
             ),
             rule(
                 "profile-put-preview",
