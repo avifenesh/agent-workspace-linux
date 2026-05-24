@@ -375,6 +375,10 @@ pub enum IpcRequest {
         cwd: Option<PathBuf>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         env: Vec<EnvVar>,
+        #[serde(default)]
+        wait_window: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_timeout_ms: Option<u64>,
     },
     ListApps {
         app_id: Option<String>,
@@ -857,6 +861,15 @@ pub fn cleanup_stale_workspaces(id: Option<String>) -> Result<WorkspaceCleanup> 
 }
 
 pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
+    launch_app_with_options(id, spec, false, None)
+}
+
+pub fn launch_app_with_options(
+    id: &str,
+    spec: LaunchSpec,
+    wait_window: bool,
+    window_timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
     let id = sanitize_workspace_id(id)?;
     validate_launch_spec(&spec)?;
     validate_launch_policy_ack(&spec)?;
@@ -870,6 +883,8 @@ pub fn launch_app_with_spec(id: &str, spec: LaunchSpec) -> Result<IpcResponse> {
             user_acknowledged_unenforced_policy: spec.user_acknowledged_unenforced_policy,
             cwd: spec.cwd,
             env: spec.env,
+            wait_window,
+            window_timeout_ms,
         },
     )
 }
@@ -2040,6 +2055,8 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             user_acknowledged_unenforced_policy,
             cwd,
             env,
+            wait_window,
+            window_timeout_ms,
         } => match spawn_app(
             state,
             LaunchSpec {
@@ -2053,6 +2070,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             },
         ) {
             Ok(app) => {
+                let app_id = app.id.clone();
                 record_event(
                     state,
                     "app_launch",
@@ -2066,17 +2084,70 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "cwd": app.cwd.as_ref().map(|path| path.display().to_string()),
                         "network_isolation": &app.network_isolation,
                         "mount_isolation": &app.mount_isolation,
+                        "wait_window": wait_window,
+                        "window_timeout_ms": window_timeout_ms,
                     }),
                 )?;
-                (
-                    {
-                        let mut response =
-                            response_with_status(true, "app launched in workspace", &state.status);
-                        response.apps = Some(vec![app]);
-                        response
-                    },
-                    false,
-                )
+                if wait_window {
+                    let timeout_ms = window_timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS);
+                    let criteria = WindowWaitCriteria {
+                        title_contains: None,
+                        class_contains: None,
+                        pid: None,
+                        app_id: Some(app_id.clone()),
+                        timeout_ms,
+                    };
+                    match wait_workspace_window(state, &criteria) {
+                        Ok(windows) => {
+                            let found = !windows.is_empty();
+                            record_event(
+                                state,
+                                "launch_wait_window",
+                                serde_json::json!({
+                                    "app_id": &app_id,
+                                    "timeout_ms": timeout_ms,
+                                    "found": found,
+                                    "windows": windows.len(),
+                                }),
+                            )?;
+                            let message = if found {
+                                "app launched and window found in workspace"
+                            } else {
+                                "app launched but window not found before timeout"
+                            };
+                            let mut response = response_with_status(found, message, &state.status);
+                            let response_app = state
+                                .status
+                                .apps
+                                .iter()
+                                .find(|candidate| candidate.id == app_id)
+                                .cloned()
+                                .unwrap_or(app);
+                            response.apps = Some(vec![response_app]);
+                            response.windows = Some(windows);
+                            (response, false)
+                        }
+                        Err(error) => {
+                            let mut response =
+                                response_with_status(false, error.to_string(), &state.status);
+                            response.apps = Some(vec![app]);
+                            (response, false)
+                        }
+                    }
+                } else {
+                    (
+                        {
+                            let mut response = response_with_status(
+                                true,
+                                "app launched in workspace",
+                                &state.status,
+                            );
+                            response.apps = Some(vec![app]);
+                            response
+                        },
+                        false,
+                    )
+                }
             }
             Err(error) => (
                 response_with_status(false, error.to_string(), &state.status),

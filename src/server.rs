@@ -374,7 +374,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_app",
-        description = "Launch an optionally named app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
+        description = "Launch an optionally named app inside an isolated agent workspace. The command runs with the workspace DISPLAY and XAUTHORITY. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -390,11 +390,11 @@ impl AgentWorkspaceLinux {
             .id
             .clone()
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            params
-                .into_launch_spec()
-                .and_then(|spec| workspace::launch_app_with_spec(&id, spec)),
-        ))
+        let wait_window = params.wait_window;
+        let window_timeout_ms = params.window_timeout_ms;
+        Json(result_response(params.into_launch_spec().and_then(
+            |spec| workspace::launch_app_with_options(&id, spec, wait_window, window_timeout_ms),
+        )))
     }
 
     #[tool(
@@ -1761,6 +1761,10 @@ struct WorkspaceLaunchParams {
     cwd: Option<PathBuf>,
     #[serde(default)]
     env: Vec<EnvVar>,
+    #[serde(default)]
+    wait_window: bool,
+    #[serde(default)]
+    window_timeout_ms: Option<u64>,
 }
 
 impl WorkspaceLaunchParams {

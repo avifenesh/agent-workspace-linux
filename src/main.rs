@@ -121,8 +121,13 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             print_json(&workspace::cleanup_stale_workspaces(id)?)
         }
         "launch" => {
-            let (id, spec) = parse_launch_options(&args[1..])?;
-            print_json(&workspace::launch_app_with_spec(&id, spec)?)
+            let (id, spec, wait_window, window_timeout_ms) = parse_launch_options(&args[1..])?;
+            print_json(&workspace::launch_app_with_options(
+                &id,
+                spec,
+                wait_window,
+                window_timeout_ms,
+            )?)
         }
         "run" => {
             let (id, spec, timeout_ms, tail_bytes, kill_on_timeout) =
@@ -945,7 +950,9 @@ fn parse_optional_id_option(args: &[String]) -> Result<Option<String>> {
     Ok(id)
 }
 
-fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
+type LaunchOptions = (String, LaunchSpec, bool, Option<u64>);
+
+fn parse_launch_options(args: &[String]) -> Result<LaunchOptions> {
     let mut id = workspace::default_workspace_id();
     let mut name = None;
     let mut profile_id = None;
@@ -953,6 +960,8 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
     let mut cwd_explicit = false;
     let mut user_acknowledged_unenforced_policy = false;
     let mut env = Vec::new();
+    let mut wait_window = false;
+    let mut window_timeout_ms = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -981,6 +990,19 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 user_acknowledged_unenforced_policy = true;
                 index += 1;
             }
+            "--wait-window" => {
+                wait_window = true;
+                index += 1;
+            }
+            "--window-timeout-ms" => {
+                wait_window = true;
+                window_timeout_ms = Some(
+                    value_after(args, index, "--window-timeout-ms")?
+                        .parse()
+                        .context("--window-timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
             "--" => {
                 let command = args[index + 1..].to_vec();
                 if command.is_empty() {
@@ -998,7 +1020,7 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec));
+                return Ok((id, spec, wait_window, window_timeout_ms));
             }
             _ => {
                 let command = args[index..].to_vec();
@@ -1017,7 +1039,7 @@ fn parse_launch_options(args: &[String]) -> Result<(String, LaunchSpec)> {
                 if let Some(profile_id) = &profile_id {
                     profile::apply_profile_to_launch_spec(profile_id, &mut spec, cwd_explicit)?;
                 }
-                return Ok((id, spec));
+                return Ok((id, spec, wait_window, window_timeout_ms));
             }
         }
     }
@@ -3008,7 +3030,7 @@ Usage:
   agent-workspace-linux workspace cleanup [--id ID]
   agent-workspace-linux workspace status [--id ID]
   agent-workspace-linux workspace ipc-info [--id ID]
-  agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]
+  agent-workspace-linux workspace launch [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--wait-window] [--window-timeout-ms N] -- COMMAND [ARGS...]
   agent-workspace-linux workspace run [--id ID] [--name NAME] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
