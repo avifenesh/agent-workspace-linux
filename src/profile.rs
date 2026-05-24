@@ -78,6 +78,10 @@ pub struct ProfilePath {
 pub struct ProfileDeleteResult {
     pub id: String,
     pub deleted: bool,
+    pub would_delete: bool,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<WorkspaceProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -256,17 +260,25 @@ pub fn put_profile(profile: WorkspaceProfile) -> Result<WorkspaceProfile> {
     Ok(profile)
 }
 
-pub fn delete_profile(id: &str) -> Result<ProfileDeleteResult> {
+pub fn delete_profile(id: &str, dry_run: bool) -> Result<ProfileDeleteResult> {
     let id = sanitize_profile_id(id)?;
     let path = profiles_path();
     let mut store = read_store(&path)?;
-    let original_len = store.profiles.len();
-    store.profiles.retain(|profile| profile.id != id);
-    let deleted = store.profiles.len() != original_len;
-    if deleted {
+    let profile_index = store.profiles.iter().position(|profile| profile.id == id);
+    let profile = profile_index.map(|index| store.profiles[index].clone());
+    let would_delete = profile.is_some();
+    let deleted = would_delete && !dry_run;
+    if let Some(index) = profile_index.filter(|_| !dry_run) {
+        store.profiles.remove(index);
         write_store(&path, &store)?;
     }
-    Ok(ProfileDeleteResult { id, deleted })
+    Ok(ProfileDeleteResult {
+        id,
+        deleted,
+        would_delete,
+        dry_run,
+        profile,
+    })
 }
 
 pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {

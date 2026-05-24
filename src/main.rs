@@ -72,8 +72,8 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
             print_json(&profile::put_profile(profile)?)
         }
         "delete" => {
-            let id = parse_required_id_arg(&args[1..], "profile delete requires an id")?;
-            print_json(&profile::delete_profile(&id)?)
+            let (id, dry_run) = parse_profile_delete_options(&args[1..])?;
+            print_json(&profile::delete_profile(&id, dry_run)?)
         }
         unknown => {
             bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, template, put, delete")
@@ -1014,6 +1014,35 @@ fn parse_profile_template_options(
         }
     }
     Ok((kind, id, host_path))
+}
+
+fn parse_profile_delete_options(args: &[String]) -> Result<(String, bool)> {
+    let mut dry_run = false;
+    let mut ids = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            "--" => {
+                ids.extend(args[index + 1..].iter().cloned());
+                break;
+            }
+            value if value.starts_with("--") => {
+                bail!("unknown profile delete option '{value}'")
+            }
+            value => {
+                ids.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+    if ids.len() != 1 {
+        bail!("profile delete requires an id");
+    }
+    Ok((ids.remove(0), dry_run))
 }
 
 fn parse_cleanup_options(args: &[String]) -> Result<(Option<String>, bool)> {
@@ -3193,6 +3222,7 @@ Usage:
   agent-workspace-linux doctor
   agent-workspace-linux mcp
   agent-workspace-linux profile path|list|get|check|template|put|delete
+  agent-workspace-linux profile delete [--dry-run] ID
   agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]
   agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--purpose TEXT] [--width PX] [--height PX]
   agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--setup] [--setup-timeout-ms N] [--setup-kill-on-timeout] [--startup-wait-window] [--startup-window-timeout-ms N] [--startup-screenshot-window] [--id ID] [--purpose TEXT] [--width PX] [--height PX]

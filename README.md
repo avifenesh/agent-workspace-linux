@@ -41,6 +41,7 @@ cargo run -- profile template project-dev --host-path "$PWD"
 cargo run -- profile put --json ./profile.json
 cargo run -- profile get project-dev
 cargo run -- profile check project-dev
+cargo run -- profile delete --dry-run project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --purpose "QA run" --ack-unenforced-policy --profile project-dev
 cargo run -- workspace open-profile --ack-hidden-workspace --purpose "Project QA" --profile project-dev --setup --setup-timeout-ms 30000 --setup-kill-on-timeout --startup-wait-window --startup-screenshot-window
@@ -147,6 +148,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
   `$XDG_RUNTIME_DIR/agent-workspace-linux/<id>/control.sock`. With `--profile`,
   profile width/height are applied unless explicit flags override them, and the
   profile's mounts/network/setup intent is snapshotted into status.
+- `profile delete --dry-run` returns the saved profile that would be removed
+  without deleting it, so a UI can ask for confirmation with the full profile
+  content visible.
 - `workspace start --foreground` runs the same workspace daemon in the current
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
@@ -349,6 +353,8 @@ The MCP server currently exposes the same control surface: `workspace_doctor`,
 app id/pid/name, app name substring, command substring, profile id, or
 running/stopped state, including against saved manifest app snapshots after a
 workspace stops.
+`profile_delete` accepts `dry_run=true` to return the profile that would be
+removed without deleting it.
 `workspace_close_window` and `workspace_close_matching_window` accept
 `dry_run=true` to resolve and return the targeted window without closing it.
 `workspace_cleanup_stale` accepts `dry_run=true` to preview stale runtime
