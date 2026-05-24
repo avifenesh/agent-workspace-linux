@@ -43,6 +43,7 @@ cargo run -- profile get project-dev
 cargo run -- profile check project-dev
 cargo run -- profile delete project-dev
 cargo run -- workspace start --ack-hidden-workspace --ack-unenforced-policy --profile project-dev
+cargo run -- workspace open-profile --ack-hidden-workspace --profile project-dev
 cargo run -- workspace start --ack-hidden-workspace --foreground
 cargo run -- workspace list
 cargo run -- workspace cleanup
@@ -95,6 +96,9 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 - `workspace start --foreground` runs the same workspace daemon in the current
   process, which is useful for MCP hosts or dev runners that clean up detached
   child processes.
+- `workspace open-profile --profile` starts a profile-backed workspace and then
+  launches its declared startup apps, returning both the workspace start result
+  and startup launch result in one response.
 - `workspace list` scans the runtime directory and reports which known
   workspaces are currently reachable.
 - `workspace cleanup` removes stale workspace runtime directories while skipping
@@ -140,10 +144,10 @@ active enforcement. The workspace commands use a small local Unix socket daemon:
 The MCP server currently exposes the same control surface: `workspace_doctor`,
 `profile_path`, `profile_list`, `profile_get`, `profile_check`,
 `profile_template`, `profile_put`, `profile_delete`, `workspace_start`,
-`workspace_list`, `workspace_cleanup_stale`, `workspace_status`,
-`workspace_launch_app`, `workspace_run_app`, `workspace_launch_profile_apps`,
-`workspace_list_windows`, `workspace_screenshot`, `workspace_focus_window`,
-`workspace_close_window`, `workspace_click`, `workspace_key`,
-`workspace_type_text`, `workspace_read_app_log`, `workspace_wait_app`,
-`workspace_events`, `workspace_run_profile_setup`, `workspace_kill_app`, and
-`workspace_stop`.
+`workspace_open_profile`, `workspace_list`, `workspace_cleanup_stale`,
+`workspace_status`, `workspace_launch_app`, `workspace_run_app`,
+`workspace_launch_profile_apps`, `workspace_list_windows`,
+`workspace_screenshot`, `workspace_focus_window`, `workspace_close_window`,
+`workspace_click`, `workspace_key`, `workspace_type_text`,
+`workspace_read_app_log`, `workspace_wait_app`, `workspace_events`,
+`workspace_run_profile_setup`, `workspace_kill_app`, and `workspace_stop`.

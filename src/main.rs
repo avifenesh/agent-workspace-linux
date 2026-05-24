@@ -84,7 +84,7 @@ fn handle_profile(args: Vec<String>) -> Result<()> {
 fn handle_workspace(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, list, status, launch, run, launch-profile-apps, windows, screenshot, focus-window, close-window, click, key, type, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, status, launch, run, launch-profile-apps, windows, screenshot, focus-window, close-window, click, key, type, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -95,6 +95,20 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
             } else {
                 print_json(&workspace::start_workspace(start.options)?)
             }
+        }
+        "open-profile" => {
+            let start = parse_start_options(&args[1..])?;
+            if start.foreground {
+                bail!("workspace open-profile does not support --foreground");
+            }
+            let profile_id = start
+                .profile_id
+                .clone()
+                .context("workspace open-profile requires --profile PROFILE")?;
+            print_json(&profile::open_profile_workspace(
+                start.options,
+                &profile_id,
+            )?)
         }
         "status" => {
             let id = parse_id_option(&args[1..])?;
@@ -183,7 +197,8 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
         }
         unknown => {
             bail!(
-                "unknown workspace command '{unknown}'. Expected: start, list, cleanup, status, launch, run, launch-profile-apps, windows, screenshot, focus-window, close-window, click, key, type, logs, wait-app, events, setup, kill-app, stop"
+                "unknown workspace command '{unknown}'. Expected: {}",
+                "start, open-profile, list, cleanup, status, launch, run, launch-profile-apps, windows, screenshot, focus-window, close-window, click, key, type, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -192,6 +207,7 @@ fn handle_workspace(args: Vec<String>) -> Result<()> {
 struct ParsedStartOptions {
     options: WorkspaceStartOptions,
     foreground: bool,
+    profile_id: Option<String>,
 }
 
 fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
@@ -251,6 +267,7 @@ fn parse_start_options(args: &[String]) -> Result<ParsedStartOptions> {
     Ok(ParsedStartOptions {
         options,
         foreground,
+        profile_id,
     })
 }
 
@@ -863,6 +880,6 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 
 fn print_help() {
     println!(
-        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
+        "agent-workspace-linux\n\nUsage:\n  agent-workspace-linux doctor\n  agent-workspace-linux mcp\n  agent-workspace-linux profile path|list|get|check|template|put|delete\n  agent-workspace-linux profile template project-dev [--id ID] [--host-path PATH]\n  agent-workspace-linux workspace start --ack-hidden-workspace [--ack-unenforced-policy] [--foreground] [--profile PROFILE] [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace open-profile --ack-hidden-workspace [--ack-unenforced-policy] --profile PROFILE [--id ID] [--width PX] [--height PX]\n  agent-workspace-linux workspace list\n  agent-workspace-linux workspace cleanup [--id ID]\n  agent-workspace-linux workspace status [--id ID]\n  agent-workspace-linux workspace launch [--id ID] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace run [--id ID] [--profile PROFILE] [--timeout-ms N] [--tail-bytes N] -- COMMAND [ARGS...]\n  agent-workspace-linux workspace launch-profile-apps [--id ID] --profile PROFILE [--ack-unenforced-policy]\n  agent-workspace-linux workspace windows [--id ID]\n  agent-workspace-linux workspace screenshot [--id ID] [--output PATH]\n  agent-workspace-linux workspace focus-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace close-window [--id ID] WINDOW_ID\n  agent-workspace-linux workspace click [--id ID] X Y\n  agent-workspace-linux workspace key [--id ID] KEY\n  agent-workspace-linux workspace type [--id ID] TEXT\n  agent-workspace-linux workspace logs [--id ID] [--stream stdout|stderr] [--tail-bytes N] APP_ID_OR_PID\n  agent-workspace-linux workspace wait-app [--id ID] [--timeout-ms N] APP_ID_OR_PID\n  agent-workspace-linux workspace events [--id ID] [--tail N]\n  agent-workspace-linux workspace setup [--id ID] --profile PROFILE [--wait] [--timeout-ms N] [--ack-unenforced-policy]\n  agent-workspace-linux workspace kill-app [--id ID] APP_ID_OR_PID\n  agent-workspace-linux workspace stop [--id ID]"
     );
 }
