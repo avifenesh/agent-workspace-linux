@@ -26,11 +26,15 @@ Verified:
   types into a focused input, and waits for the X11 title to change to
   `typed:typed-ok`, proving page-level text input rather than only address-bar
   navigation.
+- The smoke suite now starts the synthetic `browser-session` profile end to
+  end. It imports the generated profile, opens it with startup Chrome, verifies
+  the mounted browser data directory is writable from inside the workspace, then
+  stops the workspace and deletes the saved profile.
 - Full `scripts/integration_smoke.sh` passed after the change, including
   permission ceilings, profile import/export, open-profile dry-runs, setup and
-  startup apps, disabled and local-only network enforcement, mount enforcement,
-  screenshots, input, clipboard, artifacts, Chrome local-dev QA, crashed-daemon
-  cleanup, and self-stop.
+  startup apps, browser-session startup, disabled and local-only network
+  enforcement, mount enforcement, screenshots, input, clipboard, artifacts,
+  Chrome local-dev QA, crashed-daemon cleanup, and self-stop.
 
 Findings:
 

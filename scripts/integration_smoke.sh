@@ -208,6 +208,23 @@ run_awl profile template "${BROWSER_SESSION_ARGS[@]}" > "$SMOKE_DIR/browser-sess
 assert_json '.id == "browser-session-smoke" and .network.mode == "inherit_host" and .require_enforced_policy == true and (.description | contains("explicit user approval")) and .mounts[0].workspace_path == "/workspace/browser-user-data" and .mounts[0].mode == "read_write" and .startup_apps[0].command[0] == $browser and (.startup_apps[0].command | index("--no-sandbox")) and (.startup_apps[0].command | index("--user-data-dir=/workspace/browser-user-data"))' "$SMOKE_DIR/browser-session-template.json" --arg browser "$EXPECTED_BROWSER_BIN"
 run_awl profile validate --json "$SMOKE_DIR/browser-session-template.json" > "$SMOKE_DIR/browser-session-template-validate.json"
 assert_json '.ok == true and .profile.id == "browser-session-smoke" and .check.applied_policy.enforcement.mounts.enforced == true and .check.applied_policy.enforcement.network.state == "not_requested"' "$SMOKE_DIR/browser-session-template-validate.json"
+if [[ -n "$BROWSER_BIN" ]]; then
+  run_awl profile import --json "$SMOKE_DIR/browser-session-template.json" > "$SMOKE_DIR/browser-session-import.json"
+  assert_json '.created == true and .saved == true' "$SMOKE_DIR/browser-session-import.json"
+  BROWSER_SESSION_ID="browser-session-open-smoke-$$"
+  WORKSPACE_IDS+=("$BROWSER_SESSION_ID")
+  run_awl workspace open-profile --ack-hidden-workspace --profile browser-session-smoke --id "$BROWSER_SESSION_ID" --purpose "Browser session smoke" --startup-wait-window --startup-screenshot-window --startup-window-timeout-ms 20000 > "$SMOKE_DIR/browser-session-open.json"
+  assert_json '.ready == true and .startup_launched == true and .startup.launched[0].ok == true and (.startup.launched[0].screenshot.bytes > 0) and .startup.launched[0].apps[0].profile_id == "browser-session-smoke"' "$SMOKE_DIR/browser-session-open.json"
+  run_awl workspace run --id "$BROWSER_SESSION_ID" --name browser-session-mount-probe --timeout-ms 8000 --tail-bytes 4000 -- bash -lc 'printf browser-session-write-ok > /workspace/browser-user-data/session-write.txt' > "$SMOKE_DIR/browser-session-mount-probe.json"
+  assert_json '.succeeded == true and .launch.apps[0].mount_isolation == "bubblewrap_mount_namespace"' "$SMOKE_DIR/browser-session-mount-probe.json"
+  grep -q '^browser-session-write-ok$' "$BROWSER_SESSION_DATA/session-write.txt"
+  run_awl workspace stop --id "$BROWSER_SESSION_ID" > "$SMOKE_DIR/browser-session-stop.json"
+  assert_json '.ok == true and (.apps[] | select(.name == "browser-session-no-sandbox" and .running == false))' "$SMOKE_DIR/browser-session-stop.json"
+  run_awl profile delete browser-session-smoke > "$SMOKE_DIR/browser-session-delete.json"
+  assert_json '.deleted == true and .profile.id == "browser-session-smoke"' "$SMOKE_DIR/browser-session-delete.json"
+else
+  echo "== browser-session startup smoke skipped: Chrome/Chromium not found =="
+fi
 
 echo "== open-profile dry-run =="
 OPEN_PROFILE="$SMOKE_DIR/open-profile.json"
