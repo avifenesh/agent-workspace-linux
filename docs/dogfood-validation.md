@@ -45,6 +45,12 @@ Verified:
   cleanup removed the runtime directory, the temporary profile was deleted, the
   temporary host mount directory was removed, and final `workspace_list`,
   `profile_list`, and stale cleanup dry-run were empty.
+- Follow-up timing against a separate minimal mounted profile
+  `timing-mounted-profile-20260525` did not reproduce the several-minute
+  `workspace_open_profile` latency from this pass. Installed CLI
+  `workspace open-profile --dry-run` and `profile check` both returned with
+  `elapsed=0.00`; installed MCP `workspace_open_profile` dry-run returned in
+  about 3.4s, and real MCP `workspace_open_profile` returned in about 2.5s.
 
 Findings:
 
@@ -52,9 +58,9 @@ Findings:
   a mounted host path can be opened in a normal desktop editor, edited through
   workspace-local input, saved, and verified on the host without touching the
   user's visible desktop.
-- `workspace_open_profile` with the mounted profile took several minutes in this
-  pass despite succeeding. Treat this as a UX/performance observation for
-  follow-up.
+- One mounted-profile `workspace_open_profile` call took several minutes during
+  this pass, but immediate follow-up timing did not reproduce it. Keep an eye on
+  profile-open latency, but do not treat this as confirmed current behavior.
 - GNOME Text Editor initially captured as a black first-window screenshot, then
   rendered correctly on a later capture. Its stderr included DRI3 acceleration
   warnings and a missing `dbus-launch` warning. This did not block the edit/save
