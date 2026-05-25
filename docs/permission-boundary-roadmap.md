@@ -24,6 +24,15 @@ This mode is intended for the Codex app integration and for developer dogfood.
 The app can request workspace starts, mounts, network modes, setup commands, and
 apps through its own UI approval flow.
 
+If the user grants the Codex session full access, UI-owned mode must respect
+that choice. The user should approve the hidden workspace once, because it is a
+separate agent-controlled environment that the user may not be looking at.
+After that approval, workspace-local actions such as launching apps, sending
+input, taking screenshots, and stopping the workspace should run without a
+second generic permission prompt storm. The runtime still scopes those actions
+to the hidden workspace display/IPC and still enforces any profile policy that
+was selected for the workspace.
+
 ### MCP-Locked Mode
 
 When the MCP is spawned with permission fields through
@@ -81,6 +90,9 @@ Rules:
 
 - Missing or empty permission fields mean no MCP-level ceiling for that
   dimension.
+- A full-access Codex session can use open dimensions without extra MCP-level
+  prompts after hidden-workspace approval, but it cannot widen a populated
+  spawn-time ceiling.
 - Prefilled `network` is the maximum network access available to all workspace
   starts and launches.
 - Prefilled `mounts` are the maximum file access. A UI may narrow mounts or

@@ -421,7 +421,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_open_profile(
@@ -650,7 +650,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_launch_app(
@@ -695,7 +695,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_run_app(
@@ -1208,7 +1208,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_click(
@@ -1266,7 +1266,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = true,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_move_pointer(
@@ -1318,7 +1318,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_drag(
@@ -1378,7 +1378,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_scroll(
@@ -1436,7 +1436,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_key(
@@ -1485,7 +1485,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_type_text(
@@ -1702,7 +1702,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_run_profile_setup(
@@ -1758,7 +1758,7 @@ impl AgentWorkspaceLinux {
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = true
+            open_world_hint = false
         )
     )]
     fn workspace_launch_profile_apps(

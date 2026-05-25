@@ -46,7 +46,12 @@ paths, and mount destinations must be non-overlapping absolute paths under
 `/workspace/`.
 
 The MCP server can run in open host-controlled mode, or with an optional
-spawn-time permission ceiling loaded from JSON. The richer human approval
+spawn-time permission ceiling loaded from JSON. In open mode, it does not
+secretly reduce a Codex session that the user already granted full access to:
+after the one hidden-workspace acknowledgement, workspace-local launch/input
+actions are treated as scoped to that approved environment. A configured
+ceiling is different: it is an immutable narrowing layer for that MCP process
+and even a full-access client cannot broaden it. The richer human approval
 boundary in Codex for Linux is still being dogfooded. See
 [Permission Boundary Roadmap](docs/permission-boundary-roadmap.md) for the
 authority model and validation gates, and
@@ -192,8 +197,10 @@ args = ["mcp"]
 ```
 
 That default registration is intentionally open at the MCP layer so Codex for
-Linux can own the approval UI. For MCP hosts or auto-loop agents that need fixed
-permissions at server spawn, pass a ceiling file during install:
+Linux can own the approval UI and honor the user's session choice, including
+full-access sessions that should not be prompted repeatedly after approving the
+hidden workspace. For MCP hosts or auto-loop agents that need fixed permissions
+at server spawn, pass a ceiling file during install:
 
 ```bash
 agent-workspace-linux permissions template local \

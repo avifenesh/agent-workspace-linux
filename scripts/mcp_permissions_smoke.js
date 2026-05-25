@@ -188,6 +188,27 @@ async function main() {
   });
   notify("notifications/initialized", {});
 
+  const tools = await request("tools/list", {});
+  const toolByName = new Map((tools.tools || []).map((tool) => [tool.name, tool]));
+  for (const name of [
+    "workspace_open_profile",
+    "workspace_launch_app",
+    "workspace_run_app",
+    "workspace_run_profile_setup",
+    "workspace_launch_profile_apps",
+    "workspace_click",
+    "workspace_key",
+    "workspace_type_text",
+  ]) {
+    const tool = toolByName.get(name);
+    assert(tool, `tools/list did not include ${name}`);
+    const openWorldHint = tool.annotations?.openWorldHint ?? tool.annotations?.open_world_hint;
+    assert(
+      openWorldHint !== true,
+      `${name} should not request open-world approval; hidden-workspace approval and MCP ceilings own that boundary`,
+    );
+  }
+
   const permissions = await callTool("mcp_permissions");
   assert(permissions.configured === true, "mcp_permissions did not report configured=true");
   assert(permissions.restricted === true, "mcp_permissions did not report restricted=true");

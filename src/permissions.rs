@@ -49,11 +49,11 @@ impl McpPermissionState {
         let restricted = ceiling.is_restricted();
         let message = match (configured, restricted) {
             (false, _) => {
-                "No MCP permission ceiling is configured; the host/client controls workspace permissions."
+                "No MCP permission ceiling is configured; the host/client session controls workspace permissions, including full-access sessions after hidden-workspace approval."
                     .to_string()
             }
             (true, false) => {
-                "MCP permission ceiling file is configured but does not restrict network, mounts, or app launches."
+                "MCP permission ceiling file is configured but does not restrict network, mounts, or app launches; the host/client session controls open dimensions."
                     .to_string()
             }
             (true, true) => {
