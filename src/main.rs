@@ -7,7 +7,7 @@ mod server;
 mod workspace;
 
 use anyhow::{bail, Context, Result};
-use policy::AppliedWorkspacePolicy;
+use policy::{AppliedWorkspacePolicy, MountMode, ProfileMount};
 use profile::WorkspaceProfile;
 use std::{fs, path::PathBuf};
 use workspace::{DaemonOptions, EnvVar, LaunchSpec, WorkspaceStartOptions};
@@ -29,6 +29,10 @@ async fn main() -> Result<()> {
                 None => Ok(()),
             }
         }
+        Some("permissions") => {
+            args.remove(0);
+            handle_permissions(args)
+        }
         Some("profile") => {
             args.remove(0);
             handle_profile(args, &permissions)
@@ -47,7 +51,7 @@ async fn main() -> Result<()> {
         }
         Some(command) => {
             bail!(
-                "unknown command '{command}'. Expected one of: doctor, guardrails, mcp, profile, workspace, --help"
+                "unknown command '{command}'. Expected one of: doctor, guardrails, mcp, permissions, profile, workspace, --help"
             )
         }
     }
@@ -141,6 +145,28 @@ fn handle_profile(args: Vec<String>, permissions: &permissions::McpPermissionSta
         unknown => {
             bail!("unknown profile command '{unknown}'. Expected: path, list, get, check, validate, template, put, import, export, delete")
         }
+    }
+}
+
+fn handle_permissions(args: Vec<String>) -> Result<()> {
+    let Some(command) = args.first().map(String::as_str) else {
+        bail!("missing permissions command. Expected: validate, template");
+    };
+    match command {
+        "validate" => {
+            let json_path = parse_permissions_validate_options(&args[1..])?;
+            print_json(&permissions::load_mcp_permission_state(json_path)?)
+        }
+        "template" => {
+            let (kind, allow_hosts, mounts, apps) = parse_permissions_template_options(&args[1..])?;
+            print_json(&permissions::template_permission_ceiling(
+                &kind,
+                allow_hosts,
+                mounts,
+                apps,
+            )?)
+        }
+        unknown => bail!("unknown permissions command '{unknown}'. Expected: validate, template"),
     }
 }
 
@@ -1157,6 +1183,78 @@ fn parse_profile_validate_options(args: &[String]) -> Result<PathBuf> {
         }
     }
     json_path.context("profile validate requires --json PATH")
+}
+
+fn parse_permissions_validate_options(args: &[String]) -> Result<PathBuf> {
+    let mut json_path = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                json_path = Some(PathBuf::from(value_after(args, index, "--json")?));
+                index += 2;
+            }
+            flag => {
+                bail!("unknown permissions validate option '{flag}'. Expected: --json PATH")
+            }
+        }
+    }
+    json_path.context("permissions validate requires --json PATH")
+}
+
+fn parse_permissions_template_options(
+    args: &[String],
+) -> Result<(String, Vec<String>, Vec<ProfileMount>, Vec<PathBuf>)> {
+    let kind = args
+        .first()
+        .context("permissions template requires a kind: open, closed, or local")?
+        .to_string();
+    let mut allow_hosts = Vec::new();
+    let mut mounts = Vec::new();
+    let mut apps = Vec::new();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--allow-host" => {
+                allow_hosts.push(value_after(args, index, "--allow-host")?.to_string());
+                index += 2;
+            }
+            "--mount" => {
+                mounts.push(parse_permission_mount_spec(value_after(args, index, "--mount")?)?);
+                index += 2;
+            }
+            "--app" => {
+                apps.push(PathBuf::from(value_after(args, index, "--app")?));
+                index += 2;
+            }
+            flag => bail!(
+                "unknown permissions template option '{flag}'. Expected: [--allow-host HOST] [--mount HOST:WORKSPACE[:read_only|read_write]] [--app PROGRAM]"
+            ),
+        }
+    }
+    Ok((kind, allow_hosts, mounts, apps))
+}
+
+fn parse_permission_mount_spec(spec: &str) -> Result<ProfileMount> {
+    let mut parts = spec.splitn(3, ':');
+    let host_path = parts
+        .next()
+        .filter(|part| !part.is_empty())
+        .context("--mount requires HOST:WORKSPACE[:read_only|read_write]")?;
+    let workspace_path = parts
+        .next()
+        .filter(|part| !part.is_empty())
+        .context("--mount requires HOST:WORKSPACE[:read_only|read_write]")?;
+    let mode = match parts.next().unwrap_or("read_only") {
+        "read_only" | "ro" => MountMode::ReadOnly,
+        "read_write" | "rw" => MountMode::ReadWrite,
+        other => bail!("unknown --mount mode '{other}'. Expected read_only or read_write"),
+    };
+    Ok(ProfileMount {
+        host_path: PathBuf::from(host_path),
+        workspace_path: PathBuf::from(workspace_path),
+        mode,
+    })
 }
 
 fn parse_profile_json_file_options(
@@ -3567,6 +3665,8 @@ Usage:
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
   agent-workspace-linux mcp [--permissions PATH]
+  agent-workspace-linux permissions validate --json PATH
+  agent-workspace-linux permissions template open|closed|local [--allow-host HOST] [--mount HOST:WORKSPACE[:read_only|read_write]] [--app PROGRAM]
   agent-workspace-linux profile path|list|get|check|validate|template|put|import|export|delete
   agent-workspace-linux profile validate --json PATH
   agent-workspace-linux profile put --json PATH [--replace] [--dry-run]

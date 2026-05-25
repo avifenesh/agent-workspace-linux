@@ -57,6 +57,8 @@ authority model and validation gates, and
 ```bash
 cargo run -- doctor
 cargo run -- guardrails
+cargo run -- permissions template local --allow-host localhost:3000 --mount "$PWD:/workspace/project:read_write" --app sh
+cargo run -- permissions validate --json ./permissions.json
 cargo run -- mcp --permissions ./permissions.json
 cargo run -- --permissions ./permissions.json profile validate --json ./profile.json
 cargo run -- profile path
@@ -194,6 +196,12 @@ Linux can own the approval UI. For MCP hosts or auto-loop agents that need fixed
 permissions at server spawn, pass a ceiling file during install:
 
 ```bash
+agent-workspace-linux permissions template local \
+  --allow-host localhost:3000 \
+  --mount "$PWD:/workspace/project:read_write" \
+  --app sh \
+  > /home/YOU/.config/agent-workspace-linux/permissions.json
+agent-workspace-linux permissions validate --json /home/YOU/.config/agent-workspace-linux/permissions.json
 ./install.sh --permissions /home/YOU/.config/agent-workspace-linux/permissions.json
 ```
 
@@ -232,6 +240,9 @@ broaden network mode, mount paths/access, or launch programs. Call
 `mcp_permissions` after connecting to see the active ceiling. App allowlists
 match the launched program only; allowing shells, package managers, or browsers
 delegates whatever those programs can do inside the workspace policy.
+Use `permissions template open|closed|local` to generate a starter ceiling, and
+`permissions validate --json PATH` to parse and check a file without starting an
+MCP server.
 
 The same ceiling can be applied to standalone CLI operations by placing
 `--permissions PATH` before the command, for example

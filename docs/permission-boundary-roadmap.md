@@ -96,7 +96,8 @@ Rules:
 - The active ceiling is visible through the read-only `mcp_permissions` tool.
 - Enforcement currently covers MCP profile template/check/validate/put/import,
   workspace start/open-profile, direct launch/run, and profile setup/startup
-  launches. The standalone CLI remains a developer/admin surface.
+  launches. The standalone CLI can also generate and validate ceiling files for
+  hosts that do not have the Codex for Linux UI.
 - The CLI also accepts a leading `--permissions PATH` global option. When used,
   profile and workspace actions are checked against the same ceiling. This is
   intended for the Codex for Linux bridge when it discovers a locked MCP server
@@ -113,10 +114,12 @@ Current gate status on 2026-05-25:
   commands, screenshots, window targeting, input, clipboard, app logs, events,
   manifests, stop, stale cleanup, daemon-crash recovery, self-stop from inside
   a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
-  discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`. A
+  discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`, and MCP daemon
+  child cleanup so stopped workspaces do not leave zombies under a long-lived
+  MCP process. A
   Codex-spawned MCP pass on this repository also revalidated project-dev
   mounts, Rust toolchain access, GUI input, events, Chrome, and current network
-  enforcement. `cargo test` currently passes 54 tests.
+  enforcement. `cargo test` currently passes 56 tests.
 - A still has known product gaps: host-localhost bridging for `local_only` and
   more varied real-project coverage. Broad network allowlists and egress proxy
   filtering are out of scope for this pass; the product network model is
@@ -139,9 +142,12 @@ Current gate status on 2026-05-25:
   recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
   slice, and `./install.sh --permissions PATH` now gives locked MCP hosts a
-  repeatable setup path without hand-editing Codex config. The Codex for Linux
-  app picker now accepts both executable files and `.desktop` launchers, parsing
-  launcher `Name`/`Exec` fields into startup app commands without a shell.
+  repeatable setup path without hand-editing Codex config. The CLI also has
+  `permissions template open|closed|local` and
+  `permissions validate --json PATH` so non-Codex hosts can generate and check a
+  ceiling before spawning MCP. The Codex for Linux app picker now accepts both
+  executable files and `.desktop` launchers, parsing launcher `Name`/`Exec`
+  fields into startup app commands without a shell.
   Authenticated browser-profile sharing now has a `browser-session` starter
   template and a first Codex for Linux picker/copy/lock-warning flow for
   explicitly user-approved browser data directories. The installed MCP path has

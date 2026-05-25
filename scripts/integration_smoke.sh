@@ -117,12 +117,9 @@ echo "== cli permission ceiling smoke =="
 CLI_PERMISSIONS="$SMOKE_DIR/cli-permissions.json"
 CLI_OPEN_PROFILE="$SMOKE_DIR/cli-open-profile.json"
 CLI_LOCKED_PROFILE="$SMOKE_DIR/cli-locked-profile.json"
-cat > "$CLI_PERMISSIONS" <<'JSON'
-{
-  "network": { "mode": "disabled" },
-  "apps": { "allow": ["sh"] }
-}
-JSON
+run_awl permissions template closed --app sh > "$CLI_PERMISSIONS"
+run_awl permissions validate --json "$CLI_PERMISSIONS" > "$SMOKE_DIR/cli-permissions-validate.json"
+assert_json '.configured == true and .restricted == true and .ceiling.network.mode == "disabled" and .ceiling.apps.allow[0] == "sh"' "$SMOKE_DIR/cli-permissions-validate.json"
 cat > "$CLI_OPEN_PROFILE" <<'JSON'
 {
   "id": "cli-too-open",

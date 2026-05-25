@@ -535,3 +535,12 @@ Previous post-patch verification:
   and the locked registration shape. `bash -n install.sh`,
   `node scripts/mcp_permissions_smoke.js`, and `cargo test --locked` all passed
   afterward.
+- 2026-05-25 C-gate locked-host CLI polish added
+  `permissions template open|closed|local` and
+  `permissions validate --json PATH`, so auto-loop agents and non-Codex MCP
+  hosts can generate and preflight ceiling files before spawning MCP. The
+  integration smoke now uses the template command to create its locked CLI
+  ceiling and validates that file before proving the ceiling blocks broader
+  profiles. The same pass also added MCP zombie-child regression coverage after
+  stopped workspaces exposed stale `agent-workspace` children under a long-lived
+  MCP process.

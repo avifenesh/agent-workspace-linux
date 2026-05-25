@@ -226,6 +226,45 @@ pub fn load_mcp_permission_state(path: PathBuf) -> Result<McpPermissionState> {
     Ok(McpPermissionState::from_ceiling(Some(path), ceiling))
 }
 
+pub fn template_permission_ceiling(
+    kind: &str,
+    allow_hosts: Vec<String>,
+    mounts: Vec<ProfileMount>,
+    apps: Vec<PathBuf>,
+) -> Result<McpPermissionCeiling> {
+    let network = match kind {
+        "open" => {
+            if !allow_hosts.is_empty() {
+                bail!("permissions template open does not accept --allow-host");
+            }
+            None
+        }
+        "closed" | "disabled" => {
+            if !allow_hosts.is_empty() {
+                bail!("permissions template closed does not accept --allow-host");
+            }
+            Some(NetworkPolicy {
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
+            })
+        }
+        "local" | "local-only" | "local_only" => Some(NetworkPolicy {
+            mode: NetworkMode::LocalOnly,
+            allow_hosts,
+        }),
+        unknown => {
+            bail!("unknown permissions template {unknown:?}. Expected: open, closed, or local")
+        }
+    };
+    let ceiling = McpPermissionCeiling {
+        network,
+        mounts,
+        apps: AppPermissionCeiling { allow: apps },
+    };
+    ceiling.validate_config()?;
+    Ok(ceiling)
+}
+
 fn validate_allowed_command(command: &Path) -> Result<()> {
     if command.as_os_str().is_empty() {
         bail!("MCP app allowlist entries cannot be empty");
@@ -425,6 +464,61 @@ mod tests {
             workspace_path: PathBuf::from(workspace_path),
             mode,
         }
+    }
+
+    #[test]
+    fn permission_templates_cover_open_closed_and_local() {
+        let open = template_permission_ceiling("open", Vec::new(), Vec::new(), Vec::new()).unwrap();
+        assert!(open.network.is_none());
+        assert!(!open.is_restricted());
+
+        let closed = template_permission_ceiling(
+            "closed",
+            Vec::new(),
+            Vec::new(),
+            vec![PathBuf::from("sh")],
+        )
+        .unwrap();
+        assert!(matches!(
+            closed.network.as_ref().map(|network| &network.mode),
+            Some(NetworkMode::Disabled)
+        ));
+        assert_eq!(closed.apps.allow, vec![PathBuf::from("sh")]);
+        assert!(closed.is_restricted());
+
+        let local = template_permission_ceiling(
+            "local",
+            vec!["localhost:3000".to_string()],
+            vec![mount(
+                "/home/me/project",
+                "/workspace/project",
+                MountMode::ReadWrite,
+            )],
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            local.network.as_ref().map(|network| &network.mode),
+            Some(NetworkMode::LocalOnly)
+        ));
+        assert_eq!(
+            local.network.unwrap().allow_hosts,
+            vec!["localhost:3000".to_string()]
+        );
+        assert_eq!(local.mounts.len(), 1);
+    }
+
+    #[test]
+    fn permission_template_rejects_hosts_for_non_local_modes() {
+        let error = template_permission_ceiling(
+            "closed",
+            vec!["localhost:3000".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect_err("closed template should reject allow-host")
+        .to_string();
+        assert!(error.contains("does not accept --allow-host"));
     }
 
     #[test]
