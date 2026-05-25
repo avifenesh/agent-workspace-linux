@@ -4,6 +4,51 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-25 Native Chrome Control Pass
+
+Environment:
+
+- Dogfood ran through the installed Codex MCP tools in developer-open mode.
+  `mcp_permissions` reported no spawn-time ceiling.
+- Preflight state was clean: `workspace_list`, `profile_list`, and
+  `workspace_cleanup_stale --dry-run` returned no entries.
+
+Verified:
+
+- `workspace_start --dry-run` returned the hidden-workspace approval bundle
+  without creating runtime state. The real `workspace_start` then created a
+  1280x800 workspace on `:90` for `Dogfood native browser control`.
+- A workspace command found installed everyday GUI candidates:
+  `google-chrome`, `firefox`, `gnome-text-editor`, and `xterm`.
+- `workspace_launch_app` opened Google Chrome with a temporary
+  `/tmp/agent-workspace-native-browser-control` user-data dir, `--no-sandbox`,
+  `--no-first-run`, and `about:blank`. It waited for a visible
+  `about:blank - Google Chrome` window and captured a first-window screenshot.
+- `workspace_focus_window`, `workspace_key ctrl+l`, `workspace_paste_text`, and
+  `workspace_key Return` drove Chrome's address bar to a local `data:text/html`
+  page. The active window title changed to
+  `Agent Workspace Native Browser OK - Google Chrome`, proving paste and
+  navigation worked in a normal browser workflow.
+- `workspace_type_text` typed into the page's autofocus input. The captured
+  window screenshot showed the rendered page with `native-browser-ok`,
+  `workspace-browser-control`, and the typed workspace-local input text.
+- `workspace_observe` returned the visible Chrome window, hidden Chrome helper
+  windows, app records, pointer metadata, a root screenshot, and recent events.
+  `workspace_events` recorded key input, typed text as `char_count`, observe,
+  and screenshot events without raw typed-text leakage.
+- `workspace_stop --dry-run` showed the running Chrome app that would be
+  stopped. The real stop ended Chrome with exit code 0, wrote stopped manifest
+  state, and `workspace_cleanup_stale` removed the runtime directory. The
+  temporary Chrome user-data dir was deleted. Final `workspace_list`,
+  `profile_list`, and stale cleanup dry-run were empty.
+
+Findings:
+
+- The installed MCP surface now has a clean proof for a user-like browser flow:
+  start, launch Chrome, focus, paste into the address bar, navigate, type into
+  page content, observe/screenshot, inspect events, stop, and cleanup. This is a
+  better C-gate proxy for shopping/browser QA than terminal-only control.
+
 ## 2026-05-25 Start/Stop and Native Control Pass
 
 Environment:
