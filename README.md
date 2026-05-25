@@ -666,6 +666,10 @@ workspace has stopped.
 setup-command cleanup behavior.
 `workspace_list_windows` and window-targeted tools can filter by title, class,
 pid, app id, or app name, with class matching `wm_class` and `wm_instance`.
+For launched apps, prefer the returned `apps[0].id`/`app_id` when sending later
+window-targeted input. Many GUI programs retitle their windows after startup, so
+title matching is useful for discovery but should not be the stable control
+handle.
 `workspace_list_windows` accepts `include_hidden=true` to return
 minimized/hidden windows as well as visible windows. `workspace_observe` also
 accepts `include_hidden=true` plus `events`, `events_tail`, and

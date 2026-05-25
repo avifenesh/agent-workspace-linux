@@ -645,7 +645,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_launch_app",
-        description = "Launch an optionally named app inside an isolated agent workspace. Set dry_run=true for a daemon-attached preview against an already running workspace daemon; it fails when the workspace is not running and never starts a daemon for you. Dry-run returns the command, cwd/env, profile policy, approval bundle, and mount/network isolation without spawning a process. The command runs with the workspace attachment environment, including DISPLAY, XAUTHORITY, AGENT_WORKSPACE_ID, AGENT_WORKSPACE_RUNTIME_DIR, and AGENT_WORKSPACE_SOCKET. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. Set screenshot_window=true to also capture the first visible launched-app window; this implies waiting for a window. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced. Action responses return the directly affected app in the top-level apps field and keep nested status compact; use workspace_status or workspace_list_apps for the full app history.",
+        description = "Launch an optionally named app inside an isolated agent workspace. Set dry_run=true for a daemon-attached preview against an already running workspace daemon; it fails when the workspace is not running and never starts a daemon for you. Dry-run returns the command, cwd/env, profile policy, approval bundle, and mount/network isolation without spawning a process. The command runs with the workspace attachment environment, including DISPLAY, XAUTHORITY, AGENT_WORKSPACE_ID, AGENT_WORKSPACE_RUNTIME_DIR, and AGENT_WORKSPACE_SOCKET. Set wait_window=true to wait for the launched app's first visible window and return it in the same response. Set screenshot_window=true to also capture the first visible launched-app window; this implies waiting for a window. If a launch profile is provided, its cwd/env and mount/network policy apply to this app; set acknowledge_unenforced_policy=true if that launch profile requests policy that remains unenforced. Action responses return the directly affected app in the top-level apps field and keep nested status compact; use workspace_status or workspace_list_apps for the full app history. Prefer the returned apps[0].id as app_id for later window-targeted actions because GUI window titles often change after launch.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1451,7 +1451,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_key_window",
-        description = "Send a key chord to a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Response includes the target window and active_window when focus can be resolved after the action.",
+        description = "Send a key chord to a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Prefer app_id from workspace_launch_app when controlling a launched app because GUI titles can change. Response includes the target window and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1500,7 +1500,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_type_window",
-        description = "Type literal text into a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Response includes the target window and active_window when focus can be resolved after the action.",
+        description = "Type literal text into a specific visible window inside an isolated agent workspace, targeted by X11 window id or by title/class/pid/app filters. Prefer app_id from workspace_launch_app when controlling a launched app because GUI titles can change. Response includes the target window and active_window when focus can be resolved after the action.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1593,7 +1593,7 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_paste_window",
-        description = "Set the isolated workspace clipboard to text, focus a visible window by X11 id/title/class/pid/app filter, then send a paste key chord. Defaults to ctrl+v. Response includes the target window and active_window when focus can be resolved after the action. Event logs store only size metadata, not the raw text.",
+        description = "Set the isolated workspace clipboard to text, focus a visible window by X11 id/title/class/pid/app filter, then send a paste key chord. Prefer app_id from workspace_launch_app when controlling a launched app because GUI titles can change. Defaults to ctrl+v. Response includes the target window and active_window when focus can be resolved after the action. Event logs store only size metadata, not the raw text.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

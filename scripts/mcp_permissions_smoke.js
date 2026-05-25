@@ -208,6 +208,16 @@ async function main() {
       `${name} should not request open-world approval; hidden-workspace approval and MCP ceilings own that boundary`,
     );
   }
+  const launchDescription = toolByName.get("workspace_launch_app")?.description || "";
+  assert(
+    /app_id/.test(launchDescription) && /titles? often change/i.test(launchDescription),
+    "workspace_launch_app description should tell agents to reuse returned app_id instead of mutable titles",
+  );
+  const pasteDescription = toolByName.get("workspace_paste_window")?.description || "";
+  assert(
+    /Prefer app_id/.test(pasteDescription) && /titles can change/i.test(pasteDescription),
+    "workspace_paste_window description should prefer app_id for launched GUI apps",
+  );
 
   const permissions = await callTool("mcp_permissions");
   assert(permissions.configured === true, "mcp_permissions did not report configured=true");

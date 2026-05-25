@@ -4,6 +4,35 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-25 Restarted Codex MCP Control Pass
+
+Environment:
+
+- Dogfood ran through the restarted Codex app's installed Agent Workspace MCP,
+  not the CLI wrapper path.
+- `mcp_permissions` reported no configured MCP ceiling, with Codex session
+  permissions owning the boundary after hidden-workspace approval.
+- `workspace_doctor` reported the X11 runtime ready, and `workspace_list`
+  started empty.
+
+Verified:
+
+- `workspace_start` with `acknowledge_hidden_workspace=true` created the hidden
+  workspace on `:90` with purpose `Dogfood restarted MCP no-prompt-storm path`.
+- `workspace_run_app` executed inside the hidden workspace, saw
+  `DISPLAY=:90`, `AGENT_WORKSPACE_ID=default`, the workspace IPC socket, and
+  `/usr/bin/xterm`.
+- `workspace_launch_app --wait-window --screenshot-window` opened a real xterm
+  window and returned `app-2092447`. A later title-based
+  `workspace_paste_window` missed because xterm retitled itself to the shell
+  cwd, while the same paste targeted by `app_id=app-2092447` succeeded.
+
+Finding:
+
+- Agents should prefer the returned `app_id` from launch responses for later
+  window-targeted actions. Window titles are good discovery hints, but not a
+  stable handle after app startup.
+
 ## 2026-05-25 Integration Smoke Native GUI Regression Pass
 
 Environment:
