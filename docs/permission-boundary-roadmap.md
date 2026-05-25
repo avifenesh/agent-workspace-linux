@@ -109,10 +109,11 @@ Current gate status on 2026-05-25:
 
 - A is validated for the current X11/bubblewrap runtime surface covered by the
   integration smoke. Real MCP dogfood and `scripts/integration_smoke.sh` have
-  covered Chrome, local-dev browser QA, Codex desktop feature tests, disabled
-  networking, local-only networking, read-only/read-write mounts, setup/startup
-  commands, screenshots, window targeting, input, clipboard, app logs, events,
-  manifests, stop, stale cleanup, daemon-crash recovery, self-stop from inside
+  covered Chrome, native browser text input, local-dev browser QA, mounted GUI
+  editor save-through, Codex desktop feature tests, disabled networking,
+  local-only networking, read-only/read-write mounts, setup/startup commands,
+  screenshots, window targeting, input, clipboard, app logs, events, manifests,
+  stop, stale cleanup, daemon-crash recovery, self-stop from inside
   a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
   discovery when a Codex/MCP launcher omits `XDG_RUNTIME_DIR`, and MCP daemon
   child cleanup so stopped workspaces do not leave zombies under a long-lived

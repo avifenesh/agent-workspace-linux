@@ -4,6 +4,41 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-25 Integration Smoke Native GUI Regression Pass
+
+Environment:
+
+- Ran `scripts/integration_smoke.sh` from the runtime repo with the local debug
+  build after extending the suite.
+- Chrome/Chromium and `gnome-text-editor` were present, so both optional GUI
+  paths executed instead of skipping.
+
+Verified:
+
+- The smoke suite now includes a mounted GUI editor regression. It launches the
+  editor against a read-write mounted file, waits for a real painted window
+  screenshot instead of only a mapped X11 window, clicks into the document,
+  selects existing content, pastes replacement text, saves, and verifies the
+  host file contains `edited-from-integration-smoke` and
+  `mounted-editor-save-ok`.
+- The smoke suite now includes a native Chrome input regression. It launches
+  Chrome in a hidden workspace, navigates to a generated `data:text/html` page,
+  types into a focused input, and waits for the X11 title to change to
+  `typed:typed-ok`, proving page-level text input rather than only address-bar
+  navigation.
+- Full `scripts/integration_smoke.sh` passed after the change, including
+  permission ceilings, profile import/export, open-profile dry-runs, setup and
+  startup apps, disabled and local-only network enforcement, mount enforcement,
+  screenshots, input, clipboard, artifacts, Chrome local-dev QA, crashed-daemon
+  cleanup, and self-stop.
+
+Findings:
+
+- GTK apps can expose a mapped X11 window before their surface is actually
+  painted. The regression now waits for a non-trivial screenshot before sending
+  editor input, matching the manual dogfood observation that a later screenshot
+  rendered correctly.
+
 ## 2026-05-25 Arbitrary App Mounted-File Pass
 
 Environment:

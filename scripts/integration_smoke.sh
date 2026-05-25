@@ -28,6 +28,10 @@ BROWSER_BIN="${BROWSER_BIN:-}"
 if [[ -z "$BROWSER_BIN" ]]; then
   BROWSER_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
 fi
+GUI_EDITOR_BIN="${GUI_EDITOR_BIN:-}"
+if [[ -z "$GUI_EDITOR_BIN" ]]; then
+  GUI_EDITOR_BIN="$(command -v gnome-text-editor || command -v gedit || command -v xed || true)"
+fi
 
 SMOKE_DIR="$(mktemp -d)"
 CONFIG_DIR="$SMOKE_DIR/config"
@@ -390,6 +394,39 @@ run_awl workspace run --id "$MOUNT_ID" --timeout-ms 8000 --tail-bytes 4000 -- ba
 assert_json '.succeeded == true and (.stdout.content | contains("ro-blocked")) and .launch.apps[0].mount_isolation == "bubblewrap_mount_namespace"' "$SMOKE_DIR/mount-run.json"
 grep -q '^rw-ok$' "$MOUNT_RW_HOST/out.txt"
 test ! -e "$MOUNT_RO_HOST/nope.txt"
+if [[ -n "$GUI_EDITOR_BIN" ]]; then
+  echo "== mounted GUI editor workspace =="
+  printf 'seed editor\n' > "$MOUNT_RW_HOST/editor-note.txt"
+  run_awl workspace launch --id "$MOUNT_ID" --name mounted-gui-editor --env XDG_CACHE_HOME=/tmp/agent-workspace-cache --wait-window --screenshot-window --window-timeout-ms 20000 -- "$GUI_EDITOR_BIN" /workspace/rw/editor-note.txt > "$SMOKE_DIR/mount-editor-launch.json"
+  assert_json '.ok == true and (.screenshot.bytes > 0) and ((.windows | length) > 0) and .apps[0].mount_isolation == "bubblewrap_mount_namespace"' "$SMOKE_DIR/mount-editor-launch.json"
+  MOUNT_EDITOR_APP_ID="$(jq -r '.apps[0].id' "$SMOKE_DIR/mount-editor-launch.json")"
+  MOUNT_EDITOR_TEXT=$'edited-from-integration-smoke\nmounted-editor-save-ok\n'
+  for _ in {1..30}; do
+    run_awl workspace screenshot-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --output "$SMOKE_DIR/mount-editor-ready.png" --timeout-ms 5000 > "$SMOKE_DIR/mount-editor-ready-screenshot.json"
+    if jq -e '.screenshot.bytes > 1000' "$SMOKE_DIR/mount-editor-ready-screenshot.json" >/dev/null; then
+      break
+    fi
+    sleep 0.2
+  done
+  assert_json '.screenshot.bytes > 1000 and .screenshot.path == $path' "$SMOKE_DIR/mount-editor-ready-screenshot.json" --arg path "$SMOKE_DIR/mount-editor-ready.png"
+  run_awl workspace focus-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --timeout-ms 5000 > "$SMOKE_DIR/mount-editor-focus.json"
+  run_awl workspace click-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --timeout-ms 5000 120 150 > "$SMOKE_DIR/mount-editor-click-body.json"
+  run_awl workspace key-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --timeout-ms 5000 ctrl+a > "$SMOKE_DIR/mount-editor-select.json"
+  run_awl workspace paste-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --timeout-ms 5000 "$MOUNT_EDITOR_TEXT" > "$SMOKE_DIR/mount-editor-paste.json"
+  run_awl workspace key-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --timeout-ms 5000 ctrl+s > "$SMOKE_DIR/mount-editor-save.json"
+  for _ in {1..30}; do
+    if grep -q '^mounted-editor-save-ok$' "$MOUNT_RW_HOST/editor-note.txt"; then
+      break
+    fi
+    sleep 0.2
+  done
+  grep -q '^edited-from-integration-smoke$' "$MOUNT_RW_HOST/editor-note.txt"
+  grep -q '^mounted-editor-save-ok$' "$MOUNT_RW_HOST/editor-note.txt"
+  run_awl workspace screenshot-window --id "$MOUNT_ID" --app "$MOUNT_EDITOR_APP_ID" --output "$SMOKE_DIR/mount-editor.png" --timeout-ms 5000 > "$SMOKE_DIR/mount-editor-screenshot.json"
+  assert_json '.screenshot.bytes > 0 and .screenshot.path == $path' "$SMOKE_DIR/mount-editor-screenshot.json" --arg path "$SMOKE_DIR/mount-editor.png"
+else
+  echo "== mounted GUI editor workspace skipped: no supported editor found =="
+fi
 run_awl workspace stop --id "$MOUNT_ID" > /dev/null
 
 echo "== window, screenshot, input, clipboard, and artifacts =="
@@ -460,8 +497,47 @@ else:
   assert_json '(.screenshot.bytes > 0) and (.active_window.title | contains("docs/dogfood-validation.md"))' "$SMOKE_DIR/browser-observe.json"
   run_awl workspace stop --id "$BROWSER_ID" > "$SMOKE_DIR/browser-stop.json"
   assert_json '.ok == true and (.apps[] | select(.name == "dev-server" and .running == false)) and (.apps[] | select(.name == "browser-local-dev" and .running == false))' "$SMOKE_DIR/browser-stop.json"
+
+  echo "== browser native input workspace =="
+  NATIVE_BROWSER_ID="browser-native-input-smoke-$$"
+  NATIVE_BROWSER_URL="$(python3 - <<'PY'
+from urllib.parse import quote
+
+html = """<!doctype html>
+<meta charset="utf-8">
+<title>Agent Workspace Native Browser OK</title>
+<input id="probe" autofocus>
+<script>
+const probe = document.getElementById("probe");
+function updateTitle() {
+  document.title = probe.value ? `typed:${probe.value}` : "Agent Workspace Native Browser OK";
+}
+probe.addEventListener("input", updateTitle);
+setTimeout(() => probe.focus(), 100);
+</script>
+"""
+print("data:text/html;charset=utf-8," + quote(html))
+PY
+)"
+  WORKSPACE_IDS+=("$NATIVE_BROWSER_ID")
+  run_awl workspace start --ack-hidden-workspace --id "$NATIVE_BROWSER_ID" --purpose "Browser native input smoke" > "$SMOKE_DIR/native-browser-start.json"
+  run_awl workspace launch --id "$NATIVE_BROWSER_ID" --name browser-native-input --wait-window --screenshot-window --window-timeout-ms 15000 -- "$BROWSER_BIN" "--user-data-dir=$SMOKE_DIR/native-browser-profile" --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check --ozone-platform=x11 --new-window about:blank > "$SMOKE_DIR/native-browser-launch.json"
+  assert_json '.ok == true and (.screenshot.bytes > 0) and ((.windows | length) > 0) and .apps[0].running == true' "$SMOKE_DIR/native-browser-launch.json"
+  NATIVE_BROWSER_APP_ID="$(jq -r '.apps[0].id' "$SMOKE_DIR/native-browser-launch.json")"
+  run_awl workspace key-window --id "$NATIVE_BROWSER_ID" --app "$NATIVE_BROWSER_APP_ID" --timeout-ms 5000 ctrl+l > "$SMOKE_DIR/native-browser-key-address.json"
+  run_awl workspace paste-window --id "$NATIVE_BROWSER_ID" --app "$NATIVE_BROWSER_APP_ID" --timeout-ms 5000 "$NATIVE_BROWSER_URL" > "$SMOKE_DIR/native-browser-paste-address.json"
+  run_awl workspace key-window --id "$NATIVE_BROWSER_ID" --app "$NATIVE_BROWSER_APP_ID" --timeout-ms 5000 Return > "$SMOKE_DIR/native-browser-key-return.json"
+  run_awl workspace wait-window --id "$NATIVE_BROWSER_ID" --app "$NATIVE_BROWSER_APP_ID" --title "Agent Workspace Native Browser OK" --timeout-ms 10000 > "$SMOKE_DIR/native-browser-wait-loaded.json"
+  assert_json '.ok == true and (.windows[0].title | contains("Agent Workspace Native Browser OK"))' "$SMOKE_DIR/native-browser-wait-loaded.json"
+  run_awl workspace type-window --id "$NATIVE_BROWSER_ID" --app "$NATIVE_BROWSER_APP_ID" --timeout-ms 5000 typed-ok > "$SMOKE_DIR/native-browser-type.json"
+  run_awl workspace wait-window --id "$NATIVE_BROWSER_ID" --app "$NATIVE_BROWSER_APP_ID" --title "typed:typed-ok" --timeout-ms 10000 > "$SMOKE_DIR/native-browser-wait-typed.json"
+  assert_json '.ok == true and (.windows[0].title | contains("typed:typed-ok"))' "$SMOKE_DIR/native-browser-wait-typed.json"
+  run_awl workspace observe --id "$NATIVE_BROWSER_ID" --screenshot --events --events-tail 20 > "$SMOKE_DIR/native-browser-observe.json"
+  assert_json '(.screenshot.bytes > 0) and (.active_window.title | contains("typed:typed-ok"))' "$SMOKE_DIR/native-browser-observe.json"
+  run_awl workspace stop --id "$NATIVE_BROWSER_ID" > "$SMOKE_DIR/native-browser-stop.json"
+  assert_json '.ok == true and (.apps[] | select(.name == "browser-native-input" and .running == false))' "$SMOKE_DIR/native-browser-stop.json"
 else
-  echo "== browser local-dev workspace skipped: Chrome/Chromium not found =="
+  echo "== browser local-dev and native input workspaces skipped: Chrome/Chromium not found =="
 fi
 
 echo "== crashed-daemon stale cleanup =="
