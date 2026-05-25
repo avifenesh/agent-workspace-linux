@@ -4,6 +4,65 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-25 Start/Stop and Native Control Pass
+
+Environment:
+
+- Dogfood ran through the installed Codex MCP tools in developer-open mode.
+  `mcp_permissions` reported no spawn-time ceiling.
+- `workspace_doctor` reported the X11 workspace dependencies and bubblewrap
+  policy backend ready. `workspace_list`, `profile_list`, and stale cleanup
+  dry-run were empty before the pass.
+
+Verified:
+
+- A temporary `dogfood-disabled-network-20260525` profile with
+  `network.mode=disabled` and `require_enforced_policy=true` was created through
+  `profile_put` after a no-overwrite dry-run. `workspace_open_profile --dry-run`
+  returned the hidden-workspace approval bundle and an enforced
+  `bubblewrap_unshare_net` network policy. The real start created workspace
+  `default` on `:90`.
+- Inside the disabled-network workspace, `workspace_run_app` launched
+  `disabled-network-probe` with `network_isolation=bubblewrap_unshare_net`. A
+  Python socket probe to `93.184.216.34:80` failed with
+  `[Errno 101] Network is unreachable` and exited 0.
+- A temporary `dogfood-local-only-20260525` profile with
+  `network.mode=local_only` and `require_enforced_policy=true` was created the
+  same way. Dry-run and real start reported
+  `network.enforcement.backend=bubblewrap_loopback_only`, plus the documented
+  limitation that host loopback services are not bridged.
+- Inside the local-only workspace, `workspace_run_app` launched
+  `local-only-probe` with `network_isolation=bubblewrap_loopback_only`. The
+  probe successfully round-tripped through an in-sandbox `127.0.0.1` listener
+  (`loopback_connect=ok`) and blocked `93.184.216.34:80` with
+  `[Errno 101] Network is unreachable`.
+- Normal GUI affordances worked through the MCP surface. The workspace found
+  installed candidates including `xterm`, `xmessage`, `gnome-text-editor`,
+  Firefox, and Google Chrome. `workspace_launch_app` opened `xterm` as
+  `native-xterm-dogfood`, waited for a visible window, and captured a window
+  screenshot. `workspace_focus_window`, `workspace_type_text`, and
+  `workspace_key Return` executed `echo native-input-ok; pwd; echo
+  DISPLAY=$DISPLAY; echo WORKSPACE=$AGENT_WORKSPACE_ID` inside the terminal.
+  A root screenshot then showed `native-input-ok`, `/tmp`, `DISPLAY=:90`, and
+  `WORKSPACE=default`.
+- Stop behavior was explicit and inspectable. `workspace_stop --dry-run`
+  returned the live `native-xterm-dogfood` app that would be terminated. The
+  real stop sent SIGTERM to the xterm app, wrote stopped status to the manifest,
+  and `workspace_cleanup_stale` removed the stopped runtime directory. The two
+  temporary profiles were deleted, and final `workspace_list`, `profile_list`,
+  and cleanup dry-run were empty.
+
+Findings:
+
+- Start, stop, app launch, window discovery, screenshot, focused keyboard input,
+  status, events, and cleanup are usable through the installed MCP tools without
+  touching the host desktop.
+- `workspace_type_text` worked but was slow for a long shell command in xterm.
+  `workspace_paste_text` reported success with `shift+Insert`, but this pass did
+  not produce a convincing terminal output proof for paste. Count xterm typing
+  as validated, and keep richer paste behavior as app/window-specific dogfood
+  rather than a generic proof.
+
 ## 2026-05-25 MCP Browser-Session Restart Pass
 
 Environment:
