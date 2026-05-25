@@ -2966,7 +2966,12 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     let stderr_path = options.runtime_dir.join("daemon.err.log");
     let exe = daemon_executable_path()?;
     let mut daemon = Command::new("setsid");
-    daemon.arg(exe).arg("daemon").arg("--id").arg(&options.id);
+    daemon
+        .arg("--fork")
+        .arg(exe)
+        .arg("daemon")
+        .arg("--id")
+        .arg(&options.id);
     daemon.arg("--session-id").arg(&options.session_id);
     if let Some(purpose) = &options.purpose {
         daemon.arg("--purpose").arg(purpose);
@@ -3013,9 +3018,14 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
             || format!("failed to create {}", stderr_path.display()),
         )?));
 
-    daemon
+    let status = daemon
         .spawn()
-        .context("failed to spawn agent workspace daemon")?;
+        .context("failed to spawn agent workspace daemon launcher")?
+        .wait()
+        .context("failed to wait for agent workspace daemon launcher")?;
+    if !status.success() {
+        bail!("agent workspace daemon launcher exited with {status}");
+    }
     Ok(())
 }
 

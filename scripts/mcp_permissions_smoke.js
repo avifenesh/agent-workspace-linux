@@ -50,6 +50,7 @@ let nextId = 1;
 let stdoutBuffer = "";
 let stderr = "";
 const pending = new Map();
+let smokeDaemonPid = null;
 
 child.stderr.on("data", (chunk) => {
   stderr += String(chunk);
@@ -141,6 +142,44 @@ function assert(condition, message) {
   if (!condition) fail(message);
 }
 
+function childProcessesOf(pid) {
+  const result = childProcess.spawnSync("ps", ["--ppid", String(pid), "-o", "pid=,stat=,cmd="], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0 && result.status !== 1) {
+    fail(`ps --ppid ${pid} failed: ${result.stderr || result.stdout}`);
+  }
+  return String(result.stdout || "")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function processThreadsOf(pid) {
+  const result = childProcess.spawnSync("ps", ["-T", "-p", String(pid), "-o", "pid=,tid=,stat=,wchan=,comm="], {
+    encoding: "utf8",
+  });
+  return String(result.stdout || "").trim();
+}
+
+async function assertNoZombieChildren(pid) {
+  const deadline = Date.now() + 2000;
+  let zombies = [];
+  do {
+    const children = childProcessesOf(pid);
+    zombies = children.filter((line) => {
+      const fields = line.split(/\s+/);
+      return fields[1]?.startsWith("Z");
+    });
+    if (zombies.length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  fail(
+    `MCP server left zombie child processes (daemon_pid=${smokeDaemonPid ?? "unknown"}):\n${zombies.join("\n")}\nMCP threads:\n${processThreadsOf(pid)}`,
+  );
+}
+
 async function main() {
   await request("initialize", {
     protocolVersion: "2024-11-05",
@@ -214,6 +253,7 @@ async function main() {
     15000,
   );
   assert(started.ok === true, "workspace_start should create the smoke workspace");
+  smokeDaemonPid = started.status?.daemon_pid || null;
 
   try {
     const run = await callTool(
@@ -305,6 +345,8 @@ async function main() {
     }
   }
 
+  await assertNoZombieChildren(child.pid);
+
   child.stdin.end();
   await new Promise((resolve, reject) => {
     child.once("exit", (code) => {
@@ -326,6 +368,9 @@ main()
       // ignore cleanup races
     }
     console.error(error instanceof Error ? error.stack || error.message : String(error));
+    if (stderr.trim()) {
+      console.error(`MCP stderr:\n${stderr.trim()}`);
+    }
     console.error(`preserved temp dir: ${tempDir}`);
     process.exit(1);
   });
