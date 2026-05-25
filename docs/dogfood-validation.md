@@ -4,6 +4,62 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-25 Arbitrary App Mounted-File Pass
+
+Environment:
+
+- Dogfood ran through the installed Codex MCP tools in developer-open mode.
+- Preflight state was clean: `workspace_list`, `profile_list`, and
+  `workspace_cleanup_stale --dry-run` returned no entries. `workspace_doctor`
+  reported X11 workspace readiness and bubblewrap mount enforcement support.
+
+Verified:
+
+- A temporary host directory
+  `/tmp/agent-workspace-arbitrary-app-mount` was mounted read-write at
+  `/workspace/mounted` through a saved profile
+  `dogfood-arbitrary-app-mount-20260525` with
+  `require_enforced_policy=true`.
+- `profile_put --dry-run` previewed creation without overwrite, then the real
+  `profile_put` saved the profile. `workspace_open_profile --dry-run` returned
+  the hidden-workspace approval bundle and reported mount enforcement through
+  `bubblewrap_mount_namespace`. The real `workspace_open_profile` started the
+  mounted workspace on `:90` with profile cwd `/workspace/mounted`.
+- A command launched inside the mounted workspace wrote
+  `/workspace/mounted/probe.txt` with `mount_isolation=bubblewrap_mount_namespace`.
+  The host then read
+  `/tmp/agent-workspace-arbitrary-app-mount/probe.txt` and saw
+  `workspace-write-ok`, proving read-write mount propagation.
+- The workspace found `gnome-text-editor` as an installed non-browser desktop
+  app. It seeded `/workspace/mounted/editor-note.txt`, then launched
+  `gnome-text-editor /workspace/mounted/editor-note.txt`. The app produced a
+  visible `editor-note.txt (/workspace/mounted) - Text Editor` window.
+- Workspace-local focus, `ctrl+a`, `workspace_paste_text`, and `ctrl+s` edited
+  and saved the mounted file in GNOME Text Editor. A window screenshot showed
+  `edited-from-agent-workspace` and `mounted-editor-save-ok`; the host read the
+  same content from
+  `/tmp/agent-workspace-arbitrary-app-mount/editor-note.txt`.
+- `workspace_observe` and `workspace_events` recorded app/window state,
+  screenshots, and input events. `workspace_stop --dry-run` showed the live
+  `gnome-text-editor-dogfood` app. Real `workspace_stop` terminated it, stale
+  cleanup removed the runtime directory, the temporary profile was deleted, the
+  temporary host mount directory was removed, and final `workspace_list`,
+  `profile_list`, and stale cleanup dry-run were empty.
+
+Findings:
+
+- Arbitrary non-browser app control is viable through the installed MCP surface:
+  a mounted host path can be opened in a normal desktop editor, edited through
+  workspace-local input, saved, and verified on the host without touching the
+  user's visible desktop.
+- `workspace_open_profile` with the mounted profile took several minutes in this
+  pass despite succeeding. Treat this as a UX/performance observation for
+  follow-up.
+- GNOME Text Editor initially captured as a black first-window screenshot, then
+  rendered correctly on a later capture. Its stderr included DRI3 acceleration
+  warnings and a missing `dbus-launch` warning. This did not block the edit/save
+  workflow, but it is useful evidence for arbitrary GTK app polish.
+
 ## 2026-05-25 Native Chrome Control Pass
 
 Environment:
