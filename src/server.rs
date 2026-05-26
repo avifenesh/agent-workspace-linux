@@ -813,13 +813,14 @@ impl AgentWorkspaceLinux {
         let profile_id = params.profile.clone();
         let open_viewer = params.open_viewer.unwrap_or(true);
         let viewer_always_on_top = params.viewer_always_on_top;
-        let result = params.into_options().and_then(|options| {
+        let result = params.into_options().and_then(|mut options| {
             self.enforce_agent_mutation_unless_dry_run(dry_run, "workspace_start")?;
             if let Some(profile_id) = &profile_id {
                 let saved_profile = profile::get_profile(profile_id)?;
                 self.permissions.validate_profile(&saved_profile)?;
             }
             self.permissions.validate_start_options(&options)?;
+            options.permissions_source = self.permissions.source.clone();
             if dry_run {
                 workspace::preview_workspace_start(options)
             } else {
@@ -859,31 +860,34 @@ impl AgentWorkspaceLinux {
         Parameters(params): Parameters<WorkspaceOpenProfileParams>,
     ) -> Json<ProfileWorkspaceOpenResult> {
         Json(
-            match params.to_start_options().and_then(|(options, profile_id)| {
-                self.enforce_agent_mutation_unless_dry_run(
-                    params.dry_run,
-                    "workspace_open_profile",
-                )?;
-                let saved_profile = profile::get_profile(&profile_id)?;
-                self.permissions.validate_profile(&saved_profile)?;
-                self.permissions.validate_start_options(&options)?;
-                if params.dry_run {
-                    return profile::preview_open_profile_workspace(
+            match params
+                .to_start_options()
+                .and_then(|(mut options, profile_id)| {
+                    self.enforce_agent_mutation_unless_dry_run(
+                        params.dry_run,
+                        "workspace_open_profile",
+                    )?;
+                    let saved_profile = profile::get_profile(&profile_id)?;
+                    self.permissions.validate_profile(&saved_profile)?;
+                    self.permissions.validate_start_options(&options)?;
+                    options.permissions_source = self.permissions.source.clone();
+                    if params.dry_run {
+                        return profile::preview_open_profile_workspace(
+                            options,
+                            &profile_id,
+                            params.to_open_options(),
+                        )
+                        .map(|preview| (None, None, Some(preview)));
+                    }
+                    self.open_profile_workspace_with_default_viewer(
                         options,
                         &profile_id,
                         params.to_open_options(),
+                        params.open_viewer.unwrap_or(true),
+                        params.viewer_always_on_top,
                     )
-                    .map(|preview| (None, None, Some(preview)));
-                }
-                self.open_profile_workspace_with_default_viewer(
-                    options,
-                    &profile_id,
-                    params.to_open_options(),
-                    params.open_viewer.unwrap_or(true),
-                    params.viewer_always_on_top,
-                )
-                .map(|(open, viewer_auto_open)| (Some(open), Some(viewer_auto_open), None))
-            }) {
+                    .map(|(open, viewer_auto_open)| (Some(open), Some(viewer_auto_open), None))
+                }) {
                 Ok((open, viewer_auto_open, preview)) => {
                     let mut target_handles =
                         profile_open_target_handles(open.as_ref(), preview.as_ref());
@@ -3230,10 +3234,6 @@ struct McpTaskPlanParams {
     #[serde(default)]
     substitution_policy: Option<String>,
     #[serde(default)]
-    profile_is_disposable_copy: bool,
-    #[serde(default)]
-    cart_draft_steps_validated: bool,
-    #[serde(default)]
     cart_mutation_approved: bool,
     #[serde(default)]
     final_cart_reviewed: bool,
@@ -3281,8 +3281,6 @@ struct McpTaskPlanTaskContext {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     action_boundaries: Vec<McpTaskPlanActionBoundary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    dogfood_requirements: Vec<McpTaskPlanDogfoodRequirement>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     approval_kinds: Vec<String>,
 }
 
@@ -3312,26 +3310,6 @@ struct McpTaskPlanActionBoundary {
     required_inputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     missing_approvals: Vec<String>,
-    reason: String,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-struct McpTaskPlanDogfoodRequirement {
-    id: String,
-    label: String,
-    applies_to_boundary: String,
-    required_for: String,
-    status: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    required_inputs: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    required_approvals: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    forbidden_actions: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    allowed_workspace_input_actions: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    helper_commands: Vec<String>,
     reason: String,
 }
 
@@ -5252,14 +5230,6 @@ fn mcp_task_plan_task_context(
         ("cart_mutation_approved", params.cart_mutation_approved),
         ("final_cart_reviewed", params.final_cart_reviewed),
         (
-            "profile_is_disposable_copy",
-            params.profile_is_disposable_copy,
-        ),
-        (
-            "cart_draft_steps_validated",
-            params.cart_draft_steps_validated,
-        ),
-        (
             "real_world_action_approved",
             params.real_world_action_approved,
         ),
@@ -5319,7 +5289,6 @@ fn mcp_task_plan_task_context(
     }
     let action_boundaries =
         mcp_task_plan_action_boundaries(params, normalized_intent, workspace_running);
-    let dogfood_requirements = mcp_task_plan_dogfood_requirements(params, normalized_intent);
 
     McpTaskPlanTaskContext {
         task_kind: normalized_intent.to_string(),
@@ -5328,110 +5297,8 @@ fn mcp_task_plan_task_context(
         missing_inputs,
         safety_boundaries,
         action_boundaries,
-        dogfood_requirements,
         approval_kinds: Vec::new(),
     }
-}
-
-fn mcp_task_plan_dogfood_requirements(
-    params: &McpTaskPlanParams,
-    normalized_intent: &str,
-) -> Vec<McpTaskPlanDogfoodRequirement> {
-    if normalized_intent != "browser_task" || !task_intent_is_shopping_or_grocery(&params.intent) {
-        return Vec::new();
-    }
-
-    let mut missing = Vec::new();
-    if params.user_data_dir.is_none() || !params.profile_is_disposable_copy {
-        missing.push("disposable_copied_browser_profile".to_string());
-    }
-    if !mcp_task_plan_release_grocery_target_url_ready(params.target_url.as_deref()) {
-        missing.push("real_https_non_local_grocery_target_url".to_string());
-    }
-    if !params.cart_draft_steps_validated {
-        missing.push("validated_grocery_cart_draft_steps_json".to_string());
-    }
-    if !params.cart_mutation_approved {
-        missing.push("cart_mutation_approved".to_string());
-    }
-    if !params.final_cart_reviewed {
-        missing.push("final_cart_reviewed".to_string());
-    }
-    let status = if params.real_world_action_approved {
-        "blocked_checkout_approval_present"
-    } else if missing.is_empty() {
-        "ready"
-    } else {
-        "pending"
-    }
-    .to_string();
-
-    vec![McpTaskPlanDogfoodRequirement {
-        id: "real_grocery_cart_draft_evidence".to_string(),
-        label: "Real grocery cart-draft dogfood evidence".to_string(),
-        applies_to_boundary: "draft_cart_changes".to_string(),
-        required_for: "real_grocery_dogfood_release_gate".to_string(),
-        status,
-        required_inputs: vec![
-            "GROCERY_USER_DATA_DIR from a disposable copied browser profile".to_string(),
-            "GROCERY_PROFILE_IS_DISPOSABLE_COPY=1 with .agent-workspace-grocery-profile-copy.json"
-                .to_string(),
-            "GROCERY_TARGET_URL for a real HTTPS non-local grocery site".to_string(),
-            "GROCERY_CART_DRAFT_STEPS_JSON validated before opening the live site".to_string(),
-        ],
-        required_approvals: vec![
-            "CART_MUTATION_APPROVED=1".to_string(),
-            "FINAL_CART_REVIEWED=1".to_string(),
-            "CHECKOUT_APPROVED and REAL_WORLD_ACTION_APPROVED must remain unset".to_string(),
-        ],
-        forbidden_actions: vec![
-            "checkout".to_string(),
-            "payment".to_string(),
-            "order_submission".to_string(),
-            "account_change".to_string(),
-            "login_or_account_creation_step_in_cart_draft_file".to_string(),
-        ],
-        allowed_workspace_input_actions: vec![
-            "key_window".to_string(),
-            "type_window".to_string(),
-            "paste_window".to_string(),
-            "click_window".to_string(),
-            "scroll_window".to_string(),
-        ],
-        helper_commands: vec![
-            "scripts/prepare_grocery_profile_copy.js --source \"$REAL_BROWSER_PROFILE\" --dest \"$PWD/target/grocery-profile-copy\"".to_string(),
-            "scripts/real_grocery_dogfood_probe.js --print-cart-draft-steps-template".to_string(),
-            "scripts/real_grocery_dogfood_probe.js --validate-cart-draft-steps \"$REAL_GROCERY_CART_DRAFT_STEPS\"".to_string(),
-            "scripts/mcp_workspace_browser_cdp_smoke.js".to_string(),
-        ],
-        reason: "A real grocery dogfood run should prove useful cart drafting ability, not just observation, while keeping checkout/order/account mutation behind a separate boundary.".to_string(),
-    }]
-}
-
-fn mcp_task_plan_release_grocery_target_url_ready(target_url: Option<&str>) -> bool {
-    let Some(target_url) = target_url.map(str::trim).filter(|value| !value.is_empty()) else {
-        return false;
-    };
-    let lower = target_url.to_ascii_lowercase();
-    if !lower.starts_with("https://") {
-        return false;
-    }
-    let host = lower
-        .trim_start_matches("https://")
-        .split(['/', '?', '#', ':'])
-        .next()
-        .unwrap_or("")
-        .trim_end_matches('.');
-    !host.is_empty()
-        && !matches!(
-            host,
-            "localhost" | "example.com" | "example.net" | "example.org"
-        )
-        && !host.ends_with(".localhost")
-        && !host.ends_with(".local")
-        && !host.ends_with(".test")
-        && !host.ends_with(".invalid")
-        && !host.ends_with(".example")
 }
 
 fn mcp_task_plan_action_boundaries(
@@ -10860,8 +10727,6 @@ mod tests {
                 budget: None,
                 fulfillment: None,
                 substitution_policy: None,
-                profile_is_disposable_copy: false,
-                cart_draft_steps_validated: false,
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
@@ -11099,8 +10964,6 @@ mod tests {
                 budget: Some("under 120 ILS".to_string()),
                 fulfillment: Some("delivery tomorrow morning".to_string()),
                 substitution_policy: Some("ask before replacing must-have items".to_string()),
-                profile_is_disposable_copy: false,
-                cart_draft_steps_validated: false,
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
@@ -11193,41 +11056,6 @@ mod tests {
             .task_context
             .approval_kinds
             .contains(&"real_world_action".to_string()));
-        let dogfood = plan
-            .task_context
-            .dogfood_requirements
-            .iter()
-            .find(|requirement| requirement.id == "real_grocery_cart_draft_evidence")
-            .expect("grocery plan should expose real grocery dogfood evidence contract");
-        assert_eq!(dogfood.applies_to_boundary, "draft_cart_changes");
-        assert_eq!(dogfood.required_for, "real_grocery_dogfood_release_gate");
-        assert_eq!(dogfood.status, "pending");
-        assert!(dogfood
-            .required_inputs
-            .iter()
-            .any(|input| input.contains("GROCERY_CART_DRAFT_STEPS_JSON")));
-        assert!(dogfood
-            .required_approvals
-            .iter()
-            .any(|approval| approval.contains("CART_MUTATION_APPROVED=1")));
-        assert!(dogfood
-            .required_approvals
-            .iter()
-            .any(|approval| approval.contains("CHECKOUT_APPROVED")));
-        assert!(dogfood
-            .forbidden_actions
-            .contains(&"order_submission".to_string()));
-        assert!(dogfood
-            .allowed_workspace_input_actions
-            .contains(&"paste_window".to_string()));
-        assert!(dogfood
-            .helper_commands
-            .iter()
-            .any(|command| command.contains("--validate-cart-draft-steps")));
-        assert!(dogfood
-            .helper_commands
-            .iter()
-            .any(|command| command.contains("mcp_workspace_browser_cdp_smoke")));
 
         let run_step = task_step(&plan, "run_browser_session_after_save")
             .expect("complete grocery plan should include the approved browser run step");
@@ -11286,8 +11114,6 @@ mod tests {
                 budget: Some("under 120 ILS".to_string()),
                 fulfillment: Some("delivery tomorrow morning".to_string()),
                 substitution_policy: Some("ask before replacing must-have items".to_string()),
-                profile_is_disposable_copy: false,
-                cart_draft_steps_validated: false,
                 cart_mutation_approved: true,
                 final_cart_reviewed: true,
                 real_world_action_approved: true,
@@ -11322,63 +11148,6 @@ mod tests {
         assert!(approved_checkout.approved);
         assert!(approved_checkout.required_inputs.is_empty());
         assert!(approved_checkout.missing_approvals.is_empty());
-        let approved_dogfood = approved_plan
-            .task_context
-            .dogfood_requirements
-            .iter()
-            .find(|requirement| requirement.id == "real_grocery_cart_draft_evidence")
-            .expect("approved grocery plan should still expose dogfood evidence contract");
-        assert_eq!(
-            approved_dogfood.status, "blocked_checkout_approval_present",
-            "release grocery dogfood should not be ready when checkout approval is present"
-        );
-
-        let release_ready_plan = task_plan_from_params(
-            McpTaskPlanParams {
-                intent: "grocery shopping".to_string(),
-                workspace_id: None,
-                profile_id: None,
-                project_path: None,
-                browser_path: None,
-                user_data_dir: Some(PathBuf::from("/tmp/disposable-grocery-profile-copy")),
-                target_url: Some("https://grocery-release.example-retailer.com".to_string()),
-                shopping_list: Some("milk 2L, apples 1kg".to_string()),
-                budget: Some("under 120 ILS".to_string()),
-                fulfillment: Some("delivery tomorrow morning".to_string()),
-                substitution_policy: Some("ask before replacing must-have items".to_string()),
-                profile_is_disposable_copy: true,
-                cart_draft_steps_validated: true,
-                cart_mutation_approved: true,
-                final_cart_reviewed: true,
-                real_world_action_approved: false,
-                open_viewer: None,
-            },
-            false,
-            Vec::new(),
-            Vec::new(),
-        );
-        for expected in [
-            "profile_is_disposable_copy",
-            "cart_draft_steps_validated",
-            "cart_mutation_approved",
-            "final_cart_reviewed",
-        ] {
-            assert!(
-                release_ready_plan
-                    .task_context
-                    .provided_inputs
-                    .iter()
-                    .any(|input| input.name == expected && input.value == "true"),
-                "release-ready grocery plan should preserve {expected}: {release_ready_plan:?}",
-            );
-        }
-        let release_dogfood = release_ready_plan
-            .task_context
-            .dogfood_requirements
-            .iter()
-            .find(|requirement| requirement.id == "real_grocery_cart_draft_evidence")
-            .expect("release-ready grocery plan should expose dogfood evidence contract");
-        assert_eq!(release_dogfood.status, "ready");
     }
 
     #[test]
@@ -11396,8 +11165,6 @@ mod tests {
                 budget: None,
                 fulfillment: None,
                 substitution_policy: None,
-                profile_is_disposable_copy: false,
-                cart_draft_steps_validated: false,
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
@@ -11650,8 +11417,6 @@ mod tests {
                 budget: Some("under 50 ILS".to_string()),
                 fulfillment: Some("delivery".to_string()),
                 substitution_policy: Some("ask before replacing".to_string()),
-                profile_is_disposable_copy: false,
-                cart_draft_steps_validated: false,
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
@@ -11862,8 +11627,6 @@ mod tests {
                 budget: None,
                 fulfillment: None,
                 substitution_policy: None,
-                profile_is_disposable_copy: false,
-                cart_draft_steps_validated: false,
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,

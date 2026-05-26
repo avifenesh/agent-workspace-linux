@@ -776,12 +776,6 @@ pub fn validate_profile(profile: &WorkspaceProfile) -> Result<()> {
 }
 
 fn validate_network_policy(network: &NetworkPolicy) -> Result<()> {
-    if matches!(network.mode, NetworkMode::Allowlist) && network.allow_hosts.is_empty() {
-        bail!(
-            "{} network profiles require at least one host",
-            network_mode_name(&network.mode)
-        );
-    }
     if matches!(network.mode, NetworkMode::LocalOnly) {
         for host in &network.allow_hosts {
             if !is_local_network_target(host) {
@@ -792,15 +786,6 @@ fn validate_network_policy(network: &NetworkPolicy) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn network_mode_name(mode: &NetworkMode) -> &'static str {
-    match mode {
-        NetworkMode::InheritHost => "inherit_host",
-        NetworkMode::Disabled => "disabled",
-        NetworkMode::LocalOnly => "local_only",
-        NetworkMode::Allowlist => "allowlist",
-    }
 }
 
 fn is_local_network_target(target: &str) -> bool {
@@ -1697,12 +1682,12 @@ mod tests {
         assert_eq!(toolchain.mounts.len(), 2);
         assert!(toolchain.mounts.iter().any(|mount| {
             mount.host_path == cargo_bin
-                && mount.workspace_path == PathBuf::from(WORKSPACE_CARGO_BIN_PATH)
+                && mount.workspace_path.as_path() == std::path::Path::new(WORKSPACE_CARGO_BIN_PATH)
                 && matches!(mount.mode, MountMode::ReadOnly)
         }));
         assert!(toolchain.mounts.iter().any(|mount| {
             mount.host_path == rustup_home
-                && mount.workspace_path == PathBuf::from(WORKSPACE_RUSTUP_HOME)
+                && mount.workspace_path.as_path() == std::path::Path::new(WORKSPACE_RUSTUP_HOME)
                 && matches!(mount.mode, MountMode::ReadOnly)
         }));
         assert!(!toolchain

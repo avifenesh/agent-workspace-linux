@@ -1,6 +1,8 @@
 use crate::approval::{
     hidden_workspace_acknowledgement, unenforced_policy_acknowledgement, ApprovalBundle,
 };
+use crate::control::{self, McpControlMode};
+use crate::permissions::{load_mcp_permission_state, McpPermissionState};
 use crate::policy::{
     AppliedWorkspacePolicy, NetworkMode, PolicyRuntimeCapabilities, PolicyToolCheck,
 };
@@ -155,6 +157,9 @@ pub struct WorkspaceStartOptions {
     pub user_acknowledged_unenforced_policy: bool,
     pub width: u32,
     pub height: u32,
+    /// Path to the active spawn-time MCP permission ceiling JSON, forwarded to
+    /// the detached daemon so it can enforce the ceiling on every launch.
+    pub permissions_source: Option<PathBuf>,
 }
 
 impl Default for WorkspaceStartOptions {
@@ -170,6 +175,7 @@ impl Default for WorkspaceStartOptions {
             user_acknowledged_unenforced_policy: false,
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
+            permissions_source: None,
         }
     }
 }
@@ -191,6 +197,10 @@ pub struct DaemonOptions {
     pub runtime_dir: PathBuf,
     pub socket_path: PathBuf,
     pub xauthority_path: PathBuf,
+    /// Path to the spawn-time MCP permission ceiling JSON, if one was active
+    /// when this daemon was started. The daemon loads and enforces it on every
+    /// mutating IPC request so the ceiling holds regardless of IPC origin.
+    pub permissions_source: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -3214,6 +3224,14 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
     create_private_runtime_dir(&options.runtime_dir)?;
     remove_stale_socket(&options.socket_path)?;
 
+    // Load the spawn-time MCP permission ceiling (if any) before serving any
+    // IPC. Fail closed: if a ceiling path was provided but cannot be read or
+    // parsed, refuse to start rather than serve launches without the ceiling.
+    let permissions = match options.permissions_source.take() {
+        Some(path) => load_mcp_permission_state(path)?,
+        None => McpPermissionState::default(),
+    };
+
     let mut x_server = spawn_xvfb(&options)?;
     wait_for_display(&options.display, &options.xauthority_path)?;
     let mut window_manager = spawn_window_manager(&options)?;
@@ -3261,6 +3279,7 @@ pub fn run_daemon(mut options: DaemonOptions) -> Result<()> {
         window_app_ids: BTreeMap::new(),
         event_path,
         next_event_sequence: 1,
+        permissions,
     };
     write_workspace_manifest(&state.status, None)?;
     let start_detail = serde_json::json!({
@@ -3476,6 +3495,7 @@ fn prepare_workspace_start(options: WorkspaceStartOptions) -> Result<WorkspaceSt
         runtime_dir,
         socket_path,
         xauthority_path,
+        permissions_source: options.permissions_source,
     }))
 }
 
@@ -3508,6 +3528,9 @@ fn spawn_detached_daemon(options: &DaemonOptions) -> Result<()> {
     if let Some(policy) = &options.applied_policy {
         let policy_path = write_applied_policy_file(&options.runtime_dir, policy)?;
         daemon.arg("--policy").arg(policy_path);
+    }
+    if let Some(permissions_source) = &options.permissions_source {
+        daemon.arg("--permissions").arg(permissions_source);
     }
     if options.user_acknowledged_hidden_workspace {
         daemon.arg("--ack-hidden-workspace");
@@ -4146,6 +4169,9 @@ struct DaemonState {
     window_app_ids: BTreeMap<String, String>,
     event_path: PathBuf,
     next_event_sequence: u64,
+    /// Spawn-time MCP permission ceiling loaded at daemon startup. Enforced on
+    /// every launch inside `spawn_app`, independent of IPC origin.
+    permissions: McpPermissionState,
 }
 
 struct AppProcess {
@@ -4153,7 +4179,7 @@ struct AppProcess {
     child: Child,
 }
 
-fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool> {
+fn handle_stream(stream: UnixStream, state: &mut DaemonState) -> Result<bool> {
     let mut line = String::new();
     {
         let mut reader = BufReader::new(&stream);
@@ -4162,6 +4188,45 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     let request: IpcRequest =
         serde_json::from_str(line.trim()).context("failed to parse workspace IPC request")?;
     refresh_apps(state)?;
+
+    // Apply live control (active / read_only / paused) inside the daemon as a
+    // best-effort convenience layer, NOT the authoritative boundary. The control
+    // mode is file-backed (control::control_status reads mcp-control.json under
+    // the shared runtime dir), so this daemon observes mode changes made by the
+    // viewer or MCP front-end and can honor a user's runtime pause. It is gated
+    // before the request match so no mutating handler runs while paused, and
+    // read-only inspection plus the safety stop stay allowed even when paused.
+    // Crucially, this is independent of the permission ceiling: the ceiling is
+    // re-checked authoritatively in spawn_app regardless of what happens here.
+    // If the control state cannot be read we fail OPEN (allow the request),
+    // because best-effort live control must never block legitimate work or
+    // become a dependency the security model relies on.
+    let control_mode = match control::control_status() {
+        Ok(status) => Some(status.state.mode),
+        Err(error) => {
+            eprintln!("best-effort live control state unreadable; allowing request: {error:#}");
+            None
+        }
+    };
+    if let Some(mode) = control_gate_block_reason(&request, control_mode) {
+        record_event(
+            state,
+            "control_blocked",
+            serde_json::json!({
+                "mode": mode.as_str(),
+                "request": ipc_request_kind(&request),
+            }),
+        )?;
+        let response = response_with_status(
+            false,
+            format!(
+                "workspace is {}; this mutating action is disabled until live control returns to active",
+                mode.label()
+            ),
+            &state.status,
+        );
+        return finish_ipc_response(stream, response, false);
+    }
 
     let (response, should_stop) = match request {
         IpcRequest::IpcInfo => {
@@ -6428,6 +6493,14 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
         }
     };
 
+    finish_ipc_response(stream, response, should_stop)
+}
+
+fn finish_ipc_response(
+    mut stream: UnixStream,
+    response: IpcResponse,
+    should_stop: bool,
+) -> Result<bool> {
     let write_response = (|| -> Result<()> {
         serde_json::to_writer(&mut stream, &response)
             .context("failed to write workspace IPC response")?;
@@ -6446,9 +6519,154 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
     Ok(should_stop)
 }
 
+/// Pure live-control gate decision: given an incoming request and the current
+/// control mode, return `Some(mode)` when the request must be blocked (it
+/// mutates and the mode does not allow agent mutation), or `None` when it is
+/// allowed. Kept separate from `handle_stream` so it can be unit-tested without
+/// touching the file-backed control state or process-global environment.
+///
+/// `mode` is `None` when the live control state is unknown/unreadable. In that
+/// case this returns `None` (allow): live control is a best-effort convenience,
+/// so it fails OPEN and never blocks work. The authoritative permission ceiling
+/// is enforced separately in `spawn_app` and does not depend on this gate.
+fn control_gate_block_reason(
+    request: &IpcRequest,
+    mode: Option<McpControlMode>,
+) -> Option<McpControlMode> {
+    match mode {
+        Some(mode) if request_mutates(request) && !mode.allows_agent_mutation() => Some(mode),
+        _ => None,
+    }
+}
+
+/// Classify an IPC request as mutating (true) or read-only/inspection (false)
+/// for live-control enforcement. Mutating requests are blocked when control is
+/// read_only or paused. Read-only requests, dry-run previews, and the safety
+/// stop are always allowed (Stop must work even when paused). New IPC variants
+/// must be added here explicitly; the match is exhaustive so adding a variant
+/// without classifying it is a compile error.
+fn request_mutates(request: &IpcRequest) -> bool {
+    match request {
+        // Read-only inspection.
+        IpcRequest::IpcInfo
+        | IpcRequest::Environment
+        | IpcRequest::Status
+        | IpcRequest::ListApps { .. }
+        | IpcRequest::ListWindows { .. }
+        | IpcRequest::ActiveWindow
+        | IpcRequest::Pointer
+        | IpcRequest::Observe { .. }
+        | IpcRequest::WaitWindow { .. }
+        | IpcRequest::Screenshot { .. }
+        | IpcRequest::ScreenshotWindow { .. }
+        | IpcRequest::ReadAppLog { .. }
+        | IpcRequest::WaitApp { .. }
+        | IpcRequest::BrowserTargets { .. }
+        | IpcRequest::BrowserSnapshot { .. }
+        | IpcRequest::BrowserSearchResults { .. }
+        | IpcRequest::ReadEvents { .. }
+        | IpcRequest::GetClipboard => false,
+        // Safety stop is always allowed, even when paused.
+        IpcRequest::Stop => false,
+        // Dry-run previews resolve targets without mutating.
+        IpcRequest::CloseWindow { dry_run, .. } => !dry_run,
+        IpcRequest::CloseMatchingWindow { dry_run, .. } => !dry_run,
+        IpcRequest::KillApp { dry_run, .. } => !dry_run,
+        // Everything else mutates workspace or app state.
+        IpcRequest::LaunchApp { .. }
+        | IpcRequest::FocusWindow { .. }
+        | IpcRequest::FocusMatchingWindow { .. }
+        | IpcRequest::MoveWindow { .. }
+        | IpcRequest::ResizeWindow { .. }
+        | IpcRequest::RaiseWindow { .. }
+        | IpcRequest::MinimizeWindow { .. }
+        | IpcRequest::ShowWindow { .. }
+        | IpcRequest::Click { .. }
+        | IpcRequest::ClickWindow { .. }
+        | IpcRequest::MovePointer { .. }
+        | IpcRequest::MovePointerWindow { .. }
+        | IpcRequest::Drag { .. }
+        | IpcRequest::DragWindow { .. }
+        | IpcRequest::Scroll { .. }
+        | IpcRequest::ScrollWindow { .. }
+        | IpcRequest::Key { .. }
+        | IpcRequest::KeyWindow { .. }
+        | IpcRequest::TypeText { .. }
+        | IpcRequest::TypeWindow { .. }
+        | IpcRequest::SetClipboard { .. }
+        | IpcRequest::PasteText { .. }
+        | IpcRequest::PasteWindow { .. }
+        | IpcRequest::RecordEvent { .. }
+        | IpcRequest::BrowserNavigate { .. } => true,
+    }
+}
+
+/// Short stable label for an IPC request, used in control-blocked event logs.
+fn ipc_request_kind(request: &IpcRequest) -> &'static str {
+    match request {
+        IpcRequest::IpcInfo => "ipc_info",
+        IpcRequest::Environment => "environment",
+        IpcRequest::Status => "status",
+        IpcRequest::LaunchApp { .. } => "launch_app",
+        IpcRequest::ListApps { .. } => "list_apps",
+        IpcRequest::ListWindows { .. } => "list_windows",
+        IpcRequest::ActiveWindow => "active_window",
+        IpcRequest::Pointer => "pointer",
+        IpcRequest::Observe { .. } => "observe",
+        IpcRequest::WaitWindow { .. } => "wait_window",
+        IpcRequest::Screenshot { .. } => "screenshot",
+        IpcRequest::ScreenshotWindow { .. } => "screenshot_window",
+        IpcRequest::FocusWindow { .. } => "focus_window",
+        IpcRequest::FocusMatchingWindow { .. } => "focus_matching_window",
+        IpcRequest::CloseWindow { .. } => "close_window",
+        IpcRequest::CloseMatchingWindow { .. } => "close_matching_window",
+        IpcRequest::MoveWindow { .. } => "move_window",
+        IpcRequest::ResizeWindow { .. } => "resize_window",
+        IpcRequest::RaiseWindow { .. } => "raise_window",
+        IpcRequest::MinimizeWindow { .. } => "minimize_window",
+        IpcRequest::ShowWindow { .. } => "show_window",
+        IpcRequest::Click { .. } => "click",
+        IpcRequest::ClickWindow { .. } => "click_window",
+        IpcRequest::MovePointer { .. } => "move_pointer",
+        IpcRequest::MovePointerWindow { .. } => "move_pointer_window",
+        IpcRequest::Drag { .. } => "drag",
+        IpcRequest::DragWindow { .. } => "drag_window",
+        IpcRequest::Scroll { .. } => "scroll",
+        IpcRequest::ScrollWindow { .. } => "scroll_window",
+        IpcRequest::Key { .. } => "key",
+        IpcRequest::KeyWindow { .. } => "key_window",
+        IpcRequest::TypeText { .. } => "type_text",
+        IpcRequest::TypeWindow { .. } => "type_window",
+        IpcRequest::SetClipboard { .. } => "set_clipboard",
+        IpcRequest::GetClipboard => "get_clipboard",
+        IpcRequest::PasteText { .. } => "paste_text",
+        IpcRequest::PasteWindow { .. } => "paste_window",
+        IpcRequest::ReadAppLog { .. } => "read_app_log",
+        IpcRequest::WaitApp { .. } => "wait_app",
+        IpcRequest::BrowserTargets { .. } => "browser_targets",
+        IpcRequest::BrowserSnapshot { .. } => "browser_snapshot",
+        IpcRequest::BrowserSearchResults { .. } => "browser_search_results",
+        IpcRequest::BrowserNavigate { .. } => "browser_navigate",
+        IpcRequest::ReadEvents { .. } => "read_events",
+        IpcRequest::RecordEvent { .. } => "record_event",
+        IpcRequest::KillApp { .. } => "kill_app",
+        IpcRequest::Stop => "stop",
+    }
+}
+
 fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> {
     let spec = launch_spec_with_workspace_defaults(&state.status, spec);
     validate_launch_spec(&spec)?;
+    // Enforce the spawn-time MCP permission ceiling inside the daemon, after
+    // workspace defaults are applied. This holds regardless of IPC origin: any
+    // same-uid process or workspace-launched app that crafts a permissive
+    // `applied_policy` directly to the control socket is still capped here, not
+    // only in the MCP front-end. Covers direct launches, `workspace run`,
+    // profile setup commands, and startup apps, which all funnel through here.
+    state
+        .permissions
+        .validate_launch_spec(&spec)
+        .context("workspace launch exceeds the MCP permission ceiling")?;
     validate_launch_policy_ack(&spec)?;
     let log_paths = prepare_app_log_paths(&state.status.runtime_dir)?;
     let effective_policy = spec
@@ -6472,6 +6690,7 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         command.args(&spec.command[1..]);
         command
     };
+    scrub_host_session_environment(&mut child_command);
     for env_var in workspace_environment(&state.status).variables {
         child_command.env(env_var.name, env_var.value);
     }
@@ -6528,6 +6747,33 @@ fn spawn_app(state: &mut DaemonState, spec: LaunchSpec) -> Result<WorkspaceApp> 
         child,
     });
     Ok(info)
+}
+
+/// Host-session environment variables that must not leak from the launching
+/// process into apps started inside the isolated workspace. These point at the
+/// host user's live desktop session services (D-Bus, PulseAudio, SSH/GPG agents,
+/// keyring, login session) and would let a workspace app reach back into the
+/// host session. We remove them with targeted `env_remove` only; PATH/HOME and
+/// the X11/Wayland display handling applied by
+/// `configure_x11_workspace_process_environment` are deliberately left intact.
+const HOST_SESSION_ENV_VARS: &[&str] = &[
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DBUS_STARTER_ADDRESS",
+    "DBUS_STARTER_BUS_TYPE",
+    "PULSE_SERVER",
+    "PULSE_COOKIE",
+    "SSH_AUTH_SOCK",
+    "SSH_AGENT_PID",
+    "DESKTOP_SESSION",
+    "XDG_SESSION_ID",
+    "GNOME_KEYRING_CONTROL",
+    "GPG_AGENT_INFO",
+];
+
+fn scrub_host_session_environment(command: &mut Command) {
+    for name in HOST_SESSION_ENV_VARS {
+        command.env_remove(name);
+    }
 }
 
 fn launch_spec_with_workspace_defaults(
@@ -6617,7 +6863,15 @@ fn bubblewrap_sandbox_for_launch(
             network_isolation: network.isolation_label().to_string(),
         }))
     } else {
-        let mut args = vec!["--dev-bind".to_string(), "/".to_string(), "/".to_string()];
+        let mut args = vec![
+            "--bind".to_string(),
+            "/".to_string(),
+            "/".to_string(),
+            "--dev".to_string(),
+            "/dev".to_string(),
+            "--proc".to_string(),
+            "/proc".to_string(),
+        ];
         if network.unshare_net() {
             args.push("--unshare-net".to_string());
         }
@@ -6733,8 +6987,7 @@ fn restricted_mount_namespace_args(
     }
     args.push("--proc".to_string());
     args.push("/proc".to_string());
-    args.push("--dev-bind".to_string());
-    args.push("/dev".to_string());
+    args.push("--dev".to_string());
     args.push("/dev".to_string());
 
     for dir in dirs {
@@ -6756,11 +7009,17 @@ fn restricted_mount_namespace_args(
     args.push(status.xauthority_path.display().to_string());
 
     for mount in &policy.mounts {
+        let canonical_host_path = fs::canonicalize(&mount.host_path).with_context(|| {
+            format!(
+                "failed to canonicalize profile mount host_path {}",
+                mount.host_path.display()
+            )
+        })?;
         args.push(match mount.mode {
             crate::policy::MountMode::ReadOnly => "--ro-bind".to_string(),
             crate::policy::MountMode::ReadWrite => "--bind".to_string(),
         });
-        args.push(mount.host_path.display().to_string());
+        args.push(canonical_host_path.display().to_string());
         args.push(mount.workspace_path.display().to_string());
     }
     if network.unshare_net() {
@@ -9852,6 +10111,13 @@ mod tests {
     }
 
     fn daemon_state_for_test(name: &str) -> DaemonState {
+        daemon_state_for_test_with_permissions(name, McpPermissionState::default())
+    }
+
+    fn daemon_state_for_test_with_permissions(
+        name: &str,
+        permissions: McpPermissionState,
+    ) -> DaemonState {
         let mut status = status_with_profile_defaults(policy(NetworkPolicy::default(), true, true));
         status.id = name.to_string();
         let runtime_dir = env::temp_dir().join(format!("{name}-{}", std::process::id()));
@@ -9864,7 +10130,180 @@ mod tests {
             window_app_ids: BTreeMap::new(),
             event_path: runtime_dir.join(EVENT_LOG_FILE),
             next_event_sequence: 1,
+            permissions,
         }
+    }
+
+    fn launch_app_request(command: &[&str]) -> IpcRequest {
+        IpcRequest::LaunchApp {
+            command: command.iter().map(|part| part.to_string()).collect(),
+            name: None,
+            profile_id: None,
+            applied_policy: None,
+            user_acknowledged_unenforced_policy: false,
+            cwd: None,
+            env: Vec::new(),
+            wait_window: false,
+            window_timeout_ms: None,
+            screenshot_window: false,
+        }
+    }
+
+    // Fix A regression: a daemon-side launch whose command exceeds a configured
+    // MCP permission ceiling is rejected by spawn_app itself (the daemon path),
+    // not only by the MCP front-end. This proves the McpPermissionState ceiling
+    // check now runs inside the daemon. The rejection happens before any log
+    // file is created or any child process is spawned.
+    #[test]
+    fn daemon_launch_exceeding_ceiling_is_rejected_in_spawn_app() {
+        let ceiling = crate::permissions::McpPermissionCeiling {
+            network: None,
+            mounts: Vec::new(),
+            apps: crate::permissions::AppPermissionCeiling {
+                allow: vec![PathBuf::from("xterm")],
+            },
+        };
+        let permissions = McpPermissionState::from_ceiling(
+            Some(PathBuf::from("/tmp/daemon-ceiling-test.json")),
+            ceiling,
+        );
+        assert!(permissions.configured && permissions.restricted);
+        let mut state =
+            daemon_state_for_test_with_permissions("daemon-ceiling-reject", permissions);
+        // Clear the inherited workspace profile so the launch spec is unprofiled
+        // and the app allowlist is the deciding ceiling dimension. Also clear the
+        // inherited profile_cwd (a non-existent path) so the shape-only launch
+        // validation passes and the ceiling check is what rejects the launch.
+        state.status.profile_id = None;
+        state.status.applied_policy = None;
+        state.status.profile_cwd = None;
+
+        let error = spawn_app(
+            &mut state,
+            LaunchSpec {
+                command: vec!["curl".to_string(), "https://example.com".to_string()],
+                name: None,
+                profile_id: None,
+                applied_policy: None,
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: Vec::new(),
+            },
+        )
+        .expect_err("launch outside the app allowlist must be rejected by the daemon");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("MCP permission ceiling"),
+            "expected ceiling rejection, got: {message}"
+        );
+        assert!(
+            message.contains("MCP app allowlist"),
+            "expected app allowlist detail, got: {message}"
+        );
+        assert!(
+            state.apps.is_empty(),
+            "rejected launch must not register an app process"
+        );
+
+        // An allowed command passes the ceiling check in the same daemon path
+        // (it then proceeds past validation; we only assert the ceiling does not
+        // reject it).
+        assert!(
+            state
+                .permissions
+                .validate_launch_spec(&launch_spec_with_workspace_defaults(
+                    &state.status,
+                    LaunchSpec {
+                        command: vec!["xterm".to_string()],
+                        name: None,
+                        profile_id: None,
+                        applied_policy: None,
+                        user_acknowledged_unenforced_policy: false,
+                        cwd: None,
+                        env: Vec::new(),
+                    },
+                ))
+                .is_ok(),
+            "allowlisted command must pass the daemon ceiling check"
+        );
+    }
+
+    // Fix A regression: the daemon live-control gate blocks mutating IPC ops
+    // when control is paused/read_only, while read-only inspection and the
+    // safety stop stay allowed. Tested through the pure gate decision so it does
+    // not depend on the process-global XDG_RUNTIME_DIR or the shared control
+    // file (safe under parallel test execution).
+    #[test]
+    fn daemon_control_gate_blocks_mutation_but_allows_readonly_and_stop() {
+        let mutating = launch_app_request(&["xterm"]);
+        let type_text = IpcRequest::TypeText {
+            text: "hello".to_string(),
+        };
+        let read_only = IpcRequest::Status;
+        let safety_stop = IpcRequest::Stop;
+
+        // Paused blocks mutating ops.
+        assert_eq!(
+            control_gate_block_reason(&mutating, Some(McpControlMode::Paused)),
+            Some(McpControlMode::Paused)
+        );
+        assert_eq!(
+            control_gate_block_reason(&type_text, Some(McpControlMode::Paused)),
+            Some(McpControlMode::Paused)
+        );
+        // Read-only inspection stays allowed even when paused.
+        assert_eq!(
+            control_gate_block_reason(&read_only, Some(McpControlMode::Paused)),
+            None
+        );
+        // Safety stop stays allowed even when paused.
+        assert_eq!(
+            control_gate_block_reason(&safety_stop, Some(McpControlMode::Paused)),
+            None
+        );
+        // read_only mode also blocks mutating ops and allows inspection.
+        assert_eq!(
+            control_gate_block_reason(&mutating, Some(McpControlMode::ReadOnly)),
+            Some(McpControlMode::ReadOnly)
+        );
+        assert_eq!(
+            control_gate_block_reason(&read_only, Some(McpControlMode::ReadOnly)),
+            None
+        );
+        // Active permits everything.
+        assert_eq!(
+            control_gate_block_reason(&mutating, Some(McpControlMode::Active)),
+            None
+        );
+        assert_eq!(
+            control_gate_block_reason(&safety_stop, Some(McpControlMode::Active)),
+            None
+        );
+
+        // Best-effort fail-open: when the live control state is unreadable
+        // (mode is None), even mutating ops are allowed. Live control is a
+        // convenience layer, not the authoritative boundary; the permission
+        // ceiling is enforced independently in spawn_app.
+        assert_eq!(control_gate_block_reason(&mutating, None), None);
+        assert_eq!(control_gate_block_reason(&type_text, None), None);
+
+        // Dry-run previews are treated as read-only.
+        let kill_dry_run = IpcRequest::KillApp {
+            app_id: "app-1".to_string(),
+            dry_run: true,
+        };
+        let kill_real = IpcRequest::KillApp {
+            app_id: "app-1".to_string(),
+            dry_run: false,
+        };
+        assert_eq!(
+            control_gate_block_reason(&kill_dry_run, Some(McpControlMode::Paused)),
+            None
+        );
+        assert_eq!(
+            control_gate_block_reason(&kill_real, Some(McpControlMode::Paused)),
+            Some(McpControlMode::Paused)
+        );
     }
 
     fn workspace_app_for_test(id: &str) -> WorkspaceApp {
@@ -10034,6 +10473,153 @@ mod tests {
         let policy = policy(NetworkPolicy::default(), true, true);
 
         assert_eq!(launch_network_plan(Some(&policy)), LaunchNetworkPlan::Host);
+    }
+
+    fn index_of(args: &[String], value: &str) -> Option<usize> {
+        args.iter().position(|arg| arg == value)
+    }
+
+    #[test]
+    fn net_only_sandbox_uses_fresh_dev_and_proc_not_host_dev_bind() {
+        let policy = policy(
+            NetworkPolicy {
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
+            },
+            true,
+            false,
+        );
+        let status = status_with_profile_defaults(policy.clone());
+        let sandbox = bubblewrap_sandbox_for_launch(
+            &status,
+            Some(status.applied_policy.as_ref().expect("policy")),
+            Some(Path::new("/workspace/project")),
+        )
+        .expect("sandbox build")
+        .expect("net-only sandbox should exist");
+        let args = &sandbox.args;
+
+        // Host filesystem stays visible, but devices and proc are fresh.
+        let bind_idx = index_of(args, "--bind").expect("--bind present");
+        let dev_idx = index_of(args, "--dev").expect("--dev present");
+        let proc_idx = index_of(args, "--proc").expect("--proc present");
+        assert!(args.contains(&"--unshare-net".to_string()));
+
+        // Ordering: bwrap applies mounts in argv order, so the fresh /dev and
+        // /proc must come after `--bind / /` to shadow the host's.
+        assert!(bind_idx < dev_idx, "--bind must precede --dev");
+        assert!(dev_idx < proc_idx, "--dev must precede --proc");
+
+        // The raw host device passthrough must be gone.
+        assert!(
+            !args
+                .windows(3)
+                .any(|w| w == ["--dev-bind".to_string(), "/".to_string(), "/".to_string()]),
+            "net-only sandbox must not bind host root with --dev-bind / /: {args:?}"
+        );
+        assert!(!args.contains(&"--dev-bind".to_string()));
+
+        assert_eq!(sandbox.mount_isolation, "host");
+    }
+
+    #[test]
+    fn restricted_mount_namespace_uses_fresh_devtmpfs() {
+        let host_dir = env::temp_dir().join(format!(
+            "agent-workspace-mount-dev-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&host_dir).expect("host mount dir");
+
+        let policy = AppliedWorkspacePolicy::new_with_capabilities(
+            "qa".to_string(),
+            vec![crate::policy::ProfileMount {
+                host_path: host_dir.clone(),
+                workspace_path: PathBuf::from("/workspace/data"),
+                mode: crate::policy::MountMode::ReadWrite,
+            }],
+            NetworkPolicy::default(),
+            false,
+            0,
+            capabilities(true, false, false, true),
+        );
+        let status = status_with_profile_defaults(policy.clone());
+
+        let args = restricted_mount_namespace_args(
+            &status,
+            Some(&policy),
+            Some(Path::new("/workspace/project")),
+            LaunchNetworkPlan::Host,
+        )
+        .expect("mount namespace args");
+
+        // Fresh devtmpfs instead of host device passthrough.
+        let dev_idx = index_of(&args, "--dev").expect("--dev present");
+        assert_eq!(args.get(dev_idx + 1), Some(&"/dev".to_string()));
+        assert!(
+            !args.windows(3).any(|w| w
+                == [
+                    "--dev-bind".to_string(),
+                    "/dev".to_string(),
+                    "/dev".to_string()
+                ]),
+            "mount namespace must not bind host /dev with --dev-bind /dev /dev: {args:?}"
+        );
+
+        // The existing fresh procfs is preserved.
+        let proc_idx = index_of(&args, "--proc").expect("--proc present");
+        assert_eq!(args.get(proc_idx + 1), Some(&"/proc".to_string()));
+
+        fs::remove_dir_all(host_dir).expect("cleanup");
+    }
+
+    #[test]
+    fn restricted_mount_namespace_binds_canonical_host_path_for_symlink() {
+        let root = env::temp_dir().join(format!(
+            "agent-workspace-mount-symlink-test-{}",
+            std::process::id()
+        ));
+        let real_dir = root.join("real-data");
+        let link = root.join("link-data");
+        fs::create_dir_all(&real_dir).expect("real mount dir");
+        std::os::unix::fs::symlink(&real_dir, &link).expect("mount symlink");
+        let canonical_target = fs::canonicalize(&real_dir).expect("canonical real dir");
+
+        let policy = AppliedWorkspacePolicy::new_with_capabilities(
+            "qa".to_string(),
+            vec![crate::policy::ProfileMount {
+                host_path: link.clone(),
+                workspace_path: PathBuf::from("/workspace/data"),
+                mode: crate::policy::MountMode::ReadWrite,
+            }],
+            NetworkPolicy::default(),
+            false,
+            0,
+            capabilities(true, false, false, true),
+        );
+        let status = status_with_profile_defaults(policy.clone());
+
+        let args = restricted_mount_namespace_args(
+            &status,
+            Some(&policy),
+            Some(Path::new("/workspace/project")),
+            LaunchNetworkPlan::Host,
+        )
+        .expect("mount namespace args");
+
+        // The canonical real path must be bound, not the symlink path.
+        let bind_idx = index_of(&args, "--bind").expect("read-write mount emits a --bind entry");
+        assert_eq!(
+            args.get(bind_idx + 1),
+            Some(&canonical_target.display().to_string()),
+            "symlinked host_path must be bound by its canonical real path: {args:?}"
+        );
+        assert_eq!(args.get(bind_idx + 2), Some(&"/workspace/data".to_string()));
+        assert!(
+            !args.contains(&link.display().to_string()),
+            "symlink path must not appear as a bind source: {args:?}"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

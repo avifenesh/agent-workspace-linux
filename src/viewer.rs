@@ -118,6 +118,10 @@ pub struct ViewerOptions {
     pub permissions: McpPermissionState,
     pub always_on_top: bool,
     pub exit_when_workspace_gone: bool,
+    /// Start with the live screen view off ("always bg"). The screen is shown by
+    /// default; this launch flag opts into a background (screen-off) start. The
+    /// in-viewer toggle ("optional bg") can turn it back on at runtime.
+    pub background: bool,
 }
 
 impl Default for ViewerOptions {
@@ -127,6 +131,7 @@ impl Default for ViewerOptions {
             permissions: viewer_permissions_from_env().unwrap_or_default(),
             always_on_top: false,
             exit_when_workspace_gone: false,
+            background: false,
         }
     }
 }
@@ -302,7 +307,7 @@ struct AgentWorkspaceViewer {
 struct ViewerPreferences {
     width: f32,
     height: f32,
-    #[serde(default)]
+    #[serde(default = "default_screen_stream")]
     screen_stream: bool,
     #[serde(default)]
     footer_mode: FooterMode,
@@ -312,12 +317,29 @@ struct ViewerPreferences {
     y: Option<f32>,
 }
 
+/// The live screen view is shown by default. Users opt into a background
+/// (screen-off) mode via the in-viewer toggle ("optional bg") or the
+/// `--background` launch flag ("always bg"). Kept as a free function so it can
+/// back both the struct default and the serde default for older preference
+/// files that predate the field.
+fn default_screen_stream() -> bool {
+    true
+}
+
+/// Whether the live screen view starts on. The screen is shown by default; the
+/// `--background` launch flag ("always bg") forces a screen-off start regardless
+/// of the saved preference. The in-viewer toggle ("optional bg") flips the saved
+/// preference at runtime.
+fn initial_screen_stream(background: bool, preference: bool) -> bool {
+    !background && preference
+}
+
 impl Default for ViewerPreferences {
     fn default() -> Self {
         Self {
             width: OVERLAY_WIDTH,
             height: OVERLAY_HEIGHT,
-            screen_stream: false,
+            screen_stream: default_screen_stream(),
             footer_mode: FooterMode::default(),
             x: None,
             y: None,
@@ -508,7 +530,7 @@ impl AgentWorkspaceViewer {
             snapshot: ViewerSnapshot::default(),
             selected_profile_id: None,
             permissions: options.permissions,
-            screen_stream: preferences.screen_stream,
+            screen_stream: initial_screen_stream(options.background, preferences.screen_stream),
             exit_when_workspace_gone: options.exit_when_workspace_gone,
             preferences,
             active_window: None,
@@ -1218,6 +1240,10 @@ fn run_viewer_action(
                 user_acknowledged_hidden_workspace: true,
                 width: 1280,
                 height: 800,
+                // Propagate the ceiling into the spawned daemon so a
+                // viewer-started workspace enforces it at the IPC socket, not
+                // only here in the front-end validate below.
+                permissions_source: permissions.source.clone(),
                 ..Default::default()
             };
             permissions
@@ -1235,6 +1261,10 @@ fn run_viewer_action(
                 purpose: Some(format!("Opened from Agent Workspace Viewer ({profile_id})")),
                 user_acknowledged_hidden_workspace: true,
                 user_acknowledged_unenforced_policy: true,
+                // Propagate the ceiling into the spawned daemon so a
+                // viewer-started profile workspace enforces it at the IPC
+                // socket, not only in the front-end validate below.
+                permissions_source: permissions.source.clone(),
                 ..Default::default()
             };
             let open_options = profile::ProfileWorkspaceOpenOptions {
@@ -3112,6 +3142,7 @@ pub fn open_viewer(
         permissions: permissions.clone(),
         always_on_top,
         exit_when_workspace_gone: true,
+        background: false,
     };
     let executable = std::env::current_exe().context("failed to resolve current executable")?;
     let args = viewer_command_args(&options);
@@ -3179,6 +3210,9 @@ fn viewer_command_args(options: &ViewerOptions) -> Vec<String> {
     }
     if options.exit_when_workspace_gone {
         args.push("--exit-when-workspace-gone".to_string());
+    }
+    if options.background {
+        args.push("--background".to_string());
     }
     args
 }
@@ -4053,7 +4087,6 @@ fn permission_ceiling_label(permissions: &McpPermissionState) -> String {
                     format!("net local {}", network.allow_hosts.len())
                 }
             }
-            NetworkMode::Allowlist => format!("net allow {}", network.allow_hosts.len()),
         });
     }
     if !permissions.ceiling.mounts.is_empty() {
@@ -4156,10 +4189,6 @@ fn network_policy_label(policy: &AppliedWorkspacePolicy) -> String {
         NetworkMode::Disabled => "Net: off declared".to_string(),
         NetworkMode::LocalOnly if policy.enforcement.network.enforced => "Net: local".to_string(),
         NetworkMode::LocalOnly => "Net: local declared".to_string(),
-        NetworkMode::Allowlist if policy.enforcement.network.enforced => {
-            "Net: allowlist".to_string()
-        }
-        NetworkMode::Allowlist => "Net: allowlist declared".to_string(),
     }
 }
 
@@ -4743,8 +4772,8 @@ mod tests {
             ViewerPreferences::default()
         );
         assert!(
-            !ViewerPreferences::default().screen_stream,
-            "screen streaming must be opt-in so the viewer does not capture frames by default"
+            ViewerPreferences::default().screen_stream,
+            "the live screen view is shown by default; background (screen-off) mode is opt-in"
         );
 
         fs::create_dir_all(&dir).expect("create preference dir");
@@ -4761,8 +4790,17 @@ mod tests {
         let loaded = load_viewer_preferences_from_path(&path);
         assert_eq!(loaded.footer_mode, FooterMode::Activity);
         assert!(
-            !loaded.screen_stream,
-            "legacy live_refresh must not silently enable screen capture"
+            loaded.screen_stream,
+            "preferences predating the screen_stream field default to the screen shown on"
+        );
+        fs::write(
+            &path,
+            r#"{"width": 400.0, "height": 390.0, "screen_stream": false}"#,
+        )
+        .expect("write background (screen-off) preference");
+        assert!(
+            !load_viewer_preferences_from_path(&path).screen_stream,
+            "an explicit screen_stream=false (optional bg) is honored across launches"
         );
         fs::write(
             &path,
@@ -4771,6 +4809,18 @@ mod tests {
         .expect("write screen-stream preference");
         assert!(load_viewer_preferences_from_path(&path).screen_stream);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn background_flag_forces_screen_off_even_when_preference_is_on() {
+        // Screen shown by default.
+        assert!(initial_screen_stream(false, true));
+        // "optional bg": the saved preference turns the screen off.
+        assert!(!initial_screen_stream(false, false));
+        // "always bg": the --background launch flag forces screen off regardless
+        // of the saved preference.
+        assert!(!initial_screen_stream(true, true));
+        assert!(!initial_screen_stream(true, false));
     }
 
     #[test]
@@ -4800,6 +4850,7 @@ mod tests {
             permissions: McpPermissionState::default(),
             always_on_top: true,
             exit_when_workspace_gone: true,
+            background: false,
         });
 
         assert_eq!(

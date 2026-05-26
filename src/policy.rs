@@ -42,7 +42,6 @@ pub enum NetworkMode {
     InheritHost,
     Disabled,
     LocalOnly,
-    Allowlist,
 }
 
 fn local_only_network_label(network: &NetworkPolicy) -> String {
@@ -91,13 +90,8 @@ impl AppliedWorkspacePolicy {
         let mount_detail = if mounts_enforced {
             "mounts are enforced with a bubblewrap mount namespace for launched apps".to_string()
         } else if mount_policy_requested {
-            if let Some(backend) = &runtime_capabilities.preferred_mount_backend {
-                format!(
-                    "mounts are declared; {backend} is available as a candidate but is not active"
-                )
-            } else {
-                "mounts are declared but no mount namespace backend is available".to_string()
-            }
+            "mounts are declared but bubblewrap is not available to enforce a mount namespace"
+                .to_string()
         } else {
             "no mount policy requested".to_string()
         };
@@ -122,7 +116,6 @@ impl AppliedWorkspacePolicy {
             NetworkMode::InheritHost => true,
             NetworkMode::Disabled => runtime_capabilities.bubblewrap.ok,
             NetworkMode::LocalOnly => runtime_capabilities.bubblewrap.ok,
-            NetworkMode::Allowlist => false,
         };
         let network_detail = match network.mode {
             NetworkMode::InheritHost => "profile inherits the host network by policy".to_string(),
@@ -131,14 +124,8 @@ impl AppliedWorkspacePolicy {
                     .to_string()
             }
             NetworkMode::Disabled => {
-                if let Some(backend) = &runtime_capabilities.preferred_network_backend {
-                    format!(
-                        "network disabled is declared; {backend} is available as a candidate but is not active"
-                    )
-                } else {
-                    "network disabled is declared but no network isolation backend is available"
-                        .to_string()
-                }
+                "network disabled is declared but bubblewrap is not available to enforce network isolation"
+                    .to_string()
             }
             NetworkMode::LocalOnly if network_enforced => {
                 format!(
@@ -150,12 +137,6 @@ impl AppliedWorkspacePolicy {
                 format!(
                     "local-only network is declared for {} but bubblewrap is not available",
                     local_only_network_label(&network)
-                )
-            }
-            NetworkMode::Allowlist => {
-                format!(
-                    "network allowlist is declared for {} but is outside the current closed/local/open product scope",
-                    network.allow_hosts.join(", ")
                 )
             }
         };
@@ -198,16 +179,6 @@ impl AppliedWorkspacePolicy {
                     .push("bubblewrap".to_string());
                 network_status.limitations.push(
                     "local-only networking is recorded in the profile but launched apps keep host network access"
-                        .to_string(),
-                );
-                network_status.limitations.push(
-                    "launched apps keep host network access when this profile is acknowledged"
-                        .to_string(),
-                );
-            }
-            NetworkMode::Allowlist => {
-                network_status.limitations.push(
-                    "allow_hosts is recorded for advanced or legacy profile intent only; the current product network modes are closed, local, and open"
                         .to_string(),
                 );
                 network_status.limitations.push(
@@ -276,13 +247,13 @@ impl AppliedWorkspacePolicy {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct PolicyRuntimeCapabilities {
     pub bubblewrap: PolicyToolCheck,
+    /// firejail / unshare / slirp4netns are reported for diagnostics (doctor)
+    /// only. They are detected but NOT wired as enforcement backends: bubblewrap
+    /// is the single backend that actually enforces mount and network policy, so
+    /// these are not advertised as usable policy backends.
     pub firejail: PolicyToolCheck,
     pub unshare: PolicyToolCheck,
     pub slirp4netns: PolicyToolCheck,
-    pub can_candidate_mounts: bool,
-    pub can_candidate_disable_network: bool,
-    pub can_candidate_local_network: bool,
-    pub can_candidate_network_allowlist: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_mount_backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -298,58 +269,26 @@ impl PolicyRuntimeCapabilities {
         unshare: PolicyToolCheck,
         slirp4netns: PolicyToolCheck,
     ) -> Self {
-        let preferred_mount_backend = if bubblewrap.ok {
-            Some("bubblewrap".to_string())
-        } else if firejail.ok {
-            Some("firejail".to_string())
-        } else if unshare.ok {
-            Some("unshare".to_string())
+        // bubblewrap is the only enforcement backend that is actually wired.
+        // We do not claim firejail/unshare as fallback "candidates" because they
+        // never enforce anything today; advertising them would overstate what
+        // the runtime can do.
+        let backend = bubblewrap.ok.then(|| "bubblewrap".to_string());
+        let notes = vec![if bubblewrap.ok {
+            "bubblewrap enforces mount and network namespace isolation for launched apps"
+                .to_string()
         } else {
-            None
-        };
-        let preferred_network_backend = if bubblewrap.ok {
-            Some("bubblewrap".to_string())
-        } else if firejail.ok {
-            Some("firejail".to_string())
-        } else if unshare.ok {
-            Some("unshare".to_string())
-        } else {
-            None
-        };
-        let can_candidate_mounts = preferred_mount_backend.is_some();
-        let can_candidate_disable_network = preferred_network_backend.is_some();
-        let can_candidate_local_network = bubblewrap.ok;
-        let can_candidate_network_allowlist = firejail.ok || slirp4netns.ok;
-        let mut notes = Vec::new();
-        if bubblewrap.ok {
-            notes.push(
-                "bubblewrap is the preferred candidate for mount and network namespace enforcement"
-                    .to_string(),
-            );
-        } else {
-            notes.push(
-                "install bubblewrap to unlock the preferred unprivileged policy backend candidate"
-                    .to_string(),
-            );
-        }
-        if can_candidate_network_allowlist {
-            notes.push("network allowlists still need a concrete rules backend before they can be enforced".to_string());
-        }
-        if can_candidate_local_network {
-            notes.push("local-only networking can be enforced with bubblewrap loopback-only network namespaces".to_string());
-        }
+            "install bubblewrap to enforce mount and network isolation; without it, mount and network policy is declared but not enforced"
+                .to_string()
+        }];
 
         Self {
             bubblewrap,
             firejail,
             unshare,
             slirp4netns,
-            can_candidate_mounts,
-            can_candidate_disable_network,
-            can_candidate_local_network,
-            can_candidate_network_allowlist,
-            preferred_mount_backend,
-            preferred_network_backend,
+            preferred_mount_backend: backend.clone(),
+            preferred_network_backend: backend,
             notes,
         }
     }
@@ -370,6 +309,15 @@ impl Default for PolicyToolCheck {
     }
 }
 
+/// Enforcement summary for a workspace policy.
+///
+/// HONESTY NOTE: the `enforced` flags below are derived from runtime
+/// capability detected at workspace start time (e.g. whether the bubblewrap
+/// binary is present), NOT from per-launch verification of the sandbox that
+/// was actually constructed. They describe the start-time expectation. The
+/// authoritative per-launch truth is the `mount_isolation` / `network_isolation`
+/// labels recorded on each `WorkspaceApp`, which reflect the sandbox that was
+/// actually applied when that specific app was spawned.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PolicyEnforcement {
     pub display_isolation: PolicyCapabilityStatus,
@@ -381,6 +329,11 @@ pub struct PolicyEnforcement {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PolicyCapabilityStatus {
     pub requested: bool,
+    /// Whether this capability is expected to be enforced. This reflects
+    /// runtime capability detected at workspace start time (the basis is
+    /// "runtime_capability_at_start"), not per-launch verification. For the
+    /// per-launch truth, read the per-app `mount_isolation` /
+    /// `network_isolation` labels on `WorkspaceApp`.
     pub enforced: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<PolicyCapabilityState>,
@@ -505,17 +458,17 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_network_stays_unenforced_even_with_candidates() {
+    fn disabled_network_without_bubblewrap_stays_unenforced() {
         let policy = AppliedWorkspacePolicy::new_with_capabilities(
-            "shopping".to_string(),
+            "qa".to_string(),
             Vec::new(),
             NetworkPolicy {
-                mode: NetworkMode::Allowlist,
-                allow_hosts: vec!["example.com".to_string()],
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
             },
             false,
             0,
-            capabilities(true, true, true, true),
+            capabilities(false, false, false, false),
         );
 
         assert!(policy.enforcement.network.requested);
@@ -537,12 +490,6 @@ mod tests {
             Some("ack_unenforced_policy")
         );
         assert!(policy.has_requested_unenforced_policy());
-        assert!(policy
-            .enforcement
-            .network
-            .limitations
-            .iter()
-            .any(|limitation| limitation.contains("allow_hosts")));
     }
 
     #[test]
@@ -571,7 +518,6 @@ mod tests {
         );
         assert_eq!(policy.enforcement.network.required_acknowledgement, None);
         assert!(!policy.has_requested_unenforced_policy());
-        assert!(policy.runtime_capabilities.can_candidate_local_network);
         assert_eq!(
             policy.enforcement.network.backend.as_deref(),
             Some("bubblewrap_loopback_only")
@@ -616,12 +562,12 @@ mod tests {
             "strict-local".to_string(),
             Vec::new(),
             NetworkPolicy {
-                mode: NetworkMode::Allowlist,
-                allow_hosts: vec!["example.com".to_string()],
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
             },
             true,
             0,
-            capabilities(true, false, false, true),
+            capabilities(false, false, false, false),
         );
 
         assert!(policy.has_requested_unenforced_policy());

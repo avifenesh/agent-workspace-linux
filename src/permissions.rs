@@ -5,8 +5,10 @@ use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
-    env, fs,
+    collections::{BTreeSet, VecDeque},
+    env,
+    ffi::OsString,
+    fs, io,
     path::{Component, Path, PathBuf},
 };
 
@@ -35,6 +37,12 @@ pub struct McpPermissionState {
     #[serde(default)]
     pub ceiling: McpPermissionCeiling,
     pub message: String,
+    /// Non-blocking advisories about allowlist entries whose enforcement is
+    /// weaker than it appears (shell/interpreter entries, bare command names).
+    /// These do not narrow or widen the ceiling; they surface caveats so the
+    /// host/client can decide whether the configured allowlist is sufficient.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub advisories: Vec<String>,
 }
 
 impl Default for McpPermissionState {
@@ -52,6 +60,7 @@ impl McpPermissionState {
             McpPermissionCeiling::default()
         };
         let restricted = ceiling.is_restricted();
+        let advisories = ceiling.allowlist_advisories();
         let message = match (configured, restricted) {
             (false, _) => {
                 "No MCP permission ceiling is configured; the host/client session controls workspace permissions, including full-access sessions after hidden-workspace approval."
@@ -72,6 +81,7 @@ impl McpPermissionState {
             source,
             ceiling,
             message,
+            advisories,
         }
     }
 
@@ -112,6 +122,30 @@ impl McpPermissionCeiling {
             .is_some_and(|network| !matches!(network.mode, NetworkMode::InheritHost))
             || !self.mounts.is_empty()
             || !self.apps.allow.is_empty()
+    }
+
+    /// Surface non-blocking caveats about app allowlist entries. The app
+    /// allowlist matches only the launched program (argv[0]), never its
+    /// arguments, and bare command names are resolved against `$PATH`.
+    /// These advisories explain where that enforcement is weaker than it looks.
+    fn allowlist_advisories(&self) -> Vec<String> {
+        let mut advisories = Vec::new();
+        for entry in &self.apps.allow {
+            let display = entry.display();
+            if let Some(name) = command_basename(entry) {
+                if is_shell_or_interpreter(&name) {
+                    advisories.push(format!(
+                        "App allowlist entry {display} resolves to {name:?}, a shell/interpreter/socket tool. The allowlist matches only the launched program, not its arguments, so allowing it effectively permits launching arbitrary programs (e.g. `{name} -c ...`). This entry is advisory, not a hard limit on what runs."
+                    ));
+                }
+            }
+            if is_bare_command_name(entry) {
+                advisories.push(format!(
+                    "App allowlist entry {display} is a bare command name; matching depends on $PATH at validation time vs. the launched app's $PATH at execution time. Prefer an absolute path to pin which binary is allowed."
+                ));
+            }
+        }
+        advisories
     }
 
     fn validate_config(&self) -> Result<()> {
@@ -179,11 +213,29 @@ impl McpPermissionCeiling {
         for mount in requested {
             validate_absolute_path(&mount.host_path, "requested mount host_path")?;
             validate_absolute_path(&mount.workspace_path, "requested mount workspace_path")?;
-            if self
-                .mounts
-                .iter()
-                .any(|allowed| mount_within(allowed, mount))
-            {
+            // Resolve the requested host path through symlinks (longest existing
+            // prefix) so a mount whose real target escapes the ceiling cannot
+            // slip past the lexical subset check.
+            let requested_real = effective_host_path(&mount.host_path).with_context(|| {
+                format!(
+                    "{context} cannot resolve mount host_path {} for ceiling containment check",
+                    mount.host_path.display()
+                )
+            })?;
+            let mut matched = false;
+            for allowed in &self.mounts {
+                let allowed_real = effective_host_path(&allowed.host_path).with_context(|| {
+                    format!(
+                        "{context} cannot resolve MCP permission ceiling mount host_path {}",
+                        allowed.host_path.display()
+                    )
+                })?;
+                if mount_within(allowed, &allowed_real, mount, &requested_real) {
+                    matched = true;
+                    break;
+                }
+            }
+            if matched {
                 continue;
             }
             bail!(
@@ -288,6 +340,36 @@ fn validate_allowed_command(command: &Path) -> Result<()> {
     );
 }
 
+/// Known shell/interpreter/socket basenames whose presence in the app
+/// allowlist effectively delegates arbitrary execution, because the allowlist
+/// only matches argv[0] and never inspects the arguments handed to them.
+const SHELL_OR_INTERPRETER_BASENAMES: &[&str] = &[
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "env", "python", "python3", "ruby", "perl", "php",
+    "lua", "tclsh", "node", "socat", "nc", "ncat", "busybox",
+];
+
+/// Extract the file name (basename) of an allowlist entry, lowercased for
+/// case-insensitive comparison against the known-tool list.
+fn command_basename(entry: &Path) -> Option<String> {
+    entry
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+}
+
+fn is_shell_or_interpreter(basename: &str) -> bool {
+    SHELL_OR_INTERPRETER_BASENAMES.contains(&basename)
+}
+
+/// A bare command name has no path separators: not absolute and a single
+/// normal path component (e.g. `bash`, not `/bin/bash` or `./bash`).
+fn is_bare_command_name(entry: &Path) -> bool {
+    if entry.is_absolute() {
+        return false;
+    }
+    let mut components = entry.components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+}
+
 fn validate_absolute_path(path: &Path, field: &str) -> Result<()> {
     if path.as_os_str().is_empty() {
         bail!("{field} cannot be empty");
@@ -305,13 +387,11 @@ fn validate_absolute_path(path: &Path, field: &str) -> Result<()> {
 }
 
 fn validate_network_hosts(network: &NetworkPolicy, context: &str) -> Result<()> {
-    if matches!(
-        network.mode,
-        NetworkMode::LocalOnly | NetworkMode::Allowlist
-    ) && network
-        .allow_hosts
-        .iter()
-        .any(|host| host.trim().is_empty())
+    if matches!(network.mode, NetworkMode::LocalOnly)
+        && network
+            .allow_hosts
+            .iter()
+            .any(|host| host.trim().is_empty())
     {
         bail!("{context} contains an empty network allow_hosts entry");
     }
@@ -326,13 +406,6 @@ fn network_within_ceiling(ceiling: &NetworkPolicy, requested: &NetworkPolicy) ->
             matches!(requested.mode, NetworkMode::Disabled)
                 || (matches!(requested.mode, NetworkMode::LocalOnly)
                     && host_subset(&requested.allow_hosts, &ceiling.allow_hosts))
-        }
-        NetworkMode::Allowlist => {
-            matches!(
-                requested.mode,
-                NetworkMode::Disabled | NetworkMode::LocalOnly
-            ) || (matches!(requested.mode, NetworkMode::Allowlist)
-                && host_subset(&requested.allow_hosts, &ceiling.allow_hosts))
         }
     }
 }
@@ -352,14 +425,114 @@ fn normalized_hosts(hosts: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
-fn mount_within(allowed: &ProfileMount, requested: &ProfileMount) -> bool {
-    path_is_same_or_child(&requested.host_path, &allowed.host_path)
+fn mount_within(
+    allowed: &ProfileMount,
+    allowed_host_real: &Path,
+    requested: &ProfileMount,
+    requested_host_real: &Path,
+) -> bool {
+    // Host side: compare symlink-resolved real paths so the containment test
+    // reflects where the mount actually lands on the host, not its lexical
+    // spelling. Workspace side stays lexical because that path lives in the
+    // container namespace and does not resolve on the host at validate time.
+    path_is_same_or_child(requested_host_real, allowed_host_real)
         && path_is_same_or_child(&requested.workspace_path, &allowed.workspace_path)
         && mount_mode_within(&allowed.mode, &requested.mode)
 }
 
 fn path_is_same_or_child(child: &Path, parent: &Path) -> bool {
     child == parent || child.starts_with(parent)
+}
+
+/// Resolve a host path to its real location for containment checks, even when
+/// the path (or its ultimate target) does not yet exist.
+///
+/// Walks the path one component at a time from the root. Each existing
+/// component is followed through symlinks (including symlinks whose targets do
+/// not exist), so the result reflects where the mount actually lands on the
+/// host. The first component that does not exist as a filesystem entry, and
+/// everything below it, is appended lexically (these are not-yet-created paths
+/// the runtime would still place under the resolved real prefix).
+///
+/// A dangling symlink is still followed: a symlink inside the allowed root that
+/// points outside it is an escape regardless of whether the target exists yet,
+/// so its target path is what gets compared against the ceiling.
+///
+/// Returns an error only when a component cannot be stat'd for a reason other
+/// than "not found" (e.g. permission/IO failure) or when symlink resolution
+/// exceeds a loop guard. Callers treat that as a rejection, never a silent pass.
+fn effective_host_path(path: &Path) -> Result<PathBuf> {
+    // Caller has already run `validate_absolute_path`, so `path` is absolute and
+    // contains no `..` of its own. Symlink *targets* may still contain `..`,
+    // which is resolved lexically against the accumulated real path below.
+    let mut resolved = PathBuf::from("/");
+    let mut pending: VecDeque<OsString> = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_os_string()),
+            _ => None,
+        })
+        .collect();
+    // Bound the number of symlinks we will follow to avoid infinite loops.
+    let mut symlink_budget = 40usize;
+
+    while let Some(name) = pending.pop_front() {
+        if name == ".." {
+            // A `..` introduced by a symlink target: step up the real path.
+            resolved.pop();
+            continue;
+        }
+        let candidate = resolved.join(&name);
+        match fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if symlink_budget == 0 {
+                    bail!(
+                        "symlink resolution limit exceeded while resolving {}",
+                        path.display()
+                    );
+                }
+                symlink_budget -= 1;
+                let target = fs::read_link(&candidate)
+                    .with_context(|| format!("failed to read symlink {}", candidate.display()))?;
+                // Splice the target's components ahead of the remaining ones.
+                // An absolute target resets resolution to the root; a relative
+                // target is resolved against the directory holding the symlink.
+                if target.is_absolute() {
+                    resolved = PathBuf::from("/");
+                }
+                let mut spliced: VecDeque<OsString> = target
+                    .components()
+                    .filter_map(|component| match component {
+                        Component::Normal(part) => Some(part.to_os_string()),
+                        Component::ParentDir => Some(OsString::from("..")),
+                        _ => None,
+                    })
+                    .collect();
+                spliced.append(&mut pending);
+                pending = spliced;
+            }
+            Ok(_) => {
+                resolved = candidate;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // First non-existing component: it and the rest are appended
+                // lexically as the not-yet-created suffix.
+                resolved = candidate;
+                for rest in pending.drain(..) {
+                    resolved.push(rest);
+                }
+                return Ok(resolved);
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(format!(
+                    "failed to inspect {} while resolving {}",
+                    candidate.display(),
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(resolved)
 }
 
 fn mount_mode_within(allowed: &MountMode, requested: &MountMode) -> bool {
@@ -423,7 +596,6 @@ fn network_mode_name(mode: &NetworkMode) -> &'static str {
         NetworkMode::InheritHost => "inherit_host",
         NetworkMode::Disabled => "disabled",
         NetworkMode::LocalOnly => "local_only",
-        NetworkMode::Allowlist => "allowlist",
     }
 }
 
@@ -643,22 +815,22 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_ceiling_requires_requested_hosts_to_be_subset() {
+    fn local_only_ceiling_requires_requested_hosts_to_be_subset() {
         let ceiling = McpPermissionCeiling {
             network: Some(NetworkPolicy {
-                mode: NetworkMode::Allowlist,
-                allow_hosts: vec!["example.com".to_string()],
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string()],
             }),
             mounts: Vec::new(),
             apps: AppPermissionCeiling::default(),
         };
         let allowed = NetworkPolicy {
-            mode: NetworkMode::Allowlist,
-            allow_hosts: vec!["EXAMPLE.com".to_string()],
+            mode: NetworkMode::LocalOnly,
+            allow_hosts: vec!["LOCALHOST:3000".to_string()],
         };
         let blocked = NetworkPolicy {
-            mode: NetworkMode::Allowlist,
-            allow_hosts: vec!["example.org".to_string()],
+            mode: NetworkMode::LocalOnly,
+            allow_hosts: vec!["localhost:9999".to_string()],
         };
 
         ceiling.validate_network(&allowed, "test").unwrap();
@@ -753,5 +925,169 @@ mod tests {
         assert!(state
             .validate_launch_spec(&launch_spec(&["bash"], None))
             .is_err());
+    }
+
+    /// Create a unique scratch directory under the system temp dir without
+    /// pulling in a temp-file crate (none is a dependency of this crate).
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = env::temp_dir().join(format!(
+            "agentws-perm-test-{tag}-{}-{nanos}-{seq}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn mount_ceiling_rejects_symlink_escaping_ceiling_root() {
+        use std::os::unix::fs::symlink;
+
+        let base = unique_temp_dir("symlink-escape");
+        // canonicalize so comparisons are robust on hosts where temp_dir is
+        // itself a symlink (e.g. /tmp -> /private/tmp).
+        let base = fs::canonicalize(&base).unwrap();
+        let allowed_root = base.join("allowed");
+        let outside = base.join("outside");
+        let secret = outside.join("secret");
+        fs::create_dir_all(&allowed_root).unwrap();
+        fs::create_dir_all(&secret).unwrap();
+
+        // A symlink that lives INSIDE the allowed root but points OUTSIDE it.
+        let escape_link = allowed_root.join("escape");
+        symlink(&secret, &escape_link).unwrap();
+
+        let ceiling = McpPermissionCeiling {
+            network: None,
+            mounts: vec![ProfileMount {
+                host_path: allowed_root.clone(),
+                workspace_path: PathBuf::from("/workspace/project"),
+                mode: MountMode::ReadWrite,
+            }],
+            apps: AppPermissionCeiling::default(),
+        };
+
+        // Requesting the symlink as the mount host_path passes the lexical
+        // subset check (it starts_with allowed_root) but its real target
+        // escapes the ceiling, so it must be rejected.
+        let escaping = vec![ProfileMount {
+            host_path: escape_link.clone(),
+            workspace_path: PathBuf::from("/workspace/project/escape"),
+            mode: MountMode::ReadWrite,
+        }];
+        let error = ceiling
+            .validate_mounts(&escaping, "symlink test")
+            .expect_err("symlink escaping the ceiling root must be rejected")
+            .to_string();
+        assert!(
+            error.contains("outside the MCP permission ceiling"),
+            "unexpected error: {error}"
+        );
+
+        // A legitimate same-or-child mount (a real subdir of the allowed root)
+        // still passes.
+        let real_child = allowed_root.join("sub");
+        fs::create_dir_all(&real_child).unwrap();
+        let legitimate = vec![ProfileMount {
+            host_path: real_child.clone(),
+            workspace_path: PathBuf::from("/workspace/project/sub"),
+            mode: MountMode::ReadWrite,
+        }];
+        ceiling
+            .validate_mounts(&legitimate, "symlink test")
+            .expect("a real same-or-child mount must still pass");
+
+        // A DANGLING symlink inside the allowed root that points outside it is
+        // still an escape: the runtime bind-mount would resolve the link to its
+        // (out-of-ceiling) target regardless of whether that target exists yet.
+        let dangling_target = outside.join("not-created-yet");
+        let dangling_link = allowed_root.join("dangling");
+        symlink(&dangling_target, &dangling_link).unwrap();
+        assert!(
+            !dangling_link.exists(),
+            "test setup: target must not exist for the dangling case"
+        );
+        let dangling = vec![ProfileMount {
+            host_path: dangling_link.clone(),
+            workspace_path: PathBuf::from("/workspace/project/dangling"),
+            mode: MountMode::ReadWrite,
+        }];
+        let error = ceiling
+            .validate_mounts(&dangling, "symlink test")
+            .expect_err("a dangling symlink escaping the ceiling root must be rejected")
+            .to_string();
+        assert!(
+            error.contains("outside the MCP permission ceiling"),
+            "unexpected error for dangling symlink: {error}"
+        );
+
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn shell_allowlist_entry_produces_arbitrary_execution_advisory() {
+        let state = configured_state(McpPermissionCeiling {
+            network: None,
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling {
+                allow: vec![PathBuf::from("bash")],
+            },
+        });
+
+        assert!(
+            !state.advisories.is_empty(),
+            "expected an advisory for a shell allowlist entry"
+        );
+        assert!(
+            state
+                .advisories
+                .iter()
+                .any(|advisory| advisory.contains("arbitrary programs")),
+            "advisories did not mention arbitrary execution: {:?}",
+            state.advisories
+        );
+    }
+
+    #[test]
+    fn bare_name_allow_entry_produces_recommend_absolute_advisory() {
+        // `xterm` is a bare name but not a shell/interpreter, so only the
+        // bare-name advisory should fire.
+        let state = configured_state(McpPermissionCeiling {
+            network: None,
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling {
+                allow: vec![PathBuf::from("xterm")],
+            },
+        });
+
+        assert!(
+            state
+                .advisories
+                .iter()
+                .any(|advisory| advisory.contains("absolute path")),
+            "expected a recommend-absolute advisory: {:?}",
+            state.advisories
+        );
+
+        // An absolute, non-shell entry produces no advisories at all.
+        let absolute = configured_state(McpPermissionCeiling {
+            network: None,
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling {
+                allow: vec![PathBuf::from("/usr/bin/xterm")],
+            },
+        });
+        assert!(
+            absolute.advisories.is_empty(),
+            "absolute non-shell entry should have no advisories: {:?}",
+            absolute.advisories
+        );
     }
 }

@@ -111,10 +111,27 @@ fn parse_global_options(args: &mut Vec<String>) -> Result<permissions::McpPermis
         }
         break;
     }
+    // Developers (or MCP host configs) who want to limit the server without
+    // passing a flag can export AGENT_WORKSPACE_PERMISSIONS=/path/to/file.json;
+    // the server starts with that ceiling and the daemon enforces it. An
+    // explicit --permissions flag takes precedence over the environment.
+    let permissions_path = permissions_path.or_else(env_permissions_path);
     match permissions_path {
         Some(path) => permissions::load_mcp_permission_state(path),
         None => Ok(permissions::McpPermissionState::default()),
     }
+}
+
+/// Permission ceiling path from the environment, if set and non-empty. Lets a
+/// dev or host config enforce a ceiling via `AGENT_WORKSPACE_PERMISSIONS`
+/// without a command-line flag. By default (unset) the MCP imposes no ceiling
+/// and defers to the host tool's permission boundary.
+fn env_permissions_path() -> Option<PathBuf> {
+    let value = std::env::var_os("AGENT_WORKSPACE_PERMISSIONS")?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(value))
 }
 
 fn handle_profile(args: Vec<String>, permissions: &permissions::McpPermissionState) -> Result<()> {
@@ -278,6 +295,10 @@ fn parse_viewer_options(args: &[String]) -> Result<Option<viewer::ViewerOptions>
                 options.exit_when_workspace_gone = true;
                 index += 1;
             }
+            "--background" => {
+                options.background = true;
+                index += 1;
+            }
             "--id" => {
                 index += 1;
                 let Some(id) = args.get(index) else {
@@ -291,7 +312,7 @@ fn parse_viewer_options(args: &[String]) -> Result<Option<viewer::ViewerOptions>
                 return Ok(None);
             }
             unknown => bail!(
-                "unknown viewer option '{unknown}'. Expected: --id ID, --always-on-top, --exit-when-workspace-gone, --help"
+                "unknown viewer option '{unknown}'. Expected: --id ID, --always-on-top, --background, --exit-when-workspace-gone, --help"
             ),
         }
     }
@@ -365,11 +386,12 @@ fn handle_workspace(
     };
     match command {
         "start" => {
-            let start = parse_start_options(&args[1..])?;
+            let mut start = parse_start_options(&args[1..])?;
             if let Some(profile_id) = &start.profile_id {
                 permissions.validate_profile(&profile::get_profile(profile_id)?)?;
             }
             permissions.validate_start_options(&start.options)?;
+            start.options.permissions_source = permissions.source.clone();
             if start.dry_run {
                 print_json(&workspace::preview_workspace_start(start.options)?)
             } else if start.foreground {
@@ -379,9 +401,10 @@ fn handle_workspace(
             }
         }
         "open-profile" => {
-            let (start, profile_id, open_options) = parse_open_profile_options(&args[1..])?;
+            let (mut start, profile_id, open_options) = parse_open_profile_options(&args[1..])?;
             permissions.validate_profile(&profile::get_profile(&profile_id)?)?;
             permissions.validate_start_options(&start.options)?;
+            start.options.permissions_source = permissions.source.clone();
             if start.dry_run {
                 print_json(&profile::preview_open_profile_workspace(
                     start.options,
@@ -4034,6 +4057,7 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
     let mut socket_path = None;
     let mut xauthority_path = None;
     let mut policy_path = None;
+    let mut permissions_source = None;
     let mut user_acknowledged_hidden_workspace = false;
     let mut user_acknowledged_unenforced_policy = false;
     let mut index = 0;
@@ -4104,6 +4128,11 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
                 policy_path = Some(PathBuf::from(value_after(&args, index, "--policy")?));
                 index += 2;
             }
+            "--permissions" => {
+                permissions_source =
+                    Some(PathBuf::from(value_after(&args, index, "--permissions")?));
+                index += 2;
+            }
             "--ack-hidden-workspace" => {
                 user_acknowledged_hidden_workspace = true;
                 index += 1;
@@ -4136,6 +4165,7 @@ fn parse_daemon_options(args: Vec<String>) -> Result<DaemonOptions> {
         runtime_dir: runtime_dir.context("daemon missing --runtime-dir")?,
         socket_path: socket_path.context("daemon missing --socket")?,
         xauthority_path: xauthority_path.context("daemon missing --xauthority")?,
+        permissions_source,
     })
 }
 
