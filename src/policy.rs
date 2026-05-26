@@ -10,17 +10,12 @@ pub struct ProfileMount {
     pub mode: MountMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MountMode {
+    #[default]
     ReadOnly,
     ReadWrite,
-}
-
-impl Default for MountMode {
-    fn default() -> Self {
-        Self::ReadOnly
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -40,19 +35,14 @@ impl Default for NetworkPolicy {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkMode {
+    #[default]
     InheritHost,
     Disabled,
     LocalOnly,
     Allowlist,
-}
-
-impl Default for NetworkMode {
-    fn default() -> Self {
-        Self::InheritHost
-    }
 }
 
 fn local_only_network_label(network: &NetworkPolicy) -> String {

@@ -4,6 +4,924 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-26 Workspace-Owned Browser CDP MCP Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on replacing host Chrome bridge assumptions with a
+  workspace-owned browser-control surface that agents can discover through the
+  repo-owned MCP.
+
+Verified:
+
+- `workspace_browser_targets`, `workspace_browser_snapshot`,
+  `workspace_browser_search_results`, and `workspace_browser_navigate` are
+  exposed through the direct stdio MCP and the CLI
+  `workspace browser-targets`, `workspace browser-snapshot`,
+  `workspace browser-search-results`, and `workspace browser-navigate`
+  subcommands.
+- The tool selects a running workspace Chrome/Chromium app, derives its
+  `--user-data-dir`, maps `/workspace/...` profile mounts back to the host
+  profile copy when needed, validates that any declared
+  `--remote-debugging-address` is loopback-only, reads `DevToolsActivePort`
+  when available, and falls back to an explicit loopback
+  `--remote-debugging-port` when the browser was launched that way.
+- `restricted-chrome` and `browser-session` profile templates now launch
+  Chrome/Chromium with loopback DevTools enabled, so browser automation can stay
+  attached to the isolated workspace browser rather than the user's normal
+  Chrome profile.
+- `mcp_task_plan` now points running and newly launched browser/shopping flows
+  at `workspace_browser_targets` followed by `workspace_browser_snapshot`,
+  `workspace_browser_search_results` for result pages, and, when `target_url`
+  is provided, `workspace_browser_navigate`, while preserving the
+  real-world/cart/checkout approval boundary.
+- `scripts/mcp_workspace_browser_cdp_smoke.js` starts the repo-owned MCP,
+  launches Chrome inside a disposable workspace, calls
+  `workspace_browser_targets`, asserts that the returned endpoint is loopback
+  and belongs to the launched workspace app, then performs page readback and
+  navigation through the MCP `workspace_browser_snapshot`,
+  `workspace_browser_search_results`, and `workspace_browser_navigate` tools.
+  The smoke asserts that structured result cards and browser action events were
+  recorded in the workspace event log, with no workspace keyboard/mouse input
+  events needed.
+- A live Amazon GPU dogfood pass against the already visible
+  `real-grocery-visible` workspace used only
+  `workspace browser-search-results` on the workspace-owned Chrome app and
+  extracted structured RTX/Pro GPU result cards. The follow-up product fix adds
+  visible `vram_gb` extraction and `min_vram_gb` filtering, so GPU-shopping
+  tasks can ask for cards above a VRAM threshold without parsing raw text or
+  returning 16GB false positives. Browser tool responses now also warn when a
+  workspace event cannot be recorded, which makes stale-daemon or IPC schema
+  skew visible instead of silently dropping activity-footer updates.
+- Browser workspace events now carry explicit omission markers and remain
+  metadata-only. Snapshot/navigation/search events record target, URL/title,
+  counts, and filters, but not raw DOM text, headings, links, or result-card
+  excerpts.
+- The GPUI viewer activity footer now renders those `browser_snapshot` and
+  `browser_navigate` events as readable status such as "Read browser page" and
+  "Navigated browser to ...", so the visible monitor tells the user what the
+  agent is doing in the workspace browser without opening a larger app panel.
+- The real-grocery collector now records the same
+  `workspace_browser_targets` discovery inside `real_browser.chrome_devtools`
+  during live real-browser runs, and the release/import gates reject
+  real-grocery evidence that lacks loopback workspace-browser target proof or
+  stores raw logged-in page text.
+- `cargo fmt --check`, `cargo test --locked`, `node --check
+  scripts/mcp_workspace_browser_cdp_smoke.js`, `node
+  scripts/mcp_workspace_browser_cdp_smoke.js`, `node
+  scripts/mcp_clean_permissions_smoke.js`, and
+  `scripts/prod_readiness_smoke.sh` passed after the change.
+
+Finding:
+
+- Browser dogfood no longer needs the host Chrome bridge, Playwright, curl, or a
+  script-owned CDP client as the efficient path. Agents can discover, read,
+  extract structured result cards from, and navigate the Chrome instance they
+  launched inside the workspace through MCP tools, which keeps browser
+  automation inside the same permission, profile-copy, event-log, and audit
+  boundary as the rest of the runtime.
+
+## 2026-05-25 No-Host-Display MCP Viewer Pass
+
+Environment:
+
+- Ran a clean/default JSON-RPC MCP smoke against the local repository build with
+  `DISPLAY`, `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, and
+  `AGENT_WORKSPACE_VIEWER_BACKEND` removed from the MCP environment.
+- The pass focused on keeping the product contract precise: no display is not
+  the same as `mcp --headless`, but host-visible viewer work still must not be
+  recommended or spawned.
+
+Verified:
+
+- `scripts/mcp_no_host_display_viewer_smoke.js` starts plain `mcp` without
+  `--headless`, confirms `mcp_permissions.configured=false`, and confirms
+  `mcp_session_brief.headless=false`.
+- `mcp_session_brief.doctor.ready_for_host_viewer=false` and
+  `viewer_blockers` names the missing `DISPLAY` / `WAYLAND_DISPLAY` host
+  display requirement.
+- The smoke starts a real hidden X11 workspace through `workspace_start` while
+  the host display is unset, proving the isolated workspace runtime can still
+  operate without treating the server as headless.
+- With that workspace running, `mcp_session_brief` does not recommend
+  `workspace_open_viewer`.
+- Non-headless app-QA and complete grocery plans suppress
+  `workspace_open_viewer` steps and `host_visible_ui` approval checkpoints when
+  `ready_for_host_viewer=false`, instead of offering a viewer that cannot open.
+- `mcp_task_plan` now exposes and smokes `host_viewer_ready`,
+  `viewer_available`, and
+  `viewer_unavailable_reason`, so host UI and agents can tell whether viewer
+  steps are absent because of explicit `--headless` mode or because this
+  non-headless MCP lacks a host display.
+- Natural shopping phrases such as "buy milk and eggs for delivery" now route
+  to the same browser/shopping plan as explicit grocery wording, preserving
+  cart mutation and checkout/account-change approval boundaries.
+- `workspace_open_viewer` returns `ok=false` with a host-display readiness
+  message rather than spawning a child process that would immediately fail.
+- `scripts/integration_smoke.sh` now runs this no-host-display smoke between
+  the normal non-headless viewer smoke and the clean/headless MCP smoke.
+- `cargo fmt --check`, `cargo build --locked`,
+  `cargo test --locked`, `node scripts/mcp_no_host_display_viewer_smoke.js`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_clean_permissions_smoke.js`,
+  `node scripts/mcp_permissions_smoke.js`, and `scripts/integration_smoke.sh`
+  passed after the availability-field change.
+
+Finding:
+
+- Headless remains an explicit MCP flag, but Linux service/no-display launches
+  now have a safer UX: the agent can still plan and run hidden workspaces while
+  host-visible viewer affordances are withheld until a real host display is
+  available.
+
+## 2026-05-25 App-QA Intent and Action Boundary Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on making app-QA planning as machine-readable as the
+  browser/shopping plan, so host UI can show the user's likely next boundary
+  without scraping step prose.
+
+Verified:
+
+- `normalize_task_intent` now treats natural app-QA phrases such as "test the
+  local UI", "verify the frontend", "debug the desktop window", "run smoke
+  checks", and "check render behavior" as `app_qa` intents.
+- `mcp_task_plan.task_context.action_boundaries` for app-QA now separates
+  read-only project observation, hidden workspace start/attach, post-start
+  evidence collection, workspace-local input, and mounted project file writes.
+- Mounted project file writes are exposed as a distinct `project_file_write`
+  approval kind, so code/file changes are not silently folded into normal app
+  driving.
+- Clean/default, locked-permissions, and non-headless MCP smokes now assert the
+  structured app-QA boundary map.
+- `cargo fmt --check`, `cargo test --locked`, `node
+  scripts/mcp_clean_permissions_smoke.js`, `node
+  scripts/mcp_permissions_smoke.js`, `node
+  scripts/mcp_non_headless_viewer_smoke.js`, `node
+  scripts/mcp_no_host_display_viewer_smoke.js`, and
+  `scripts/integration_smoke.sh` passed after the change.
+
+Finding:
+
+- App-QA host UX can now render the next likely user boundary directly from
+  `task_context`, including the difference between observing/driving the
+  isolated workspace and changing files in the mounted project.
+
+## 2026-05-25 Approval Summary Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on turning the existing flat approval checkpoint list into a
+  host-renderable next-boundary summary.
+
+Verified:
+
+- `mcp_task_plan` now includes `approval_summary` with `blocking_count`,
+  `approval_required_count`, `approval_kinds`, and `next_boundary`.
+- `next_boundary` chooses the first blocking checkpoint before later
+  non-blocking approvals, so host UI can render the next required input,
+  permission ceiling, live-control reactivation, hidden-workspace approval, or
+  real-world approval without reimplementing checkpoint ordering.
+- Clean/default, locked-permissions, and non-headless MCP smokes now assert the
+  approval summary for app-QA and browser/grocery plans.
+- `cargo fmt --check`, `cargo build --locked`, `cargo test --locked`,
+  `node scripts/mcp_clean_permissions_smoke.js`,
+  `node scripts/mcp_permissions_smoke.js`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_no_host_display_viewer_smoke.js`, and
+  `scripts/integration_smoke.sh` passed after the change.
+
+Finding:
+
+- Hosts now get both the complete checkpoint list and the one boundary most
+  likely to need user attention first. This narrows the final approval UI gap
+  without changing the clean/default permission model.
+
+## 2026-05-25 Session Recommendation Approval Summary Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on letting `mcp_session_brief` expose a first approval
+  boundary before a host has called `mcp_task_plan`.
+
+Verified:
+
+- Each `mcp_session_brief.recommendations[]` entry now carries
+  `approval_summary` with blocking count, approval-required count, approval
+  kinds, and next boundary.
+- The top-level `mcp_session_brief.approval_summary` summarizes the
+  already-prioritized recommendations and selects the first blocking boundary,
+  or otherwise the first approval-required boundary.
+- Clean/default, locked-permissions, and non-headless MCP smokes assert that
+  browser/grocery planning recommendations expose `real_world_action` in both
+  per-recommendation and top-level summaries.
+- `cargo fmt --check`, `cargo build --locked`, `cargo test --locked`,
+  `node scripts/mcp_clean_permissions_smoke.js`,
+  `node scripts/mcp_permissions_smoke.js`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_no_host_display_viewer_smoke.js`, and
+  `scripts/integration_smoke.sh` passed after the change.
+
+Finding:
+
+- Hosts can now show a compact first boundary from the session brief itself,
+  then call `mcp_task_plan` only when they need the full workflow. This reduces
+  duplicated approval-ordering logic in Codex Desktop or non-Codex MCP hosts.
+
+## 2026-05-25 Grocery Browser Workflow Smoke
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on a concrete browser/grocery dogfood loop rather than only
+  planning metadata.
+
+Verified:
+
+- `scripts/grocery_browser_workflow_smoke.sh` starts a hidden workspace, opens
+  Chrome/Chromium against a local grocery data page, uses workspace-local
+  keyboard and paste actions to draft a grocery list, and submits that draft to
+  the page's cart state.
+- The smoke waits for the browser window title to become
+  `cart:3:checkout-locked`, captures a screenshot-backed observation, and fails
+  if the page crosses into an `order-submitted` state.
+- `scripts/integration_smoke.sh` now runs the grocery workflow when
+  Chrome/Chromium is available, after the existing local-dev and native-browser
+  input checks.
+- `bash -n scripts/grocery_browser_workflow_smoke.sh
+  scripts/integration_smoke.sh`, `cargo fmt --check`, `cargo test --locked`,
+  `scripts/grocery_browser_workflow_smoke.sh`, and
+  `scripts/integration_smoke.sh` passed after the change.
+
+Finding:
+
+- The runtime now has a repeatable grocery-style browser dogfood path that
+  exercises observation, browser focus, address navigation, literal typing,
+  paste, cart mutation, screenshot observation, and the no-checkout boundary.
+  It is still not live real-account grocery dogfood, but it proves the workflow
+  mechanics before that higher-risk pass.
+
+## 2026-05-25 Grocery Approval State Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on representing cart approval separately from checkout
+  approval in `mcp_task_plan`.
+
+Verified:
+
+- Grocery `task_context.action_boundaries` now include `approved` and
+  `missing_approvals`.
+- `mcp_task_plan` accepts `cart_mutation_approved`, `final_cart_reviewed`, and
+  `real_world_action_approved` inputs. When only cart mutation and final cart
+  review are approved, the cart boundary becomes approved while checkout still
+  reports the missing explicit checkout approval.
+- Clean/default and locked-permissions MCP smokes assert the new approval state
+  fields for grocery/cart boundaries.
+- `cargo fmt --check`, `cargo build --locked`, `cargo test --locked`,
+  `node scripts/mcp_clean_permissions_smoke.js`,
+  `node scripts/mcp_permissions_smoke.js`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_no_host_display_viewer_smoke.js`,
+  `scripts/grocery_browser_workflow_smoke.sh`, `scripts/integration_smoke.sh`,
+  and `git diff --check` passed after the change.
+
+Finding:
+
+- Hosts can now persist a user's approval to draft a cart without conflating it
+  with approval to place an order or change account state. This makes the
+  synthetic grocery dogfood path closer to a future real-account grocery flow.
+
+## 2026-05-25 Prod Readiness Gate Pass
+
+Environment:
+
+- Added a broad local pre-release gate at `scripts/prod_readiness_smoke.sh`.
+- The gate is intentionally local-first: it can run the runtime checks in this
+  repository and the sibling Codex Desktop agent-workspace tests when
+  `/home/avifenesh/projects/codex-desktop-linux` is present.
+
+Verified:
+
+- `bash -n scripts/prod_readiness_smoke.sh` and
+  `scripts/prod_readiness_smoke.sh` passed on this machine after the gate was
+  added.
+- The gate covers `cargo fmt --check`, `cargo build --locked`,
+  `cargo clippy --locked -- -D warnings`, `cargo test --locked`, all focused
+  MCP permission/viewer smokes, the grocery browser workflow,
+  `scripts/integration_smoke.sh`, and `git diff --check`.
+- It also runs `node --check linux-features/agent-workspace/patch.js`,
+  `node --test linux-features/agent-workspace/test.js`, and Desktop
+  `git diff --check` when the sibling Desktop repo is present.
+- The GPUI viewer smoke runs automatically when the host has `DISPLAY` plus the
+  X11/ImageMagick inspection tools, and can be made mandatory with
+  `REQUIRE_GUI_SMOKE=1`. Desktop tests can be made mandatory with
+  `REQUIRE_DESKTOP_SMOKE=1`.
+- A full pass after the real-grocery dogfood requirement readiness state was
+  wired into `mcp_task_plan` produced
+  `target/real-grocery-dogfood/20260525T205013Z.json`,
+  `target/viewer-desktop-matrix/20260525T205030Z.json`,
+  `target/release-gate-audit/20260525T205036Z.json`, and
+  `target/final-review-bundle/20260525T205036Z.md`; the sibling Desktop node
+  test suite reported 16 passing tests.
+- `scripts/release_gate_audit.py` now scans generated viewer-matrix and
+  real-grocery evidence, writes reports under `target/release-gate-audit/`, and
+  can be made strict with `--require-all` or `REQUIRE_RELEASE_GATES=1` through
+  the broad smoke script. Release evidence must be fresh by default:
+  `--max-evidence-age-days` defaults to 14, with `0` disabling the age check.
+  Evidence must also match the current combined source identity, a hash over
+  the runtime source (`Cargo.toml`, `Cargo.lock`, `src/`, and `scripts/`) plus
+  the sibling Codex Desktop feature source
+  (`../codex-desktop-linux/linux-features/agent-workspace` and
+  `../codex-desktop-linux/agent-workspaces-linux.js`, or
+  `CODEX_DESKTOP_LINUX_REPO` when set), unless `--no-source-identity-check` is
+  used explicitly. `REQUIRE_RELEASE_GATES=1` also enables
+  `--require-clean-source`, so release mode requires no git status entries
+  under those runtime and Desktop feature paths. Its
+  human-review marker must also match the current review-scope identity. In a
+  dirty worktree that identity hashes both repos' status, staged and unstaged
+  diffs, and non-ignored untracked file contents; in a clean worktree it hashes
+  the current `HEAD` commit content. Its `--self-test` mode builds synthetic pending,
+  stale-complete, mismatched-source, mismatched-review-scope, dirty-source, and
+  fresh-clean-complete release-evidence fixtures, proving the audit can fail
+  when evidence is missing, stale, dirty, from a different source tree, or from
+  a different reviewed diff scope and pass when fresh GNOME/KDE, X11/Wayland,
+  native Wayland observation, real-browser grocery, and human-review evidence
+  are all present for a clean current combined source. Its current
+  pending output names the missing KDE/Plasma row, X11 row, native Wayland
+  observation, real-browser grocery pass, and human final diff review. The
+  human-review gate remains pending until a human-created
+  `target/release-gate-human-review.json` marker records schema
+  `agent-workspace-linux.human_final_diff_review.v1` with status `reviewed`.
+- `scripts/prepare_grocery_profile_copy.js` now prepares the disposable browser
+  profile copy required by real-browser grocery dogfood. It skips browser
+  locks, sockets, caches, crash dumps, extension/web-app payloads, and symlinks,
+  writes `.agent-workspace-grocery-profile-copy.json`, and has a self-test wired
+  into the broad gate. The guarded wrapper defaults the disposable copy outside
+  the repo `target/` tree under `$XDG_RUNTIME_DIR/agent-workspace-linux/`, or
+  `/tmp` when `XDG_RUNTIME_DIR` is unavailable.
+  `scripts/real_grocery_dogfood_probe.js` requires that manifest before it
+  opens a real grocery site, and the release-gate audit only
+  accepts real-browser grocery reports with a valid profile-copy manifest,
+  passed MCP plan assertions, an approved cart-draft interaction, the
+  cart-draft safety contract, and a workspace event audit proving only declared
+  cart-draft input events occurred. The probe baselines the workspace event log
+  after browser launch, collects post-baseline events with a step-sized tail,
+  and the audit rejects reports that do not cover every declared cart-draft
+  input step. The page readback evidence stores URL/title and text
+  length/truncation metadata only; raw logged-in page text, excerpts, links, and
+  headings are omitted and rejected. The real-browser probe also stops and
+  cleans the workspace runtime by default, and release evidence must prove that
+  cleanup happened; `REAL_GROCERY_PRESERVE_WORKSPACE=1` is for debugging only.
+- `scripts/final_review_bundle.py` now writes JSON and Markdown bundles under
+  `target/final-review-bundle/` during the broad gate. These bundles collect
+  combined runtime/Desktop source identity, review-scope identity, runtime and
+  sibling Desktop dirty scope, latest evidence reports,
+  release-audit/current-source and review-scope consistency, pending release
+  gates, concrete next evidence commands, a human review checklist, generated
+  runtime/Desktop review diffs, and the exact marker template for
+  `target/release-gate-human-review.json`; they intentionally do not claim
+  review happened. After actual human review, set `HUMAN_REVIEW_NOTES` to
+  specific non-placeholder notes and run the guarded marker command with
+  `--notes "$HUMAN_REVIEW_NOTES"` to regenerate the runtime/Desktop review
+  artifacts and write the marker. The marker includes meaningful reviewer/notes
+  metadata plus `review_artifacts` hashes that the audit verifies before
+  accepting the human review gate. The broad gate also runs
+  `scripts/final_review_bundle.py --self-test` and
+  `scripts/create_human_review_marker.py --self-test` so those command recipes,
+  stale-audit checks, and marker validation are covered. Because the
+  review-scope identity includes docs and untracked files, regenerate the audit
+  and final-review bundle after final doc edits and before creating the
+  human-review marker.
+- `scripts/release_next_steps.py` now prints the concise release roadmap from
+  the latest final-review bundle, including combined source-hash consistency,
+  review-scope consistency, pending gates, next commands, and the final strict
+  release command.
+- Added `scripts/import_release_evidence.py` for copied external
+  viewer/app-QA/grocery release reports and copied human-review markers. It
+  validates schema, current source identity, passing viewer smoke, local GUI
+  app-QA safety/evidence, real-browser grocery mode, checkout refusal,
+  disposable profile manifest validity, passed MCP plan assertions, approved
+  cart-draft interaction evidence, cart-draft safety contracts, declared-only
+  workspace input events, enough input evidence to cover the declared
+  cart-draft input steps, workspace cleanup evidence, non-local HTTPS grocery
+  URLs, human-review review-scope identity, and human-review artifact bytes before copying
+  reports into the audit directories or writing
+  `target/release-gate-human-review.json`. The broad gate runs its self-test so
+  stale-source, skipped, nonpassing, contradictory session-attestation,
+  unexpected workspace-input, weak grocery-safety, missing-review-artifact, and
+  review-scope-mismatched reports remain rejected by default.
+- Added `scripts/export_release_evidence_bundle.py` for collecting external
+  viewer rows, app-QA, real-grocery dogfood, and final human-review markers
+  against the exact current source identity. It exports a tarball with the
+  runtime source, sibling Codex Desktop feature source, source and review-scope
+  manifest, `collect-viewer-evidence.sh`, `collect-app-qa-evidence.sh`,
+  `collect-real-grocery-evidence.sh`, and `create-human-review-marker.sh`; the
+  broad gate runs its self-test so the bundle shape is checked before release
+  evidence is collected elsewhere.
+  Export after final doc/source edits because the
+  review-scope manifest intentionally includes docs.
+- Native Wayland release evidence now requires explanatory observation notes:
+  `scripts/viewer_desktop_matrix_probe.sh` rejects
+  `NATIVE_WAYLAND_LAYER_SHELL_OBSERVED=1` unless
+  `NATIVE_WAYLAND_LAYER_SHELL_NOTES` is also set, and
+  `scripts/release_gate_audit.py` only counts native Wayland layer-shell
+  evidence when those notes are present on a Wayland session and make a
+  positive layer-shell/top-layer claim. GNOME/Xwayland fallback observations and
+  notes that say the viewer was not layer-shell are intentionally rejected.
+  Real-browser
+  grocery release evidence now also requires an HTTPS, non-local grocery URL so
+  localhost, reserved, and private-network URLs cannot satisfy the real dogfood
+  gate. Viewer matrix reports also include `session_consistency`; when
+  `loginctl` metadata is available, contradictory environment/session claims are
+  not release eligible. They also include display-server attestation for local
+  Wayland/X11 sockets and `lsof` process evidence, and release import/audit
+  rejects remote X forwarding plus known nested/headless host displays such as
+  Xvfb, xpra, Xephyr, and headless Weston.
+
+Finding:
+
+- The repo now has one executable gate for the current runtime, MCP, viewer,
+  dogfood, and thin Desktop integration evidence. The remaining release gaps are
+  explicit manual gates: multi-desktop Linux viewer UX, real-account grocery
+  dogfood without crossing checkout/account boundaries, and human final diff
+  review.
+
+## 2026-05-26 Objective Completion Audit Pass
+
+Environment:
+
+- Added `scripts/objective_completion_audit.py` as the requirement-level audit
+  for the active product objective.
+- Wired the audit into `scripts/prod_readiness_smoke.sh` after the release-gate
+  audit, source bundle, final-review bundle, release-next summary, and smoke
+  report are generated.
+
+Verified:
+
+- `scripts/objective_completion_audit.py --self-test` passes and covers the
+  important negative cases: current smoke missing, external gates pending, and a
+  stale final-review bundle even when release gates are otherwise marked passed.
+- The broad smoke now runs the objective audit in non-failing mode by default,
+  writing `target/objective-completion-audit/*.json`; when
+  `REQUIRE_RELEASE_GATES=1` is set, it also passes `--require-complete` so a
+  strict release cannot succeed unless the full objective map is proven.
+- The audit verifies current combined source identity and review-scope identity
+  for the prod-readiness smoke report, release-gate audit, and final human-review
+  bundle before it can mark requirements complete.
+
+Finding:
+
+- Completion is now machine-readable and intentionally conservative. The local
+  MCP/runtime/UI work can keep advancing, but the active goal remains pending
+  until the existing external viewer matrix, real logged-in grocery dogfood, and
+  human review gates are all satisfied for the same reviewed source.
+
+## 2026-05-25 Detached Viewer Reaping Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on the long-running MCP lifecycle behavior of detached
+  host-visible viewer launches.
+
+Verified:
+
+- `viewer::open_viewer`, the X11 replacement relaunch path, and host path open
+  helpers now spawn detached children through a shared reaper helper instead of
+  dropping `std::process::Child` handles.
+- Added `viewer::tests::detached_child_spawn_is_reaped`, which starts a
+  short-lived child and verifies that `/proc/<pid>` disappears, proving the
+  child is waited on rather than left as a zombie under the parent process.
+- `cargo fmt --check`, `cargo check --locked`,
+  `cargo test --locked viewer::tests::detached_child_spawn_is_reaped`, and
+  `scripts/prod_readiness_smoke.sh` passed after the change. The broad gate now
+  includes 103 Rust tests plus the focused MCP, grocery, integration, GPUI, and
+  sibling Codex Desktop checks.
+
+Finding:
+
+- `workspace_open_viewer` remains a separate child process, which matches the
+  product direction, but it is now safer for long-lived MCP servers because
+  exited viewer processes are reaped instead of accumulating as zombies.
+
+## 2026-05-25 Viewer Desktop Matrix Probe Pass
+
+Environment:
+
+- Added `scripts/viewer_desktop_matrix_probe.sh` to turn the remaining
+  multi-desktop Linux viewer validation into repeatable evidence rows.
+- The probe writes JSON reports under `target/viewer-desktop-matrix/`, outside
+  the tracked source tree.
+
+Verified:
+
+- `bash -n scripts/viewer_desktop_matrix_probe.sh scripts/prod_readiness_smoke.sh`,
+  `scripts/viewer_desktop_matrix_probe.sh`, and
+  `scripts/prod_readiness_smoke.sh` passed after the probe was added.
+- This machine produced a passing matrix row at
+  `target/viewer-desktop-matrix/20260525T165426Z.json` with
+  `desktop_label="ubuntu:GNOME / wayland / ubuntu"`,
+  `counts_for_release_matrix=true`, and `viewer_smoke.status="passed"`.
+- The probe records OS release, kernel/platform, `XDG_SESSION_TYPE`,
+  `XDG_CURRENT_DESKTOP`, `DESKTOP_SESSION`, `DISPLAY`, `WAYLAND_DISPLAY`,
+  `loginctl` session data when available, X11 root-window metadata when
+  available, required command availability, and the focused GPUI viewer smoke
+  result.
+- `scripts/prod_readiness_smoke.sh` now calls the matrix probe instead of
+  invoking `scripts/gpui_viewer_smoke.sh` directly when GUI validation is
+  available, so the broad gate leaves a desktop/session evidence row.
+- `REQUIRE_VIEWER_SMOKE=1` makes a skipped visual smoke fail the probe;
+  `REQUIRE_GUI_SMOKE=1` keeps the same strict behavior through the prod gate.
+
+Finding:
+
+- The release matrix gap is now operational rather than prose-only: each
+  desktop/session run can produce comparable JSON evidence. This machine still
+  contributes only its current desktop/session; GNOME/KDE and X11/Wayland-like
+  coverage across multiple environments remains a release gate.
+
+## 2026-05-25 Real Grocery Dogfood Probe Pass
+
+Environment:
+
+- Added `scripts/real_grocery_dogfood_probe.js` as the guarded entrypoint for
+  future logged-in grocery dogfood.
+- The probe defaults to plan-only mode and writes reports under
+  `target/real-grocery-dogfood/`.
+
+Verified:
+
+- `node --check scripts/real_grocery_dogfood_probe.js` and
+  `scripts/real_grocery_dogfood_probe.js` passed in plan-only mode, producing
+  `target/real-grocery-dogfood/20260525T165716Z.json`.
+- `scripts/prod_readiness_smoke.sh` passed after the probe was wired into the
+  broad gate, producing
+  `target/real-grocery-dogfood/20260525T165838Z.json` in plan-only mode.
+- Plan-only mode starts a clean/default `mcp --headless`, calls
+  `mcp_task_plan` with real-grocery-shaped inputs, asserts that cart mutation
+  is not approved by default, asserts checkout/account change approval is not
+  approved by default, then asserts that explicit cart approval plus final cart
+  review approves only cart mutation while checkout remains blocked behind
+  `explicit_checkout_approval`.
+- Real browser mode requires `REAL_GROCERY_DOGFOOD=1`, `GROCERY_TARGET_URL`,
+  `GROCERY_USER_DATA_DIR`, and `GROCERY_PROFILE_IS_DISPOSABLE_COPY=1`; it
+  refuses to run if `GROCERY_TARGET_URL` is not an HTTPS, non-local grocery
+  site, or if `CHECKOUT_APPROVED=1` or `REAL_WORLD_ACTION_APPROVED=1`.
+- Release-counting real browser mode now also requires
+  `REAL_GROCERY_INTERACTION_MODE=cart-draft-approved`,
+  `CART_MUTATION_APPROVED=1`, `FINAL_CART_REVIEWED=1`, and
+  `GROCERY_CART_DRAFT_STEPS_JSON=/path/to/steps.json`. The step file must
+  declare the workspace-local browser input actions and include at least one
+  step marked as an explicit cart mutation, while checkout/order/account words
+  are rejected from input-step safety labels.
+- `scripts/collect_real_grocery_evidence.sh --print-cart-draft-steps-template`
+  prints a starter step file, and `--validate-cart-draft-steps PATH` validates a
+  site-specific step file without opening a browser through the same wrapper
+  used by local and exported-bundle collection. The lower-level
+  `scripts/real_grocery_dogfood_probe.js --preflight-real-grocery` checks the
+  release-counting real run inputs without launching the browser, and
+  `--self-test` covers the template plus rejection paths for checkout-like
+  labels, unsupported actions, missing cart mutations, unexpected workspace
+  input events, and the no-launch preflight.
+- `scripts/collect_real_grocery_evidence.sh` is the guarded release wrapper for
+  the real browser gate. `--preflight-only` prepares the disposable profile copy
+  and validates the real URL, approved cart-draft step file, browser executable,
+  and no-checkout authority without opening the site. It also writes a durable
+  preflight artifact under `target/real-grocery-preflight/` by default, so the
+  exact ready-to-run setup is available in the final review bundle before any
+  live grocery browser is opened. The wrapper now also accepts
+  `REAL_GROCERY_PROFILE_DIRECTORY` for Chrome/Chromium logins that live in a
+  named profile such as `Profile 1`; it validates that directory in both the
+  source and disposable copy, passes `--profile-directory=...` during the live
+  run, and records the chosen profile directory in the preflight and live
+  reports. `--run-real-browser` repeats that preflight and then opens the real
+  grocery site only under `cart-draft-approved` mode.
+- `mcp_task_plan` now exposes the same release-facing contract under
+  `task_context.dogfood_requirements[]` for grocery plans, so MCP hosts and
+  agents can discover the disposable-profile, validated-step-file,
+  cart-approval, final-review, no-checkout-approval, declared-input evidence
+  requirements without reading release scripts. The requirement status becomes
+  `ready` only when the plan receives a real HTTPS non-local target,
+  `profile_is_disposable_copy=true`, `cart_draft_steps_validated=true`,
+  `cart_mutation_approved=true`, `final_cart_reviewed=true`, and no checkout or
+  real-world approval.
+- A refusal check with `CHECKOUT_APPROVED=1` failed before launching a browser,
+  with the expected message telling the caller to unset checkout/real-world
+  approval.
+- `scripts/prod_readiness_smoke.sh` now runs the plan-only probe and syntax
+  check as part of the broad local gate.
+
+Finding:
+
+- The live real-account grocery gap is smaller and safer: the repo now has a
+  guarded probe that can open a disposable copied logged-in profile only after
+  explicit setup and can prove approved cart-draft actions without checkout,
+  order, or account mutation. A true real-account run still needs a disposable
+  profile copy, user-selected grocery URL, and site-specific cart-draft step
+  file.
+
+## 2026-05-25 Natural Shopping Intent Planning Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on routing ordinary user phrasing into the existing
+  browser/shopping/grocery safety plan instead of requiring exact "grocery
+  shopping" wording.
+
+Verified:
+
+- `normalize_task_intent` now treats natural shopping phrases such as "buy",
+  "purchase", "cart", "checkout", "order", and "delivery" as `browser_task`
+  intents.
+- The unit test `natural_shopping_phrases_normalize_to_browser_task` covers
+  examples like "buy milk and eggs", "add bananas to cart", and "order
+  groceries for delivery".
+- `scripts/mcp_clean_permissions_smoke.js` now calls `mcp_task_plan` with
+  `intent="buy milk and eggs for delivery"` and verifies the clean/default MCP
+  still produces the browser/shopping plan with required shopping inputs,
+  `cart_mutation`, and `real_world_action` checkout/account boundaries.
+- `cargo fmt --check`, `cargo build --locked`, `cargo test --locked`,
+  `node scripts/mcp_clean_permissions_smoke.js`,
+  `node scripts/mcp_permissions_smoke.js`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_no_host_display_viewer_smoke.js`, and
+  `scripts/integration_smoke.sh` passed after the change.
+
+Finding:
+
+- The agent UX now better matches how users actually ask for grocery work: a
+  casual "buy/order/add to cart" request lands in the same safe browser plan
+  with cart and checkout boundaries, rather than falling through to the generic
+  unknown-intent plan.
+
+## 2026-05-25 Viewer Doctor Readiness Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on moving GPUI viewer prerequisites out of the handover and
+  into the product-facing doctor/install surface.
+
+Verified:
+
+- `workspace_doctor` / `agent-workspace-linux doctor` now reports viewer
+  readiness separately from hidden X11 workspace readiness.
+- The new doctor payload keeps `ready_for_x11_workspace` for the workspace
+  runtime and adds `ready_for_host_viewer`, `viewer.host_display`,
+  `viewer.source_build_xkbcommon_x11`, `viewer.host_opener`, and
+  `viewer_blockers`.
+- On this GNOME Wayland session, the rebuilt local binary reported
+  `ready_for_x11_workspace=true`, `ready_for_host_viewer=true`,
+  `WAYLAND_DISPLAY=wayland-0`, `DISPLAY=:0`,
+  `xkbcommon-x11: 1.13.1`, `/usr/bin/xdg-open`, and no workspace or viewer
+  blockers.
+- `workspace_open_viewer` now preflights `ready_for_host_viewer` before
+  spawning the GPUI child process, so a non-headless MCP launched without a
+  host display returns a clear doctor-backed refusal instead of reporting a
+  child pid that immediately dies.
+- `mcp_session_brief.doctor` now exposes `ready_for_host_viewer` and
+  `viewer_blockers`, and its running-workspace viewer recommendation is only
+  emitted when the MCP is not headless and the host viewer is ready.
+- The README now documents the separate viewer source-build dependency:
+  `pkg-config libxkbcommon-x11-dev`.
+- `cargo fmt --check`, `cargo check --locked`, `cargo build --locked`,
+  `cargo test --locked`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_clean_permissions_smoke.js`, and
+  `node scripts/mcp_permissions_smoke.js` passed after the change.
+- `scripts/integration_smoke.sh` also passed after the doctor schema change,
+  including the locked MCP smoke, non-headless viewer smoke, clean/headless MCP
+  smoke, doctor phase, workspace/profile flows, browser-session paths, stale
+  cleanup, and self-stop coverage.
+
+Finding:
+
+- The next Linux install gap is smaller: users and MCP hosts can now distinguish
+  "hidden workspace can run" from "this session can open the host-visible GPUI
+  viewer", and source builders get an explicit signal for the xkbcommon package
+  that previously only appeared in handover notes.
+
+## 2026-05-25 Non-Headless MCP Viewer Planning Pass
+
+Environment:
+
+- Ran a new clean/default JSON-RPC MCP smoke against the local repository build
+  using `agent-workspace-linux mcp` without `--headless`.
+- The pass focused on proving the default MCP server remains UI-capable until
+  a host explicitly opts into `mcp --headless`, without opening an actual viewer
+  window during the smoke.
+
+Verified:
+
+- `scripts/mcp_non_headless_viewer_smoke.js` now initializes a clean/default
+  non-headless MCP server, checks `mcp_permissions.configured=false`, and
+  verifies `mcp_session_brief.headless=false`.
+- The smoke compares `tools/list` to `mcp_action_catalog`, proving the catalog
+  covers the exposed MCP tools while keeping `workspace_open_viewer` classified
+  as `headless_gated_open_world`.
+- The smoke verifies the `workspace_open_viewer` tool description and action
+  catalog document the host-visible child process, `--headless` boundary, and
+  opt-in `always_on_top` parameter. It also verifies the tool is classified as
+  idempotent because repeated calls reuse the registered workspace viewer instead
+  of opening another host-visible window.
+- Non-headless app-QA and complete grocery `mcp_task_plan` responses now have
+  external JSON-RPC coverage for optional viewer steps:
+  `open_viewer_when_project_runs` and `open_viewer_when_browser_runs` are
+  offered only after their workspace run dependencies, carry
+  `host_visible_ui` approval checkpoints, and do not introduce permission
+  blockers in clean/default MCP mode.
+- While live MCP control is `read_only` or `paused`, the non-headless smoke now
+  proves real workspace/browser start steps are blocked by live-control
+  checkpoints, but the optional `workspace_open_viewer` steps remain
+  `host_visible_ui` approval steps without a live-control blocker. This keeps
+  the floating viewer usable as an observation/recovery surface.
+- The `mcp_action_catalog` text now explicitly says `workspace_open_viewer`
+  remains available while live control is `read_only` or `paused`, and the
+  `always_on_top` parameter note names the same behavior while preserving the
+  `--headless` boundary.
+- The existing clean/headless smoke catalog comparison helper was corrected and
+  now actively verifies that `mcp_action_catalog` exactly matches `tools/list`.
+- `cargo fmt --check`, `cargo build --locked`,
+  `node scripts/mcp_non_headless_viewer_smoke.js`,
+  `node scripts/mcp_clean_permissions_smoke.js`,
+  `node scripts/mcp_permissions_smoke.js`, `bash -n scripts/integration_smoke.sh`,
+  and `git diff --check` passed after the change. `scripts/integration_smoke.sh`
+  now runs the non-headless viewer smoke between the locked-permissions and
+  clean/headless MCP smokes.
+
+Finding:
+
+- The external MCP smoke coverage now proves both sides of the viewer boundary:
+  `mcp --headless` suppresses host-visible viewer recommendations/refuses
+  viewer opens, while default `mcp` remains UI-capable and exposes
+  host-visible viewer checkpoints only as explicit open-world approval steps.
+
+## 2026-05-25 Codex Desktop Open Viewer Bridge Pass
+
+Environment:
+
+- Patched `/home/avifenesh/projects/codex-desktop-linux` on branch
+  `agent-workspace-linux-feature`.
+- The pass focused on making Codex Desktop a thin launcher/status bridge for the
+  GPUI viewer owned by this runtime repo.
+
+Verified:
+
+- The generated `linux-agent-workspace` main-process bridge now supports
+  `workspaceOpenViewer`, builds `agent-workspace-linux viewer --id <id>`, and
+  uses detached `child_process.spawn` with ignored stdio so the UI action does
+  not hang waiting for the long-lived GPUI process.
+- When Codex has an MCP `--permissions` file configured, the bridge prefixes
+  the viewer launch with the same global `--permissions <path>` arguments used
+  for other CLI workspace actions. Clean/default usage still adds no permission
+  ceiling.
+- The Agent Workspaces settings page now exposes `Open Viewer` for active,
+  other running, and stopped workspaces with concrete workspace ids, keeping
+  Codex Desktop as a launcher/status surface rather than a second serious
+  workspace UI.
+- A generated-settings VM render test now loads a mocked active workspace,
+  renders the actual `Open Viewer` button, clicks it, and verifies the UI sends
+  `{ action: "workspaceOpenViewer", workspaceId: "qa-live" }` without an
+  `alwaysOnTop` field.
+- `node --check linux-features/agent-workspace/patch.js` and
+  `node --test linux-features/agent-workspace/test.js` passed in the desktop
+  repo. The focused tests assert both halves of the bridge contract: clean/
+  default Open Viewer spawns exactly `viewer --id qa-live` with no
+  `--permissions` prefix and no topmost flag, while a locked-permissions launch
+  spawns `--permissions <path> viewer --id default --always-on-top`. Both paths
+  use detached ignored-stdio process handling and call `unref()`.
+- In this runtime repo, `cargo run --locked -- viewer --help` confirmed the
+  command contract is `viewer [--id ID] [--always-on-top]`, and
+  `cargo test --locked viewer::tests` passed.
+
+Finding:
+
+- The desktop integration gap is now narrower: Codex Desktop can launch the
+  canonical GPUI viewer without bypassing the MCP permission ceiling, while the
+  viewer remains optional and headless hosts still depend on the runtime
+  `mcp --headless` boundary.
+
+## 2026-05-25 MCP Action Catalog Completeness Pass
+
+Environment:
+
+- Ran the clean/default and locked-permissions JSON-RPC MCP smokes against the
+  local repository build.
+- The pass focused on the clean/default contract where `mcp_action_catalog` is
+  advisory classification rather than an MCP permission ceiling.
+
+Verified:
+
+- `node scripts/mcp_clean_permissions_smoke.js` now compares `tools/list`
+  against `mcp_action_catalog` exactly: every exposed MCP tool must have a
+  catalog entry, every catalog entry must name a real exposed tool, and catalog
+  tool names must be unique.
+- `node scripts/mcp_permissions_smoke.js` performs the same exact catalog /
+  `tools/list` comparison while the MCP is spawned with an explicit
+  permissions ceiling.
+- Both smokes passed, preserving the existing checks that clean/default MCP
+  reports `configured=false`, the catalog stays advisory, `workspace_open_viewer`
+  is open-world/headless-gated, dry-run mutations document their preview
+  behavior, `profile_export.output_path` is a host write, and
+  `workspace_wait_app.kill_on_timeout` is a conditional termination.
+
+Finding:
+
+- The advisory action taxonomy now has direct drift protection against the
+  exposed MCP tool surface, which is required before hosts can depend on it for
+  read-only/mutating/destructive/open-world approval UX in clean/default mode.
+
+## 2026-05-25 GPUI Viewer Topmost Boundary Pass
+
+Environment:
+
+- Ran `scripts/gpui_viewer_smoke.sh` against the local repository build on the
+  current GNOME Wayland session using the viewer's X11/Xwayland backend.
+- The pass focused on the default-vs-explicit topmost contract for the small
+  GPUI monitor, not on native Wayland layer-shell compositor inspection.
+
+Verified:
+
+- The viewer smoke starts a hidden workspace, launches `xclock`, proves the
+  active-window screenshot path, app-log path, and event-log artifact path, then
+  opens the GPUI viewer with seeded compact size, position, live-refresh, and
+  Task footer preferences.
+- The default X11/Xwayland viewer advertises the expected
+  `agent-workspace-linux-viewer` class, skip-taskbar and skip-pager state, and
+  utility window type while explicitly not advertising `_NET_WM_STATE_ABOVE` or
+  `_NET_WM_STATE_STICKY`.
+- The smoke now launches a second viewer with `--always-on-top` and verifies
+  that the opt-in path advertises `_NET_WM_STATE_ABOVE`,
+  `_NET_WM_STATE_STICKY`, skip-taskbar, skip-pager, and notification/utility
+  window types while still rendering a nonblank compact monitor.
+- The X11 overlay hint task now reasserts the requested window-manager state
+  during startup instead of exiting after the first successful write. This fixes
+  a race where GPUI or the window manager could leave the opt-in topmost window
+  with notification/utility type but without above/sticky state by the time the
+  smoke inspected it.
+- `scripts/gpui_viewer_smoke.sh`, `cargo test --locked viewer::tests`,
+  `cargo fmt --check`, and `git diff --check` passed after the change.
+
+Finding:
+
+- The X11/Xwayland viewer now proves both halves of the product boundary:
+  default is a gentle non-topmost monitor, while explicit `--always-on-top`
+  requests topmost overlay behavior. Native Wayland layer-shell still needs
+  compositor-level validation separate from X11 property inspection.
+
+## 2026-05-25 Complete Grocery Input Planning Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on the read-only MCP planning surface for grocery/browser
+  tasks once the user has already supplied task details.
+
+Verified:
+
+- `mcp_task_plan` with `intent="grocery shopping"`, an explicit
+  `user_data_dir`, `target_url`, `shopping_list`, `budget`, `fulfillment`, and
+  `substitution_policy` moves those details into
+  `task_context.provided_inputs` and leaves `task_context.missing_inputs`
+  empty.
+- The complete grocery plan no longer repeats stale `needs_user_input` prompts
+  for the supplied grocery details, and its browser run / post-start boundary
+  steps no longer list those supplied details as required input.
+- The structured action boundaries mark navigation/search and item comparison
+  ready without approval, mark draft cart changes ready but approval-gated as
+  `cart_mutation`, and keep checkout/order/account changes blocked behind
+  `explicit_checkout_approval`.
+- The clean/default MCP JSON-RPC smoke still reports
+  `mcp_permissions.configured=false`, finds no permission blockers, and keeps
+  host-visible viewer checkpoints absent under `mcp --headless`.
+- `cargo test --locked
+  server::tests::grocery_plan_exposes_structured_action_boundaries` and
+  `node scripts/mcp_clean_permissions_smoke.js` passed after the change.
+
+Finding:
+
+- Fully specified grocery input now behaves like task context, not a permission
+  ceiling or a repeated prompt. The remaining shopping/grocery gap is live
+  real-account dogfood, not planner schema shape.
+
 ## 2026-05-25 Restarted Codex MCP Control Pass
 
 Environment:
@@ -32,6 +950,78 @@ Finding:
 - Agents should prefer the returned `app_id` from launch responses for later
   window-targeted actions. Window titles are good discovery hints, but not a
   stable handle after app startup.
+
+## 2026-05-25 MCP Task Context Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `/home/avifenesh/projects/agent-workspace-linux`.
+- The pass focused on the read-only MCP planning surface, not on changing the
+  runtime permission ceiling.
+
+Verified:
+
+- `mcp_task_plan` now returns a structured `task_context` alongside the
+  existing step list and `approval_checkpoints`. The context names the
+  normalized task kind, target workspace, provided inputs, missing inputs,
+  safety boundaries, and approval kinds present in the plan.
+- Browser/grocery plans expose missing `target_url`, `shopping_list`,
+  `fulfillment`, `substitution_policy`, and `budget` as task input needs. These
+  remain separate from MCP permission blockers: the clean/default MCP smoke
+  still reports `mcp_permissions.configured=false`, keeps the action catalog
+  advisory, and asserts that app-QA/browser plans do not invent permission
+  blockers.
+- Browser/grocery `task_context` now also includes structured action boundaries
+  for observation, navigation/search, item comparison, cart mutation, and
+  checkout/account changes. Cart changes are called out as their own approval
+  class, while checkout/order/account changes remain separate real-world
+  approvals.
+- Live MCP control reactivation now requires `confirmed_user_request=true` when
+  an MCP client switches from `read_only` or `paused` back to `active`.
+  Live-control checkpoints include that exact required input, and
+  `mcp_session_brief` also carries the latest control actor, timestamp, and
+  reason so host UI can explain why the boundary changed.
+- Viewer profile starts now follow the same boundary: clean/default usage does
+  not add an MCP ceiling, while an explicit ceiling is validated before the
+  viewer opens a profile-backed workspace.
+- The locked-permissions MCP smoke now asserts that `task_context` also reports
+  permission-ceiling, hidden-workspace, and real-world approval kinds when a
+  restricted MCP ceiling actually blocks a browser-session profile.
+- `cargo build --locked`, both MCP JSON-RPC smokes, `cargo test --locked`, and
+  `scripts/integration_smoke.sh` passed after the change.
+
+Finding:
+
+- Host UI and agent loops can now render the agent's inferred user intent and
+  missing grocery inputs directly from schema instead of scraping planner prose.
+
+## 2026-05-25 GPUI Viewer Task Footer Pass
+
+Environment:
+
+- Ran against the local repository build and viewer unit tests.
+- This pass focused on the compact GPUI monitor surface, not on adding another
+  full management panel.
+
+Verified:
+
+- The viewer footer mode cycle now includes Activity, Task, Isolation, and Apps.
+  Task mode infers app-QA, browser/shopping, observation, or stopped-workspace
+  review from the selected workspace purpose/profile, active window, and app
+  labels.
+- The selected footer mode is now saved in `viewer.json`, so a user who leaves
+  the monitor in Task, Isolation, or Apps context gets the same compact context
+  when reopening the viewer. The GPUI viewer smoke seeds `footer_mode=task`
+  alongside size and position preferences.
+- `cargo test --locked viewer::tests` passed with coverage for the new footer
+  cycle and browser/app-QA task inference labels.
+
+Finding:
+
+- The small floating monitor can now show what kind of work the agent appears
+  to be doing without opening a larger details view, keeping it aligned with
+  the gentle always-optional overlay direction.
 
 ## 2026-05-25 Integration Smoke Native GUI Regression Pass
 
@@ -778,3 +1768,30 @@ Previous post-patch verification:
   profiles. The same pass also added MCP zombie-child regression coverage after
   stopped workspaces exposed stale `agent-workspace` children under a long-lived
   MCP process.
+
+## 2026-05-26 Viewer Still-Frame Pass
+
+- The native GPUI viewer now preserves the last captured frame when the user
+  pauses the screen stream while the workspace is still running. This keeps the
+  floating window useful for observation without reintroducing continuous
+  screenshot capture or accumulating screenshot files. Stopped workspaces still
+  clear stale frames.
+- Verification: `cargo fmt --check`, `cargo test --locked
+  viewer::tests::paused_screen_stream_keeps_last_running_frame`, and
+  `cargo test --locked viewer::tests` passed.
+
+## 2026-05-26 Direct Live-Control Pass
+
+- The native GPUI viewer now exposes direct live-control choices instead of one
+  implicit cycling button. Active mode shows `RO` and `Pause`; read-only mode
+  shows `Run` and `Pause`; paused mode shows `Run` and `RO`. This makes
+  read-only, pause, and resume visible in the small floating control surface
+  while preserving the MCP boundary semantics and avoiding a crowded header.
+- The viewer minimum width is now 380px, and window dragging starts from the
+  title area rather than the root surface. The focused GPUI smoke caught the
+  old 360px clipping of the `Stop` control and now verifies the native
+  X11/Xwayland viewer renders at 380x340 without requesting always-on-top state
+  by default.
+- Verification: `cargo test --locked viewer::tests`,
+  `cargo test --locked control::tests`, `cargo clippy --locked -- -D warnings`,
+  and `scripts/gpui_viewer_smoke.sh` passed.

@@ -24,6 +24,16 @@ This mode is intended for the Codex app integration and for developer dogfood.
 The app can request workspace starts, mounts, network modes, setup commands, and
 apps through its own UI approval flow.
 
+The default MCP spawn path with no `--permissions` file stays in this mode: the
+  server does not invent a second permission ceiling. It reports
+  `configured=false` through `mcp_permissions`, points agents back to the
+  host/client harness boundary, and uses `mcp_action_catalog` only as advisory
+  classification for read-only, mutating, destructive, idempotent, and
+  host-visible/open-world actions. Catalog `parameter_notes` are also advisory:
+  they explain risk-changing arguments such as `dry_run`, `replace`,
+  `output_path`, and `kill_on_timeout`, but they do not narrow default clean
+  usage.
+
 If the user grants the Codex session full access, UI-owned mode must respect
 that choice. The user should approve the hidden workspace once, because it is a
 separate agent-controlled environment that the user may not be looking at.
@@ -106,6 +116,73 @@ Rules:
 - Spawn-time MCP permissions are immutable. Changing them requires restarting
   the MCP server with new config.
 - The active ceiling is visible through the read-only `mcp_permissions` tool.
+- Agents and non-Codex hosts can call read-only `mcp_session_brief` for the
+  active ceiling, live control mode, headless state, runtime readiness, known
+  workspaces/profiles, compact live/stopped app activity, inferred task intent
+  from profile/app activity, and suggested next MCP actions before attempting
+  mutating tools. The brief now classifies each recommendation with action type,
+  idempotency, and compact approval checkpoints, then derives read-only
+  `mcp_task_plan` recommendations from saved profiles and runtime state,
+  nudging agents toward app QA, browser/shopping/grocery, observe, or cleanup
+  plans before direct mutation. Brief recommendations and the top-level brief
+  now expose `approval_summary`, so hosts can show the first recommendation
+  boundary before making a second planner call. They can also call
+  `mcp_task_plan` directly with those intents to get a safe preview sequence,
+  approval hints, and structured `approval_checkpoints` before executing real
+  actions. These checkpoints let a
+  host render required input, dry-run approval surfaces, profile writes, hidden
+  workspace starts, live-control blockers, host-visible UI, permission blockers,
+  destructive actions, and separate real-world approvals without scraping prose.
+  Live-control checkpoints include the exact `confirmed_user_request=true`
+  reactivation input for `mcp_control_update mode=active`.
+  Plans also include `task_context` with normalized task kind, target workspace,
+  provided inputs, missing inputs, safety boundaries, action boundaries, and
+  approval kinds, so user-intent derivation is machine-readable for host UI and
+  agent loops. `approval_summary` provides the host-renderable next boundary:
+  blocking count, approval-required count, all approval kinds, and the first
+  blocking or approval-required checkpoint so Codex Desktop and non-Codex hosts
+  do not need to reimplement checkpoint ordering before showing a prompt.
+  App-QA plans generated from natural testing phrases or a project path now
+  carry through reviewed profile save, approved profile start, and read-only
+  observation. Their action boundaries separately classify observation,
+  hidden workspace start/attach, evidence collection, workspace-local input,
+  and mounted project file writes; `project_file_write` stays an explicit
+  approval class instead of being inferred from generic app interaction.
+  Browser/shopping plans now carry through to the approved browser-profile run
+  and read-only observation step, with explicit real-world approval text for
+  checkout, purchases, or account changes; viewer steps are offered only when
+  the plan has a concrete browser workspace run step and the MCP is not
+  headless.
+  Shopping/grocery intents also request task details (`target_url`,
+  `shopping_list`, `fulfillment`, `substitution_policy`, and `budget`) as
+  required input rather than permission blockers, so a clean/default MCP remains
+  harness-owned unless `--permissions` is explicitly configured. Their action
+  boundaries separate observe, navigation/search, item comparison, cart
+  mutation, and checkout/account changes; cart mutation has its own approval
+  class and final checkout/account changes stay real-world approvals. Grocery
+  action boundaries now also report explicit approval state and missing
+  approvals, so a host can record `cart_mutation_approved=true` separately from
+  `real_world_action_approved=true`. Cleanup plans
+  now pair dry-run preview with the destructive follow-up and verification
+  step. Fresh-start and already-running app-QA/browser plans collect read-only
+  evidence before input by reading recent workspace events and waiting for a
+  stable app/window target before app logs or focused screenshots. If the target
+  workspace is already running, the plan continues from that live workspace
+  instead of starting another profile. Browser/shopping plans still expose the
+  separate real-world approval boundary. Generated project-dev and
+  browser-session profile steps plus saved-profile preview/run steps are
+  preflighted against the active ceiling and expose permission blockers when
+  the configured MCP cannot support that workflow. The integration
+  smoke also runs a clean/default MCP JSON-RPC pass with no `--permissions`
+  file and asserts that app-QA/browser plans stay free of permission blockers
+  under the harness-owned boundary. The locked-permissions MCP smoke now also
+  covers live `read_only` and `paused` control: dry-run previews and read-only
+  profile returns remain available, real workspace starts are blocked, and
+  host-output writes such as `profile_export.output_path` do not create files
+  until control returns to `active`. Reactivating mutating agent actions through
+  `mcp_control_update` requires `confirmed_user_request=true` when the current
+  mode is `read_only` or `paused`, and session briefs carry the control update
+  actor, timestamp, and reason for host UI and agent explanation.
 - Enforcement currently covers MCP profile template/check/validate/put/import,
   workspace start/open-profile, direct launch/run, and profile setup/startup
   launches. The standalone CLI can also generate and validate ceiling files for
@@ -122,9 +199,10 @@ Current gate status on 2026-05-25:
 - A is validated for the current X11/bubblewrap runtime surface covered by the
   integration smoke. Real MCP dogfood and `scripts/integration_smoke.sh` have
   covered Chrome, native browser text input, local-dev browser QA, mounted GUI
-  editor save-through, synthetic browser-session startup, Codex desktop feature
-  tests, disabled networking, local-only networking, read-only/read-write
-  mounts, setup/startup commands, screenshots, window targeting, input,
+  editor save-through, synthetic browser-session startup/observe/mounted-profile
+  write-through, Codex desktop feature tests, disabled networking, local-only
+  networking, read-only/read-write mounts, setup/startup commands, screenshots,
+  window targeting, input,
   clipboard, app logs, events, manifests, stop, stale cleanup, daemon-crash
   recovery, self-stop from inside
   a workspace app, direct MCP stop/revoke cleanup, and consistent workspace
@@ -133,24 +211,23 @@ Current gate status on 2026-05-25:
   MCP process. A
   Codex-spawned MCP pass on this repository also revalidated project-dev
   mounts, Rust toolchain access, GUI input, events, Chrome, and current network
-  enforcement. `cargo test` currently passes 56 tests.
+  enforcement. `cargo test` currently passes 84 tests.
 - A still has known product gaps: host-localhost bridging for `local_only` and
   more varied real-project coverage. Broad network allowlists and egress proxy
   filtering are out of scope for this pass; the product network model is
   closed, local, or open.
-- B has a first Codex for Linux slice: the conversation surface can show a live
-  active-workspace panel with screenshot, profile/policy/app metadata, Stop, and
-  Revoke. The side-by-side dev app and the installed user-facing app have both
-  been dogfooded inside a hidden workspace. The launcher now avoids inherited
-  renderer URLs, the live panel appears in the conversation view, and it hides
-  on Settings pages where the dedicated Agent Workspaces controls are shown. The
-  installed app was verified through Chrome DevTools Protocol with real MCP
-  bridge calls, a live screenshot, and Refresh interaction. A later installed
-  app dogfood pass verified the polished viewer with Refresh/Details/Stop/
-  Revoke controls, a Details tray for active window/running app/hidden display,
-  and an embedded Stop action that stops the workspace from inside the app. B
-  still needs the final UI approval boundary before it should become a hard
-  trust boundary.
+- B has pivoted away from the earlier Codex conversation embed. The
+  runtime-owned GPUI viewer is the intended serious UI surface, and the Codex
+  Desktop feature should stay a thin launcher/settings bridge that does not
+  revive the embedded screenshot panel. The viewer now provides a compact
+  host-visible window with workspace observation, screen streaming, task/isolation
+  footer context, app/event/log/artifact affordances, live read-only/paused/active
+  control, Stop/Clean/Revoke paths, persisted size/position, default non-topmost
+  behavior, and opt-in topmost behavior. `workspace_doctor` reports
+  hidden-workspace readiness separately from host-visible viewer readiness so
+  desktop sessions and headless hosts can be diagnosed without guessing. B still
+  needs broader compositor validation and final UI approval review before it
+  should become a hard trust boundary.
 - C is partially covered. Desktop QA, local-dev browser QA, arbitrary startup
   app configuration, PID-less arbitrary app window targeting, and
   recovery/inspection flows work at the primitive level.
@@ -167,8 +244,10 @@ Current gate status on 2026-05-25:
   explicitly user-approved browser data directories. The installed MCP path has
   also proven that template end to end with a synthetic Chrome profile: approval
   preview, real startup, visible Chrome window, mounted browser-data read/write,
-  screenshots/observe/artifacts, stop, profile deletion, and stale cleanup. Live
-  real-account dogfood is still needed before making that path the default
+  screenshots, read-only observation, workspace-owned browser target discovery,
+  page snapshot, navigation, browser action events, artifacts, stop, profile
+  deletion, and stale cleanup. Live real-account dogfood is still needed before making
+  that path the default
   recommendation for shopping-style tasks.
 
 ### A. Prove Runtime Claims With Real Workloads
@@ -181,6 +260,18 @@ Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
 - Validated: Chrome/Chromium launches inside the agent workspace and is
   controllable through workspace-local window, keyboard, and paste operations
   without stealing the host desktop.
+- Validated: Chrome/Chromium launches inside the agent workspace with an
+  ephemeral `DevToolsActivePort` endpoint. `workspace_browser_targets`,
+  `workspace_browser_snapshot`, `workspace_browser_search_results`, and
+  `workspace_browser_navigate` expose target discovery, page readback,
+  structured search/product card extraction, GPU VRAM filtering, and navigation
+  through the repo-owned MCP by deriving the endpoint from the running workspace
+  app and approved/copied browser profile path. Browser tool responses warn if
+  activity events cannot be recorded in the workspace event log, so stale
+  runtime/version skew is visible to the agent and user. This lets
+  browser/shopping automation inspect and navigate the workspace browser
+  through MCP tools instead of attaching to the user's host Chrome bridge or
+  using external browser-control workarounds.
 - Validated: workspace QA has run against this repo, Codex for Linux, and
   `agent-chrome-bridge`, including local dev server/browser paths and
   project-mounted test commands.
@@ -199,19 +290,23 @@ Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
 - Keep the user-facing network model to closed, local, or open. Do not treat
   broad host allowlists or egress proxy filtering as part of this gate.
 
-### B. Embed Workspace Visibility In Conversation
+### B. Provide Native Workspace Visibility
 
-Before final permission hardening, the user should be able to see what the agent
-is doing without leaving the conversation flow:
+Before final permission hardening, the user should be able to see and control
+what the agent is doing without depending on a Codex-only conversation embed:
 
-- Embed the active workspace view in the Codex conversation surface.
-- Show when a hidden workspace is active, which profile/policy is applied, and
-  which apps are running.
-- Provide obvious stop/revoke controls near the embedded view.
-- Surface screenshots or live view updates from the workspace, not only status
-  JSON.
-- Keep the settings page for saved environments, but make the conversation view
-  the place where live agent activity is visible.
+- Use the runtime-owned GPUI viewer as the canonical visible surface.
+- Keep the viewer small, movable, resizable, readable, and not always-on-top by
+  default; topmost behavior must stay an explicit opt-in.
+- Show when a hidden workspace is active, which profile/policy is applied, which
+  app/window is active, and what kind of task the agent appears to be doing.
+- Provide obvious live controls for read-only, paused, active, Stop, Clean, and
+  Revoke, while keeping safety stop available even when mutation is paused.
+- Surface screenshots or live view updates from the workspace only when the user
+  enables that stream, and reuse frame files so polling does not create an
+  unbounded screenshot pile.
+- Keep Codex Desktop as a thin settings/launcher integration that opens the
+  native viewer and preserves configured MCP ceilings.
 
 ### C. Validate Capability Coverage
 

@@ -1,9 +1,12 @@
 mod approval;
+mod browser;
+mod control;
 mod guardrails;
 mod permissions;
 mod policy;
 mod profile;
 mod server;
+mod viewer;
 mod workspace;
 
 use anyhow::{bail, Context, Result};
@@ -25,7 +28,7 @@ async fn main() -> Result<()> {
         Some("mcp") => {
             args.remove(0);
             match parse_mcp_options(&args, permissions)? {
-                Some(permissions) => server::serve_mcp(permissions).await,
+                Some(options) => server::serve_mcp(options.permissions, options.headless).await,
                 None => Ok(()),
             }
         }
@@ -41,6 +44,35 @@ async fn main() -> Result<()> {
             args.remove(0);
             handle_workspace(args, &permissions)
         }
+        Some("viewer") => {
+            args.remove(0);
+            if let Some(command) = args.first().map(String::as_str) {
+                match command {
+                    "list" => {
+                        parse_no_options(&args[1..], "viewer list")?;
+                        return print_json(&viewer::list_viewers()?);
+                    }
+                    "close" => {
+                        let close = parse_viewer_close_options(&args[1..])?;
+                        return print_json(&viewer::close_viewers(
+                            close.id,
+                            close.all,
+                            close.dry_run,
+                        )?);
+                    }
+                    _ => {}
+                }
+            }
+            match parse_viewer_options(&args)? {
+                Some(mut options) => {
+                    if permissions.configured || permissions.restricted {
+                        options.permissions = permissions;
+                    }
+                    viewer::run(options)
+                }
+                None => Ok(()),
+            }
+        }
         Some("daemon") => {
             args.remove(0);
             workspace::run_daemon(parse_daemon_options(args)?)
@@ -51,7 +83,7 @@ async fn main() -> Result<()> {
         }
         Some(command) => {
             bail!(
-                "unknown command '{command}'. Expected one of: doctor, guardrails, mcp, permissions, profile, workspace, --help"
+                "unknown command '{command}'. Expected one of: doctor, guardrails, mcp, permissions, profile, workspace, viewer, --help"
             )
         }
     }
@@ -59,10 +91,7 @@ async fn main() -> Result<()> {
 
 fn parse_global_options(args: &mut Vec<String>) -> Result<permissions::McpPermissionState> {
     let mut permissions_path = None;
-    loop {
-        let Some(arg) = args.first() else {
-            break;
-        };
+    while let Some(arg) = args.first() {
         if let Some(path) = arg.strip_prefix("--permissions=") {
             if path.is_empty() {
                 bail!("--permissions requires a path");
@@ -170,11 +199,17 @@ fn handle_permissions(args: Vec<String>) -> Result<()> {
     }
 }
 
+struct McpOptions {
+    permissions: permissions::McpPermissionState,
+    headless: bool,
+}
+
 fn parse_mcp_options(
     args: &[String],
     default_permissions: permissions::McpPermissionState,
-) -> Result<Option<permissions::McpPermissionState>> {
+) -> Result<Option<McpOptions>> {
     let mut permissions_path = None;
+    let mut headless = false;
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -195,19 +230,127 @@ fn parse_mcp_options(
                 permissions_path = Some(PathBuf::from(path));
                 index += 1;
             }
+            "--headless" => {
+                headless = true;
+                index += 1;
+            }
             "--help" | "-h" => {
                 print_mcp_help();
                 return Ok(None);
             }
             unknown => {
-                bail!("unknown mcp option '{unknown}'. Expected: --permissions PATH, --help")
+                bail!(
+                    "unknown mcp option '{unknown}'. Expected: --permissions PATH, --headless, --help"
+                )
             }
         }
     }
-    match permissions_path {
-        Some(path) => Ok(Some(permissions::load_mcp_permission_state(path)?)),
-        None => Ok(Some(default_permissions)),
+    let permissions = match permissions_path {
+        Some(path) => permissions::load_mcp_permission_state(path)?,
+        None => default_permissions,
+    };
+    Ok(Some(McpOptions {
+        permissions,
+        headless,
+    }))
+}
+
+fn parse_viewer_options(args: &[String]) -> Result<Option<viewer::ViewerOptions>> {
+    let mut options = viewer::ViewerOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if let Some(id) = arg.strip_prefix("--id=") {
+            if id.is_empty() {
+                bail!("--id requires a workspace id");
+            }
+            options.id = id.to_string();
+            index += 1;
+            continue;
+        }
+        match arg.as_str() {
+            "--always-on-top" => {
+                options.always_on_top = true;
+                index += 1;
+            }
+            "--exit-when-workspace-gone" => {
+                options.exit_when_workspace_gone = true;
+                index += 1;
+            }
+            "--id" => {
+                index += 1;
+                let Some(id) = args.get(index) else {
+                    bail!("--id requires a workspace id");
+                };
+                options.id = id.clone();
+                index += 1;
+            }
+            "--help" | "-h" => {
+                print_viewer_help();
+                return Ok(None);
+            }
+            unknown => bail!(
+                "unknown viewer option '{unknown}'. Expected: --id ID, --always-on-top, --exit-when-workspace-gone, --help"
+            ),
+        }
     }
+    Ok(Some(options))
+}
+
+struct ViewerCloseOptions {
+    id: Option<String>,
+    all: bool,
+    dry_run: bool,
+}
+
+fn parse_viewer_close_options(args: &[String]) -> Result<ViewerCloseOptions> {
+    let mut id = None;
+    let mut all = false;
+    let mut dry_run = false;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if let Some(value) = arg.strip_prefix("--id=") {
+            if value.is_empty() {
+                bail!("--id requires a workspace id");
+            }
+            id = Some(value.to_string());
+            index += 1;
+            continue;
+        }
+        match arg.as_str() {
+            "--id" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    bail!("--id requires a workspace id");
+                };
+                id = Some(value.clone());
+                index += 1;
+            }
+            "--all" => {
+                all = true;
+                index += 1;
+            }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            "--help" | "-h" => {
+                print_viewer_help();
+                std::process::exit(0);
+            }
+            unknown => bail!(
+                "unknown viewer close option '{unknown}'. Expected: --id ID, --all, --dry-run, --help"
+            ),
+        }
+    }
+    if id.is_some() && all {
+        bail!("viewer close accepts either --id ID or --all, not both");
+    }
+    if id.is_none() && !all {
+        bail!("viewer close requires --id ID or --all");
+    }
+    Ok(ViewerCloseOptions { id, all, dry_run })
 }
 
 fn handle_workspace(
@@ -216,7 +359,7 @@ fn handle_workspace(
 ) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(
-            "missing workspace command. Expected: start, open-profile, list, cleanup, status, manifest, artifacts, ipc-info, env, launch, run, launch-profile-apps, apps, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+            "missing workspace command. Expected: start, open-profile, list, cleanup, status, manifest, artifacts, ipc-info, env, launch, run, launch-profile-apps, apps, browser-targets, browser-snapshot, browser-search-results, browser-navigate, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
         );
     };
     match command {
@@ -346,6 +489,58 @@ fn handle_workspace(
                 parsed.command_contains,
                 parsed.profile_id,
                 parsed.running,
+            )?)
+        }
+        "browser-targets" => {
+            let parsed = parse_browser_targets_options(&args[1..])?;
+            print_json(&browser::workspace_browser_targets(
+                &parsed.id,
+                parsed.app_id,
+                parsed.user_data_dir,
+                parsed.timeout_ms,
+            )?)
+        }
+        "browser-snapshot" => {
+            let parsed = parse_browser_snapshot_options(&args[1..])?;
+            print_json(&browser::workspace_browser_snapshot(
+                &parsed.id,
+                parsed.app_id,
+                parsed.user_data_dir,
+                parsed.target_id,
+                parsed.title_contains,
+                parsed.url_contains,
+                parsed.max_text_chars,
+                parsed.timeout_ms,
+            )?)
+        }
+        "browser-search-results" => {
+            let parsed = parse_browser_search_results_options(&args[1..])?;
+            print_json(&browser::workspace_browser_search_results(
+                &parsed.id,
+                parsed.app_id,
+                parsed.user_data_dir,
+                parsed.target_id,
+                parsed.title_contains,
+                parsed.url_contains,
+                parsed.max_results,
+                parsed.min_vram_gb,
+                parsed.timeout_ms,
+            )?)
+        }
+        "browser-navigate" => {
+            let parsed = parse_browser_navigate_options(&args[1..])?;
+            print_json(&browser::workspace_browser_navigate(
+                &parsed.id,
+                parsed.app_id,
+                parsed.user_data_dir,
+                parsed.target_id,
+                parsed.title_contains,
+                parsed.url_contains,
+                parsed.url,
+                parsed.wait_ms,
+                parsed.snapshot,
+                parsed.max_text_chars,
+                parsed.timeout_ms,
             )?)
         }
         "windows" => {
@@ -762,7 +957,7 @@ fn handle_workspace(
         unknown => {
             bail!(
                 "unknown workspace command '{unknown}'. Expected: {}",
-                "start, open-profile, list, cleanup, status, manifest, artifacts, ipc-info, env, launch, run, launch-profile-apps, apps, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
+                "start, open-profile, list, cleanup, status, manifest, artifacts, ipc-info, env, launch, run, launch-profile-apps, apps, browser-targets, browser-snapshot, browser-search-results, browser-navigate, windows, active-window, pointer, observe, wait-window, screenshot, screenshot-window, focus-window, close-window, move-window, resize-window, raise-window, minimize-window, show-window, click, click-window, move-pointer, move-pointer-window, drag, drag-window, scroll, scroll-window, key, key-window, type, type-window, clipboard-set, clipboard-get, paste, paste-window, logs, wait-app, events, setup, kill-app, stop"
             )
         }
     }
@@ -1027,6 +1222,325 @@ struct ParsedAppsOptions {
     running: Option<bool>,
 }
 
+struct ParsedBrowserTargetsOptions {
+    id: String,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    timeout_ms: Option<u64>,
+}
+
+struct ParsedBrowserSnapshotOptions {
+    id: String,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    max_text_chars: Option<usize>,
+    timeout_ms: Option<u64>,
+}
+
+struct ParsedBrowserSearchResultsOptions {
+    id: String,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    max_results: Option<usize>,
+    min_vram_gb: Option<u32>,
+    timeout_ms: Option<u64>,
+}
+
+struct ParsedBrowserNavigateOptions {
+    id: String,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    url: String,
+    wait_ms: Option<u64>,
+    snapshot: bool,
+    max_text_chars: Option<usize>,
+    timeout_ms: Option<u64>,
+}
+
+fn parse_browser_targets_options(args: &[String]) -> Result<ParsedBrowserTargetsOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut app_id = None;
+    let mut user_data_dir = None;
+    let mut timeout_ms = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--user-data-dir" => {
+                user_data_dir = Some(PathBuf::from(value_after(args, index, "--user-data-dir")?));
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            flag => bail!("unknown workspace browser-targets option '{flag}'"),
+        }
+    }
+    Ok(ParsedBrowserTargetsOptions {
+        id,
+        app_id,
+        user_data_dir,
+        timeout_ms,
+    })
+}
+
+fn parse_browser_snapshot_options(args: &[String]) -> Result<ParsedBrowserSnapshotOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut app_id = None;
+    let mut user_data_dir = None;
+    let mut target_id = None;
+    let mut title_contains = None;
+    let mut url_contains = None;
+    let mut max_text_chars = None;
+    let mut timeout_ms = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--user-data-dir" => {
+                user_data_dir = Some(PathBuf::from(value_after(args, index, "--user-data-dir")?));
+                index += 2;
+            }
+            "--target" => {
+                target_id = Some(value_after(args, index, "--target")?.to_string());
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--url-contains" => {
+                url_contains = Some(value_after(args, index, "--url-contains")?.to_string());
+                index += 2;
+            }
+            "--max-text-chars" => {
+                max_text_chars = Some(
+                    value_after(args, index, "--max-text-chars")?
+                        .parse()
+                        .context("--max-text-chars must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            flag => bail!("unknown workspace browser-snapshot option '{flag}'"),
+        }
+    }
+    Ok(ParsedBrowserSnapshotOptions {
+        id,
+        app_id,
+        user_data_dir,
+        target_id,
+        title_contains,
+        url_contains,
+        max_text_chars,
+        timeout_ms,
+    })
+}
+
+fn parse_browser_search_results_options(
+    args: &[String],
+) -> Result<ParsedBrowserSearchResultsOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut app_id = None;
+    let mut user_data_dir = None;
+    let mut target_id = None;
+    let mut title_contains = None;
+    let mut url_contains = None;
+    let mut max_results = None;
+    let mut min_vram_gb = None;
+    let mut timeout_ms = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--user-data-dir" => {
+                user_data_dir = Some(PathBuf::from(value_after(args, index, "--user-data-dir")?));
+                index += 2;
+            }
+            "--target" => {
+                target_id = Some(value_after(args, index, "--target")?.to_string());
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--url-contains" => {
+                url_contains = Some(value_after(args, index, "--url-contains")?.to_string());
+                index += 2;
+            }
+            "--max-results" => {
+                max_results = Some(
+                    value_after(args, index, "--max-results")?
+                        .parse()
+                        .context("--max-results must be a positive integer")?,
+                );
+                index += 2;
+            }
+            "--min-vram-gb" => {
+                min_vram_gb = Some(
+                    value_after(args, index, "--min-vram-gb")?
+                        .parse()
+                        .context("--min-vram-gb must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            flag => bail!("unknown workspace browser-search-results option '{flag}'"),
+        }
+    }
+    Ok(ParsedBrowserSearchResultsOptions {
+        id,
+        app_id,
+        user_data_dir,
+        target_id,
+        title_contains,
+        url_contains,
+        max_results,
+        min_vram_gb,
+        timeout_ms,
+    })
+}
+
+fn parse_browser_navigate_options(args: &[String]) -> Result<ParsedBrowserNavigateOptions> {
+    let mut id = workspace::default_workspace_id();
+    let mut app_id = None;
+    let mut user_data_dir = None;
+    let mut target_id = None;
+    let mut title_contains = None;
+    let mut url_contains = None;
+    let mut url = None;
+    let mut wait_ms = None;
+    let mut snapshot = true;
+    let mut max_text_chars = None;
+    let mut timeout_ms = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                id = value_after(args, index, "--id")?.to_string();
+                index += 2;
+            }
+            "--app" => {
+                app_id = Some(value_after(args, index, "--app")?.to_string());
+                index += 2;
+            }
+            "--user-data-dir" => {
+                user_data_dir = Some(PathBuf::from(value_after(args, index, "--user-data-dir")?));
+                index += 2;
+            }
+            "--target" => {
+                target_id = Some(value_after(args, index, "--target")?.to_string());
+                index += 2;
+            }
+            "--title" => {
+                title_contains = Some(value_after(args, index, "--title")?.to_string());
+                index += 2;
+            }
+            "--url-contains" => {
+                url_contains = Some(value_after(args, index, "--url-contains")?.to_string());
+                index += 2;
+            }
+            "--wait-ms" => {
+                wait_ms = Some(
+                    value_after(args, index, "--wait-ms")?
+                        .parse()
+                        .context("--wait-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--no-snapshot" => {
+                snapshot = false;
+                index += 1;
+            }
+            "--max-text-chars" => {
+                max_text_chars = Some(
+                    value_after(args, index, "--max-text-chars")?
+                        .parse()
+                        .context("--max-text-chars must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            "--timeout-ms" => {
+                timeout_ms = Some(
+                    value_after(args, index, "--timeout-ms")?
+                        .parse()
+                        .context("--timeout-ms must be a non-negative integer")?,
+                );
+                index += 2;
+            }
+            value if !value.starts_with('-') && url.is_none() => {
+                url = Some(value.to_string());
+                index += 1;
+            }
+            flag => bail!("unknown workspace browser-navigate option '{flag}'"),
+        }
+    }
+    let url = url.context("workspace browser-navigate requires a URL")?;
+    Ok(ParsedBrowserNavigateOptions {
+        id,
+        app_id,
+        user_data_dir,
+        target_id,
+        title_contains,
+        url_contains,
+        url,
+        wait_ms,
+        snapshot,
+        max_text_chars,
+        timeout_ms,
+    })
+}
+
 fn parse_apps_options(args: &[String]) -> Result<ParsedAppsOptions> {
     let mut id = workspace::default_workspace_id();
     let mut app_id = None;
@@ -1084,6 +1598,7 @@ fn parse_apps_options(args: &[String]) -> Result<ParsedAppsOptions> {
     })
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_windows_options(
     args: &[String],
 ) -> Result<(
@@ -1202,6 +1717,7 @@ fn parse_permissions_validate_options(args: &[String]) -> Result<PathBuf> {
     json_path.context("permissions validate requires --json PATH")
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_permissions_template_options(
     args: &[String],
 ) -> Result<(String, Vec<String>, Vec<ProfileMount>, Vec<PathBuf>)> {
@@ -1288,6 +1804,7 @@ fn parse_profile_json_file_options(
     Ok((json_path, replace, dry_run))
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_profile_template_options(
     args: &[String],
 ) -> Result<(
@@ -1898,6 +2415,7 @@ fn parse_screenshot_window_options(args: &[String]) -> Result<ScreenshotWindowOp
     ))
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_wait_window_options(
     args: &[String],
 ) -> Result<(
@@ -2284,6 +2802,7 @@ fn parse_targeted_window_action_options(
     ))
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_click_options(args: &[String]) -> Result<(String, i32, i32, Option<u8>, Option<u8>)> {
     let mut id = workspace::default_workspace_id();
     let mut button = None;
@@ -3657,14 +4176,14 @@ fn shell_quote(value: &str) -> String {
 
 fn print_help() {
     println!(
-        "{}",
         r#"agent-workspace-linux
 
 Usage:
   agent-workspace-linux [--permissions PATH] <command>
   agent-workspace-linux doctor
   agent-workspace-linux guardrails
-  agent-workspace-linux mcp [--permissions PATH]
+  agent-workspace-linux mcp [--permissions PATH] [--headless]
+  agent-workspace-linux viewer [--id ID] [--always-on-top] [--exit-when-workspace-gone]
   agent-workspace-linux permissions validate --json PATH
   agent-workspace-linux permissions template open|closed|local [--allow-host HOST] [--mount HOST:WORKSPACE[:read_only|read_write]] [--app PROGRAM]
   agent-workspace-linux profile path|list|get|check|validate|template|put|import|export|delete
@@ -3689,6 +4208,10 @@ Usage:
   agent-workspace-linux workspace run [--dry-run] [--id ID] [--name NAME] [--profile PROFILE] [--ack-unenforced-policy] [--cwd DIR] [--env NAME=VALUE] [--timeout-ms N] [--tail-bytes N] [--kill-on-timeout] -- COMMAND [ARGS...]
   agent-workspace-linux workspace launch-profile-apps [--dry-run] [--id ID] --profile PROFILE [--ack-unenforced-policy] [--wait-window] [--window-timeout-ms N] [--screenshot-window]
   agent-workspace-linux workspace apps [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--name TEXT] [--command TEXT] [--profile PROFILE] [--running|--stopped]
+  agent-workspace-linux workspace browser-targets [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--user-data-dir PATH] [--timeout-ms N]
+  agent-workspace-linux workspace browser-snapshot [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--user-data-dir PATH] [--target TARGET_ID] [--title TEXT] [--url-contains TEXT] [--max-text-chars N] [--timeout-ms N]
+  agent-workspace-linux workspace browser-search-results [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--user-data-dir PATH] [--target TARGET_ID] [--title TEXT] [--url-contains TEXT] [--max-results N] [--min-vram-gb N] [--timeout-ms N]
+  agent-workspace-linux workspace browser-navigate [--id ID] [--app APP_ID_OR_PID_OR_NAME] [--user-data-dir PATH] [--target TARGET_ID] [--title TEXT] [--url-contains TEXT] [--wait-ms N] [--no-snapshot] [--max-text-chars N] [--timeout-ms N] URL
   agent-workspace-linux workspace windows [--id ID] [--all] [--title TEXT] [--class TEXT] [--pid PID] [--app APP_ID_OR_PID_OR_NAME]
   agent-workspace-linux workspace active-window [--id ID]
   agent-workspace-linux workspace pointer [--id ID]
@@ -3745,14 +4268,128 @@ Usage:
 
 fn print_mcp_help() {
     println!(
-        "{}",
         r#"agent-workspace-linux mcp
 
 Usage:
-  agent-workspace-linux mcp [--permissions PATH]
+  agent-workspace-linux mcp [--permissions PATH] [--headless]
 
 Options:
-  --permissions PATH  Load a spawn-time MCP permission ceiling JSON file. Empty or omitted fields leave that dimension open; populated network, mounts, or app allowlist fields cap every MCP tool for this process.
+  --permissions PATH  Load a spawn-time MCP permission ceiling JSON file. If omitted, the MCP adds no ceiling and respects the host/client harness boundary. Empty fields in a file leave that dimension open; populated network, mounts, or app allowlist fields cap every MCP tool for this process.
+  --headless          Disable host-visible GPUI viewer launches from this MCP process. Without this flag, workspace_open_viewer may open the live monitor when the agent/user asks for it.
 "#
     );
+}
+
+fn print_viewer_help() {
+    println!(
+        r#"agent-workspace-linux viewer
+
+Usage:
+  agent-workspace-linux viewer [--id ID] [--always-on-top] [--exit-when-workspace-gone]
+  agent-workspace-linux viewer list
+  agent-workspace-linux viewer close (--id ID | --all) [--dry-run]
+
+Opens the small host-visible Agent Workspace GPUI monitor.
+The viewer runs outside the MCP stdio server and surfaces the selected isolated
+workspace without taking over the user's desktop.
+By default it does not request always-on-top state; --always-on-top opts into
+Wayland layer-shell or X11/Xwayland above hints for hosts that explicitly want
+that behavior.
+--exit-when-workspace-gone closes the viewer once the selected workspace runtime
+is removed; workspace_open_viewer uses this so MCP-launched monitors do not
+become orphan windows.
+The list and close subcommands use the repo-owned viewer registry, so they can
+inspect and close GPUI viewers even when the desktop compositor does not expose
+them as ordinary controllable windows.
+"#
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_open_mcp_permissions(state: &permissions::McpPermissionState) {
+        assert!(!state.restricted);
+        state
+            .validate_launch_spec(&LaunchSpec {
+                command: vec!["sh".to_string(), "-c".to_string(), "true".to_string()],
+                name: None,
+                profile_id: None,
+                applied_policy: None,
+                user_acknowledged_unenforced_policy: false,
+                cwd: None,
+                env: Vec::<EnvVar>::new(),
+            })
+            .expect("open MCP permissions should not restrict unprofiled launches");
+    }
+
+    #[test]
+    fn mcp_without_permissions_uses_harness_owned_open_boundary() {
+        let options = parse_mcp_options(&[], permissions::McpPermissionState::default())
+            .expect("parse mcp options")
+            .expect("mcp should start");
+
+        assert!(!options.headless);
+        assert!(!options.permissions.configured);
+        assert_open_mcp_permissions(&options.permissions);
+        assert!(
+            options.permissions.message.contains("host/client session"),
+            "default MCP message should point agents to the harness/session boundary"
+        );
+    }
+
+    #[test]
+    fn empty_mcp_permissions_file_is_configured_but_unrestricted() {
+        let path = std::env::temp_dir().join(format!(
+            "agent-workspace-empty-mcp-permissions-{}.json",
+            std::process::id()
+        ));
+        fs::write(&path, "{}\n").expect("write empty permissions file");
+        let args = vec![
+            "--permissions".to_string(),
+            path.display().to_string(),
+            "--headless".to_string(),
+        ];
+
+        let options = parse_mcp_options(&args, permissions::McpPermissionState::default())
+            .expect("parse mcp options")
+            .expect("mcp should start");
+        let _ = fs::remove_file(&path);
+
+        assert!(options.headless);
+        assert!(options.permissions.configured);
+        assert_open_mcp_permissions(&options.permissions);
+        assert!(
+            options
+                .permissions
+                .message
+                .contains("does not restrict network, mounts, or app launches"),
+            "empty permissions file should be advisory/open, not a forced MCP sandbox"
+        );
+    }
+
+    #[test]
+    fn viewer_always_on_top_is_opt_in() {
+        let default_options = parse_viewer_options(&[])
+            .expect("parse viewer options")
+            .expect("viewer should run");
+        assert!(!default_options.always_on_top);
+        assert!(!default_options.exit_when_workspace_gone);
+
+        let args = vec!["--always-on-top".to_string()];
+        let always_options = parse_viewer_options(&args)
+            .expect("parse viewer options")
+            .expect("viewer should run");
+        assert!(always_options.always_on_top);
+    }
+
+    #[test]
+    fn viewer_exit_when_workspace_gone_is_opt_in() {
+        let args = vec!["--exit-when-workspace-gone".to_string()];
+        let options = parse_viewer_options(&args)
+            .expect("parse viewer options")
+            .expect("viewer should run");
+        assert!(options.exit_when_workspace_gone);
+    }
 }

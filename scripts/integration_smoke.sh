@@ -20,6 +20,12 @@ cargo build --manifest-path "$ROOT_DIR/Cargo.toml" >/dev/null
 if command -v node >/dev/null 2>&1; then
   echo "== mcp permissions smoke =="
   AGENT_WORKSPACE_BIN="$BIN" node "$ROOT_DIR/scripts/mcp_permissions_smoke.js"
+  echo "== non-headless mcp viewer smoke =="
+  AGENT_WORKSPACE_BIN="$BIN" node "$ROOT_DIR/scripts/mcp_non_headless_viewer_smoke.js"
+  echo "== no-host-display mcp viewer smoke =="
+  AGENT_WORKSPACE_BIN="$BIN" node "$ROOT_DIR/scripts/mcp_no_host_display_viewer_smoke.js"
+  echo "== clean mcp permissions smoke =="
+  AGENT_WORKSPACE_BIN="$BIN" node "$ROOT_DIR/scripts/mcp_clean_permissions_smoke.js"
 else
   echo "== mcp permissions smoke skipped: node not found =="
 fi
@@ -215,6 +221,8 @@ if [[ -n "$BROWSER_BIN" ]]; then
   WORKSPACE_IDS+=("$BROWSER_SESSION_ID")
   run_awl workspace open-profile --ack-hidden-workspace --profile browser-session-smoke --id "$BROWSER_SESSION_ID" --purpose "Browser session smoke" --startup-wait-window --startup-screenshot-window --startup-window-timeout-ms 20000 > "$SMOKE_DIR/browser-session-open.json"
   assert_json '.ready == true and .startup_launched == true and .startup.launched[0].ok == true and (.startup.launched[0].screenshot.bytes > 0) and .startup.launched[0].apps[0].profile_id == "browser-session-smoke"' "$SMOKE_DIR/browser-session-open.json"
+  run_awl workspace observe --id "$BROWSER_SESSION_ID" --screenshot --events --events-tail 20 > "$SMOKE_DIR/browser-session-observe.json"
+  assert_json '(.screenshot.bytes > 0) and (.active_window.title | length > 0) and (.apps[] | select(.name == "browser-session-no-sandbox" and .running == true and .profile_id == "browser-session-smoke")) and (.events | length > 0)' "$SMOKE_DIR/browser-session-observe.json"
   run_awl workspace run --id "$BROWSER_SESSION_ID" --name browser-session-mount-probe --timeout-ms 8000 --tail-bytes 4000 -- bash -lc 'printf browser-session-write-ok > /workspace/browser-user-data/session-write.txt' > "$SMOKE_DIR/browser-session-mount-probe.json"
   assert_json '.succeeded == true and .launch.apps[0].mount_isolation == "bubblewrap_mount_namespace"' "$SMOKE_DIR/browser-session-mount-probe.json"
   grep -q '^browser-session-write-ok$' "$BROWSER_SESSION_DATA/session-write.txt"
@@ -555,6 +563,9 @@ PY
   assert_json '(.screenshot.bytes > 0) and (.active_window.title | contains("typed:typed-ok"))' "$SMOKE_DIR/native-browser-observe.json"
   run_awl workspace stop --id "$NATIVE_BROWSER_ID" > "$SMOKE_DIR/native-browser-stop.json"
   assert_json '.ok == true and (.apps[] | select(.name == "browser-native-input" and .running == false))' "$SMOKE_DIR/native-browser-stop.json"
+
+  echo "== grocery browser workflow workspace =="
+  AGENT_WORKSPACE_BIN="$BIN" BROWSER_BIN="$BROWSER_BIN" "$ROOT_DIR/scripts/grocery_browser_workflow_smoke.sh"
 else
   echo "== browser local-dev and native input workspaces skipped: Chrome/Chromium not found =="
 fi

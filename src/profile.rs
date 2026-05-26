@@ -455,7 +455,7 @@ pub fn template_profile(
             WorkspaceProfile {
                 id,
                 description: Some(
-                    "Chrome with workspace networking disabled. Uses --no-sandbox because Chrome's SUID sandbox may abort inside the bubblewrap network namespace; use an isolated browser profile and edit the browser path if needed.".to_string(),
+                    "Chrome with workspace networking disabled. Uses --no-sandbox because Chrome's SUID sandbox may abort inside the bubblewrap network namespace; use an isolated browser profile and edit the browser path if needed. Exposes Chrome DevTools on an ephemeral loopback port for workspace-owned browser control.".to_string(),
                 ),
                 width: Some(1280),
                 height: Some(800),
@@ -475,6 +475,8 @@ pub fn template_profile(
                         "--user-data-dir=/tmp/agent-workspace-chrome-restricted".to_string(),
                         "--no-sandbox".to_string(),
                         "--disable-dev-shm-usage".to_string(),
+                        "--remote-debugging-address=127.0.0.1".to_string(),
+                        "--remote-debugging-port=0".to_string(),
                         "--no-first-run".to_string(),
                         "--no-default-browser-check".to_string(),
                         "--new-window".to_string(),
@@ -496,7 +498,7 @@ pub fn template_profile(
             WorkspaceProfile {
                 id,
                 description: Some(
-                    "Browser session profile with the selected user-data directory mounted read-write. Use only with explicit user approval; close the host browser or point to a copied profile to avoid profile lock/corruption. Uses --no-sandbox because Chrome can abort inside the enforced bubblewrap mount namespace.".to_string(),
+                    "Browser session profile with the selected user-data directory mounted read-write. Use only with explicit user approval; close the host browser or point to a copied profile to avoid profile lock/corruption. Uses --no-sandbox because Chrome can abort inside the enforced bubblewrap mount namespace. Exposes Chrome DevTools on an ephemeral loopback port for workspace-owned browser control.".to_string(),
                 ),
                 width: Some(1280),
                 height: Some(800),
@@ -517,6 +519,8 @@ pub fn template_profile(
                         "--user-data-dir=/workspace/browser-user-data".to_string(),
                         "--no-sandbox".to_string(),
                         "--disable-dev-shm-usage".to_string(),
+                        "--remote-debugging-address=127.0.0.1".to_string(),
+                        "--remote-debugging-port=0".to_string(),
                         "--no-first-run".to_string(),
                         "--no-default-browser-check".to_string(),
                         "--new-window".to_string(),
@@ -1030,7 +1034,7 @@ pub fn preview_open_profile_workspace(
     )?;
     let launch_plan_allowed = setup
         .as_ref()
-        .map_or(true, |setup| setup.all_launches_allowed_by_policy)
+        .is_none_or(|setup| setup.all_launches_allowed_by_policy)
         && startup.all_launches_allowed_by_policy;
     let would_open = start_preview.ok_to_start && launch_plan_allowed;
     let message = if would_open {
@@ -1727,11 +1731,20 @@ mod tests {
         let description = profile.description.as_deref().unwrap_or_default();
         assert!(description.contains("networking disabled"));
         assert!(description.contains("--no-sandbox"));
+        assert!(description.contains("DevTools"));
         assert_eq!(profile.startup_apps.len(), 1);
         let app = &profile.startup_apps[0];
         assert_eq!(app.name.as_deref(), Some("restricted-chrome-no-sandbox"));
         assert_eq!(app.command[0], "/usr/bin/google-chrome");
         assert!(app.command.iter().any(|arg| arg == "--no-sandbox"));
+        assert!(app
+            .command
+            .iter()
+            .any(|arg| arg == "--remote-debugging-address=127.0.0.1"));
+        assert!(app
+            .command
+            .iter()
+            .any(|arg| arg == "--remote-debugging-port=0"));
         assert!(app.command.iter().any(|arg| arg == "about:blank"));
     }
 
@@ -1752,6 +1765,7 @@ mod tests {
         let description = profile.description.as_deref().unwrap_or_default();
         assert!(description.contains("explicit user approval"));
         assert!(description.contains("--no-sandbox"));
+        assert!(description.contains("DevTools"));
         assert_eq!(profile.mounts.len(), 1);
         assert_eq!(
             profile.mounts[0].workspace_path,
@@ -1766,6 +1780,14 @@ mod tests {
             .iter()
             .any(|arg| arg == "--user-data-dir=/workspace/browser-user-data"));
         assert!(app.command.iter().any(|arg| arg == "--no-sandbox"));
+        assert!(app
+            .command
+            .iter()
+            .any(|arg| arg == "--remote-debugging-address=127.0.0.1"));
+        assert!(app
+            .command
+            .iter()
+            .any(|arg| arg == "--remote-debugging-port=0"));
     }
 
     #[test]

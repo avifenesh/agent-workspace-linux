@@ -49,6 +49,7 @@ const MAX_UNIX_SOCKET_PATH_BYTES: usize = 107;
 const APPLIED_POLICY_FILE: &str = "applied_policy.json";
 const EVENT_LOG_FILE: &str = "events.jsonl";
 const WORKSPACE_MANIFEST_FILE: &str = "workspace.json";
+const OBSERVE_SCREENSHOT_FILE: &str = "observe-frame.png";
 const LINUX_DELETED_EXE_SUFFIX: &str = " (deleted)";
 
 unsafe extern "C" {
@@ -101,8 +102,11 @@ impl FromStr for ScrollDirection {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DoctorReport {
     pub runtime: RuntimeReport,
+    pub viewer: ViewerRuntimeReport,
     pub ready_for_x11_workspace: bool,
+    pub ready_for_host_viewer: bool,
     pub blockers: Vec<String>,
+    pub viewer_blockers: Vec<String>,
     pub recommended_next_step: String,
 }
 
@@ -118,6 +122,13 @@ pub struct RuntimeReport {
     pub screenshot: Check,
     pub clipboard: Check,
     pub policy: PolicyRuntimeCapabilities,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ViewerRuntimeReport {
+    pub host_display: Check,
+    pub source_build_xkbcommon_x11: Check,
+    pub host_opener: Check,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -489,6 +500,31 @@ pub struct WorkspaceScreenshot {
     pub format: String,
     pub bytes: u64,
     pub captured_at_unix: u64,
+    #[serde(default)]
+    pub source: WorkspaceScreenshotSource,
+    #[serde(default)]
+    pub target: WorkspaceScreenshotTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceScreenshotSource {
+    #[default]
+    WorkspaceScreenshot,
+    WorkspaceObserve,
+    WorkspaceScreenshotWindow,
+    WorkspaceLaunchWindow,
+    ViewerStream,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceScreenshotTarget {
+    #[default]
+    Root,
+    Window,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -577,6 +613,7 @@ pub struct WorkspaceEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum IpcRequest {
     IpcInfo,
     Environment,
@@ -640,6 +677,8 @@ pub enum IpcRequest {
     },
     Screenshot {
         output_path: Option<PathBuf>,
+        #[serde(default)]
+        source: WorkspaceScreenshotSource,
     },
     ScreenshotWindow {
         window_id: Option<String>,
@@ -841,9 +880,50 @@ pub enum IpcRequest {
         #[serde(default)]
         kill_on_timeout: bool,
     },
+    BrowserTargets {
+        app_id: Option<String>,
+        user_data_dir: Option<PathBuf>,
+        timeout_ms: Option<u64>,
+    },
+    BrowserSnapshot {
+        app_id: Option<String>,
+        user_data_dir: Option<PathBuf>,
+        target_id: Option<String>,
+        title_contains: Option<String>,
+        url_contains: Option<String>,
+        max_text_chars: Option<usize>,
+        timeout_ms: Option<u64>,
+    },
+    BrowserSearchResults {
+        app_id: Option<String>,
+        user_data_dir: Option<PathBuf>,
+        target_id: Option<String>,
+        title_contains: Option<String>,
+        url_contains: Option<String>,
+        max_results: Option<usize>,
+        min_vram_gb: Option<u32>,
+        timeout_ms: Option<u64>,
+    },
+    BrowserNavigate {
+        app_id: Option<String>,
+        user_data_dir: Option<PathBuf>,
+        target_id: Option<String>,
+        title_contains: Option<String>,
+        url_contains: Option<String>,
+        url: String,
+        wait_ms: Option<u64>,
+        snapshot: bool,
+        max_text_chars: Option<usize>,
+        timeout_ms: Option<u64>,
+    },
     ReadEvents {
         tail: Option<usize>,
         since_sequence: Option<u64>,
+    },
+    RecordEvent {
+        kind: String,
+        #[serde(default)]
+        detail: serde_json::Value,
     },
     KillApp {
         app_id: String,
@@ -882,6 +962,14 @@ pub struct IpcResponse {
     pub clipboard: Option<WorkspaceClipboard>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<Vec<WorkspaceEvent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_targets: Option<crate::browser::WorkspaceBrowserTargets>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_snapshot: Option<crate::browser::WorkspaceBrowserSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_search_results: Option<crate::browser::WorkspaceBrowserSearchResults>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_navigate: Option<crate::browser::WorkspaceBrowserNavigate>,
 }
 
 pub fn default_workspace_id() -> String {
@@ -909,6 +997,11 @@ pub fn doctor_report() -> DoctorReport {
         screenshot: first_available_command(&["import", "scrot"]),
         clipboard: first_available_command(&["xclip", "xsel"]),
         policy: policy_runtime_capabilities(),
+    };
+    let viewer = ViewerRuntimeReport {
+        host_display: host_display_check(),
+        source_build_xkbcommon_x11: pkg_config_package_check("xkbcommon-x11"),
+        host_opener: first_available_command(&["xdg-open", "gio"]),
     };
 
     let mut blockers = Vec::new();
@@ -943,7 +1036,16 @@ pub fn doctor_report() -> DoctorReport {
         blockers.push("Install ImageMagick import or scrot for workspace screenshots.".to_string());
     }
 
+    let mut viewer_blockers = Vec::new();
+    if !viewer.host_display.ok {
+        viewer_blockers.push(
+            "Start the MCP from a desktop session with DISPLAY or WAYLAND_DISPLAY, or use `mcp --headless` for hosts that must never open a viewer."
+                .to_string(),
+        );
+    }
+
     let ready_for_x11_workspace = blockers.is_empty();
+    let ready_for_host_viewer = viewer_blockers.is_empty();
     let recommended_next_step = if ready_for_x11_workspace {
         "Run `agent-workspace-linux workspace start`, then launch apps into the workspace."
             .to_string()
@@ -954,8 +1056,11 @@ pub fn doctor_report() -> DoctorReport {
 
     DoctorReport {
         runtime,
+        viewer,
         ready_for_x11_workspace,
+        ready_for_host_viewer,
         blockers,
+        viewer_blockers,
         recommended_next_step,
     }
 }
@@ -987,6 +1092,10 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             app_log: None,
             clipboard: None,
             events: None,
+            browser_targets: None,
+            browser_snapshot: None,
+            browser_search_results: None,
+            browser_navigate: None,
         }),
         WorkspaceStartPlan::Start(daemon_options) => {
             spawn_detached_daemon(&daemon_options)?;
@@ -1014,6 +1123,10 @@ pub fn preview_workspace_start(options: WorkspaceStartOptions) -> Result<IpcResp
         app_log: None,
         clipboard: None,
         events: None,
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     })
 }
 
@@ -1722,6 +1835,10 @@ pub fn preview_launch_app(
         app_log: None,
         clipboard: None,
         events: None,
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     })
 }
 
@@ -1936,13 +2053,33 @@ pub fn wait_window(
 }
 
 pub fn screenshot(id: &str, output_path: Option<PathBuf>) -> Result<IpcResponse> {
-    let id = sanitize_workspace_id(id)?;
-    request(
-        &workspace_socket_path(&id),
-        IpcRequest::Screenshot { output_path },
+    screenshot_with_source(
+        id,
+        output_path,
+        WorkspaceScreenshotSource::WorkspaceScreenshot,
     )
 }
 
+pub fn screenshot_for_viewer_stream(id: &str, output_path: Option<PathBuf>) -> Result<IpcResponse> {
+    screenshot_with_source(id, output_path, WorkspaceScreenshotSource::ViewerStream)
+}
+
+fn screenshot_with_source(
+    id: &str,
+    output_path: Option<PathBuf>,
+    source: WorkspaceScreenshotSource,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::Screenshot {
+            output_path,
+            source,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn screenshot_window(
     id: &str,
     window_id: Option<String>,
@@ -2033,6 +2170,7 @@ pub fn close_matching_window(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn move_window(
     id: &str,
     window_id: Option<String>,
@@ -2061,6 +2199,7 @@ pub fn move_window(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn resize_window(
     id: &str,
     window_id: Option<String>,
@@ -2184,6 +2323,7 @@ pub fn click(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn click_window(
     id: &str,
     window_id: Option<String>,
@@ -2228,6 +2368,7 @@ pub fn move_pointer(id: &str, x: i32, y: i32) -> Result<IpcResponse> {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn move_pointer_window(
     id: &str,
     window_id: Option<String>,
@@ -2280,6 +2421,7 @@ pub fn drag(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn drag_window(
     id: &str,
     window_id: Option<String>,
@@ -2339,6 +2481,7 @@ pub fn scroll(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn scroll_window(
     id: &str,
     window_id: Option<String>,
@@ -2382,6 +2525,7 @@ pub fn key(id: &str, key: String) -> Result<IpcResponse> {
     request(&workspace_socket_path(&id), IpcRequest::Key { key })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn key_window(
     id: &str,
     window_id: Option<String>,
@@ -2419,6 +2563,7 @@ pub fn type_text(id: &str, text: String) -> Result<IpcResponse> {
     request(&workspace_socket_path(&id), IpcRequest::TypeText { text })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn type_window(
     id: &str,
     window_id: Option<String>,
@@ -2472,6 +2617,7 @@ pub fn paste_text(id: &str, text: String, key: Option<String>) -> Result<IpcResp
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn paste_window(
     id: &str,
     window_id: Option<String>,
@@ -2543,6 +2689,109 @@ pub fn wait_app(
             app_id,
             timeout_ms: timeout_ms.unwrap_or(DEFAULT_APP_WAIT_TIMEOUT_MS),
             kill_on_timeout,
+        },
+    )
+}
+
+pub fn browser_targets(
+    id: &str,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::BrowserTargets {
+            app_id,
+            user_data_dir,
+            timeout_ms,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn browser_snapshot(
+    id: &str,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    max_text_chars: Option<usize>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::BrowserSnapshot {
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            max_text_chars,
+            timeout_ms,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn browser_search_results(
+    id: &str,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    max_results: Option<usize>,
+    min_vram_gb: Option<u32>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::BrowserSearchResults {
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            max_results,
+            min_vram_gb,
+            timeout_ms,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn browser_navigate(
+    id: &str,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    url: String,
+    wait_ms: Option<u64>,
+    snapshot: bool,
+    max_text_chars: Option<usize>,
+    timeout_ms: Option<u64>,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::BrowserNavigate {
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            url,
+            wait_ms,
+            snapshot,
+            max_text_chars,
+            timeout_ms,
         },
     )
 }
@@ -2647,6 +2896,21 @@ pub fn read_events(
             read_events_from_workspace_log(&id, tail, since_sequence)?.ok_or(ipc_error)
         }
     }
+}
+
+pub fn record_workspace_event(
+    id: &str,
+    kind: impl Into<String>,
+    detail: serde_json::Value,
+) -> Result<IpcResponse> {
+    let id = sanitize_workspace_id(id)?;
+    request(
+        &workspace_socket_path(&id),
+        IpcRequest::RecordEvent {
+            kind: kind.into(),
+            detail,
+        },
+    )
 }
 
 pub fn kill_app(id: &str, app_id: String, dry_run: bool) -> Result<IpcResponse> {
@@ -3226,6 +3490,88 @@ fn record_event(
     Ok(event)
 }
 
+fn validate_external_event_kind(kind: &str) -> Result<()> {
+    if matches!(
+        kind,
+        "browser_snapshot" | "browser_search_results" | "browser_navigate"
+    ) {
+        Ok(())
+    } else {
+        bail!("external workspace event kind {kind:?} is not allowed")
+    }
+}
+
+fn scalar_event_metadata(value: &serde_json::Value) -> bool {
+    value.is_null() || value.is_boolean() || value.is_number() || value.is_string()
+}
+
+fn copy_event_metadata_field(
+    input: &serde_json::Value,
+    output: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) {
+    if let Some(value) = input.get(field) {
+        if scalar_event_metadata(value) {
+            output.insert(field.to_string(), value.clone());
+        }
+    }
+}
+
+fn metadata_only_browser_event_detail(
+    kind: &str,
+    detail: serde_json::Value,
+) -> Result<serde_json::Value> {
+    validate_external_event_kind(kind)?;
+    let fields = match kind {
+        "browser_snapshot" => &[
+            "app_id",
+            "target_id",
+            "title",
+            "url",
+            "text_chars",
+            "text_truncated",
+        ][..],
+        "browser_search_results" => &[
+            "app_id",
+            "target_id",
+            "title",
+            "url",
+            "result_count",
+            "min_vram_gb",
+        ][..],
+        "browser_navigate" => &[
+            "app_id",
+            "target_id",
+            "url",
+            "frame_id",
+            "snapshot",
+            "title",
+            "current_url",
+        ][..],
+        _ => unreachable!("external event kind was already validated"),
+    };
+    let mut sanitized = serde_json::Map::new();
+    for field in fields {
+        copy_event_metadata_field(&detail, &mut sanitized, field);
+    }
+    match kind {
+        "browser_search_results" => {
+            sanitized.insert(
+                "raw_result_text_omitted".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+        "browser_snapshot" | "browser_navigate" => {
+            sanitized.insert(
+                "raw_text_omitted".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+        _ => {}
+    }
+    Ok(serde_json::Value::Object(sanitized))
+}
+
 fn read_event_log(
     path: &Path,
     tail: Option<usize>,
@@ -3293,6 +3639,10 @@ fn read_events_from_workspace_log(
         app_log: None,
         clipboard: None,
         events: Some(events),
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     }))
 }
 
@@ -3339,6 +3689,10 @@ fn read_app_log_from_workspace_manifest(
         app_log: Some(app_log),
         clipboard: None,
         events: None,
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     }))
 }
 
@@ -3379,6 +3733,10 @@ fn list_apps_from_workspace_manifest(
         app_log: None,
         clipboard: None,
         events: None,
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     }))
 }
 
@@ -3403,6 +3761,10 @@ fn response_with_status(
         app_log: None,
         clipboard: None,
         events: None,
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     }
 }
 
@@ -3611,6 +3973,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                                 &state.status,
                                                 window,
                                                 None,
+                                                WorkspaceScreenshotSource::WorkspaceLaunchWindow,
                                             )
                                         })
                                         .transpose()
@@ -3627,7 +3990,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                                                 "timeout_ms": timeout_ms,
                                                 "found": found,
                                                 "windows": windows.len(),
-                                                "screenshot": screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
+                                                "screenshot": screenshot.as_ref().map(screenshot_event_detail),
                                             }),
                                         )?;
                                         let message = if screenshot.is_some() {
@@ -3840,7 +4203,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                         "windows": response.windows.as_ref().map(Vec::len).unwrap_or_default(),
                         "include_hidden": include_hidden,
                         "active_window_id": response.active_window.as_ref().map(|window| window.id.as_str()),
-                        "screenshot": response.screenshot.as_ref().map(|screenshot| screenshot.path.display().to_string()),
+                        "screenshot": response.screenshot.as_ref().map(screenshot_event_detail),
                         "events": include_events,
                         "events_tail": events_tail,
                         "events_since_sequence": events_since_sequence,
@@ -3916,25 +4279,22 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 ),
             }
         }
-        IpcRequest::Screenshot { output_path } => {
-            match capture_workspace_screenshot(&state.status, output_path) {
-                Ok(screenshot) => {
-                    record_event(
-                        state,
-                        "screenshot",
-                        serde_json::json!({ "path": screenshot.path.display().to_string() }),
-                    )?;
-                    let mut response =
-                        response_with_status(true, "workspace screenshot captured", &state.status);
-                    response.screenshot = Some(screenshot);
-                    (response, false)
-                }
-                Err(error) => (
-                    response_with_status(false, error.to_string(), &state.status),
-                    false,
-                ),
+        IpcRequest::Screenshot {
+            output_path,
+            source,
+        } => match capture_workspace_screenshot(&state.status, output_path, source) {
+            Ok(screenshot) => {
+                record_event(state, "screenshot", screenshot_event_detail(&screenshot))?;
+                let mut response =
+                    response_with_status(true, "workspace screenshot captured", &state.status);
+                response.screenshot = Some(screenshot);
+                (response, false)
             }
-        }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
         IpcRequest::ScreenshotWindow {
             window_id,
             title_contains,
@@ -3973,7 +4333,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                             state,
                             "screenshot_window",
                             serde_json::json!({
-                                "path": result.screenshot.path.display().to_string(),
+                                "screenshot": screenshot_event_detail(&result.screenshot),
                                 "window_id": &result.window.id,
                                 "title_contains": criteria.title_contains.as_deref(),
                                     "class_contains": criteria.class_contains.as_deref(),
@@ -5507,6 +5867,162 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
+        IpcRequest::BrowserTargets {
+            app_id,
+            user_data_dir,
+            timeout_ms,
+        } => match crate::browser::workspace_browser_targets_from_status(
+            &state.status,
+            app_id,
+            user_data_dir,
+            timeout_ms,
+        ) {
+            Ok(targets) => {
+                let mut response =
+                    response_with_status(true, "workspace browser targets returned", &state.status);
+                response.browser_targets = Some(targets);
+                (response, false)
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::BrowserSnapshot {
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            max_text_chars,
+            timeout_ms,
+        } => match crate::browser::workspace_browser_snapshot_from_status(
+            &state.status,
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            max_text_chars,
+            timeout_ms,
+        ) {
+            Ok(snapshot) => {
+                let detail = crate::browser::browser_snapshot_event_detail(&snapshot);
+                match record_event(state, "browser_snapshot", detail) {
+                    Ok(event) => {
+                        let mut response = response_with_status(
+                            true,
+                            "workspace browser page snapshot captured",
+                            &state.status,
+                        );
+                        response.browser_snapshot = Some(snapshot);
+                        response.events = Some(vec![event]);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::BrowserSearchResults {
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            max_results,
+            min_vram_gb,
+            timeout_ms,
+        } => match crate::browser::workspace_browser_search_results_from_status(
+            &state.status,
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            max_results,
+            min_vram_gb,
+            timeout_ms,
+        ) {
+            Ok(results) => {
+                let detail =
+                    crate::browser::browser_search_results_event_detail(&results, min_vram_gb);
+                match record_event(state, "browser_search_results", detail) {
+                    Ok(event) => {
+                        let mut response = response_with_status(
+                            true,
+                            "workspace browser search results extracted",
+                            &state.status,
+                        );
+                        response.browser_search_results = Some(results);
+                        response.events = Some(vec![event]);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
+        IpcRequest::BrowserNavigate {
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            url,
+            wait_ms,
+            snapshot,
+            max_text_chars,
+            timeout_ms,
+        } => match crate::browser::workspace_browser_navigate_from_status(
+            &state.status,
+            app_id,
+            user_data_dir,
+            target_id,
+            title_contains,
+            url_contains,
+            url,
+            wait_ms,
+            snapshot,
+            max_text_chars,
+            timeout_ms,
+        ) {
+            Ok(navigation) => {
+                let detail = crate::browser::browser_navigate_event_detail(&navigation);
+                match record_event(state, "browser_navigate", detail) {
+                    Ok(event) => {
+                        let mut response = response_with_status(
+                            true,
+                            "workspace browser navigated",
+                            &state.status,
+                        );
+                        response.browser_navigate = Some(navigation);
+                        response.events = Some(vec![event]);
+                        (response, false)
+                    }
+                    Err(error) => (
+                        response_with_status(false, error.to_string(), &state.status),
+                        false,
+                    ),
+                }
+            }
+            Err(error) => (
+                response_with_status(false, error.to_string(), &state.status),
+                false,
+            ),
+        },
         IpcRequest::ReadEvents {
             tail,
             since_sequence,
@@ -5522,6 +6038,22 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
                 false,
             ),
         },
+        IpcRequest::RecordEvent { kind, detail } => {
+            match metadata_only_browser_event_detail(&kind, detail)
+                .and_then(|sanitized_detail| record_event(state, &kind, sanitized_detail))
+            {
+                Ok(event) => {
+                    let mut response =
+                        response_with_status(true, "workspace event recorded", &state.status);
+                    response.events = Some(vec![event]);
+                    (response, false)
+                }
+                Err(error) => (
+                    response_with_status(false, error.to_string(), &state.status),
+                    false,
+                ),
+            }
+        }
         IpcRequest::KillApp { app_id, dry_run } if dry_run => {
             match refresh_apps(state)
                 .and_then(|()| resolve_workspace_app(&state.status.apps, &app_id).cloned())
@@ -5610,7 +6142,7 @@ fn handle_stream(mut stream: UnixStream, state: &mut DaemonState) -> Result<bool
             eprintln!("workspace IPC stop response failed after shutdown was requested: {error}");
             return Ok(true);
         }
-        return Err(error.into());
+        return Err(error);
     }
     Ok(should_stop)
 }
@@ -6120,7 +6652,12 @@ fn observe_workspace(
     let active_window = active_workspace_window_for_state(state)?;
     let pointer = workspace_pointer(&state.status)?;
     let screenshot = if screenshot {
-        Some(capture_workspace_screenshot(&state.status, output_path)?)
+        let output_path = observe_screenshot_output_path(output_path);
+        Some(capture_workspace_screenshot(
+            &state.status,
+            output_path,
+            WorkspaceScreenshotSource::WorkspaceObserve,
+        )?)
     } else {
         None
     };
@@ -6140,7 +6677,15 @@ fn observe_workspace(
         app_log: None,
         clipboard: None,
         events: None,
+        browser_targets: None,
+        browser_snapshot: None,
+        browser_search_results: None,
+        browser_navigate: None,
     })
+}
+
+fn observe_screenshot_output_path(output_path: Option<PathBuf>) -> Option<PathBuf> {
+    output_path.or_else(|| Some(PathBuf::from(OBSERVE_SCREENSHOT_FILE)))
 }
 
 fn filter_workspace_apps(
@@ -6612,6 +7157,7 @@ fn move_workspace_pointer_window(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drag_workspace_window(
     state: &mut DaemonState,
     window_id: Option<&str>,
@@ -6929,6 +7475,7 @@ fn parse_window_geometry(text: &str) -> Result<WindowGeometry> {
 fn capture_workspace_screenshot(
     status: &WorkspaceStatus,
     output_path: Option<PathBuf>,
+    source: WorkspaceScreenshotSource,
 ) -> Result<WorkspaceScreenshot> {
     let path = resolve_screenshot_path(status, output_path);
     if let Some(parent) = path.parent() {
@@ -6953,7 +7500,14 @@ fn capture_workspace_screenshot(
         bail!("missing screenshot command: install ImageMagick import or scrot");
     }
 
-    workspace_screenshot_result(path, status.width, status.height)
+    workspace_screenshot_result(
+        path,
+        status.width,
+        status.height,
+        source,
+        WorkspaceScreenshotTarget::Root,
+        None,
+    )
 }
 
 struct WindowScreenshotResult {
@@ -6970,7 +7524,12 @@ fn screenshot_workspace_window(
     let Some(window) = resolve_workspace_window(state, window_id, criteria)? else {
         return Ok(None);
     };
-    let screenshot = capture_workspace_window_screenshot(&state.status, &window, output_path)?;
+    let screenshot = capture_workspace_window_screenshot(
+        &state.status,
+        &window,
+        output_path,
+        WorkspaceScreenshotSource::WorkspaceScreenshotWindow,
+    )?;
     Ok(Some(WindowScreenshotResult { window, screenshot }))
 }
 
@@ -6978,6 +7537,7 @@ fn capture_workspace_window_screenshot(
     status: &WorkspaceStatus,
     window: &WorkspaceWindow,
     output_path: Option<PathBuf>,
+    source: WorkspaceScreenshotSource,
 ) -> Result<WorkspaceScreenshot> {
     let path = resolve_window_screenshot_path(status, &window.id, output_path);
     if let Some(parent) = path.parent() {
@@ -7004,13 +7564,23 @@ fn capture_workspace_window_screenshot(
         bail!("missing screenshot command: install ImageMagick import or scrot");
     }
 
-    workspace_screenshot_result(path, window.geometry.width, window.geometry.height)
+    workspace_screenshot_result(
+        path,
+        window.geometry.width,
+        window.geometry.height,
+        source,
+        WorkspaceScreenshotTarget::Window,
+        Some(window.id.clone()),
+    )
 }
 
 fn workspace_screenshot_result(
     path: PathBuf,
     width: u32,
     height: u32,
+    source: WorkspaceScreenshotSource,
+    target: WorkspaceScreenshotTarget,
+    window_id: Option<String>,
 ) -> Result<WorkspaceScreenshot> {
     let bytes = fs::metadata(&path)
         .with_context(|| format!("failed to read screenshot metadata for {}", path.display()))?
@@ -7022,6 +7592,18 @@ fn workspace_screenshot_result(
         format: "png".to_string(),
         bytes,
         captured_at_unix: unix_now(),
+        source,
+        target,
+        window_id,
+    })
+}
+
+fn screenshot_event_detail(screenshot: &WorkspaceScreenshot) -> serde_json::Value {
+    serde_json::json!({
+        "path": screenshot.path.display().to_string(),
+        "source": screenshot.source,
+        "target": screenshot.target,
+        "window_id": screenshot.window_id.as_deref(),
     })
 }
 
@@ -8284,6 +8866,69 @@ fn first_available_command(commands: &[&str]) -> Check {
     }
 }
 
+fn host_display_check() -> Check {
+    let wayland = env::var_os("WAYLAND_DISPLAY")
+        .filter(|value| !value.as_os_str().is_empty())
+        .map(|value| value.to_string_lossy().to_string());
+    let display = env::var_os("DISPLAY")
+        .filter(|value| !value.as_os_str().is_empty())
+        .map(|value| value.to_string_lossy().to_string());
+
+    match (wayland, display) {
+        (Some(wayland), Some(display)) => Check {
+            ok: true,
+            detail: format!("WAYLAND_DISPLAY={wayland}, DISPLAY={display}"),
+        },
+        (Some(wayland), None) => Check {
+            ok: true,
+            detail: format!("WAYLAND_DISPLAY={wayland}"),
+        },
+        (None, Some(display)) => Check {
+            ok: true,
+            detail: format!("DISPLAY={display}"),
+        },
+        (None, None) => Check {
+            ok: false,
+            detail: "missing DISPLAY and WAYLAND_DISPLAY".to_string(),
+        },
+    }
+}
+
+fn pkg_config_package_check(package: &str) -> Check {
+    match Command::new("pkg-config")
+        .args(["--modversion", package])
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Check {
+                ok: true,
+                detail: if version.is_empty() {
+                    format!("{package}: available")
+                } else {
+                    format!("{package}: {version}")
+                },
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let detail = if !stderr.is_empty() {
+                stderr
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                format!("{package}: missing pkg-config metadata")
+            };
+            Check { ok: false, detail }
+        }
+        Err(error) => Check {
+            ok: false,
+            detail: format!("pkg-config unavailable: {error}"),
+        },
+    }
+}
+
 fn policy_tool_check(command: &str) -> PolicyToolCheck {
     let check = command_path_check(command);
     PolicyToolCheck {
@@ -8391,6 +9036,63 @@ mod tests {
             0,
             capabilities(bubblewrap, false, false, slirp4netns),
         )
+    }
+
+    #[test]
+    fn observe_screenshot_reuses_stable_default_frame() {
+        assert_eq!(
+            observe_screenshot_output_path(None),
+            Some(PathBuf::from(OBSERVE_SCREENSHOT_FILE))
+        );
+
+        let explicit = PathBuf::from("/tmp/agent-observe.png");
+        assert_eq!(
+            observe_screenshot_output_path(Some(explicit.clone())),
+            Some(explicit)
+        );
+    }
+
+    #[test]
+    fn screenshot_event_detail_includes_provenance() {
+        let screenshot = WorkspaceScreenshot {
+            path: PathBuf::from("/tmp/agent-window.png"),
+            width: 640,
+            height: 480,
+            format: "png".to_string(),
+            bytes: 1234,
+            captured_at_unix: 42,
+            source: WorkspaceScreenshotSource::WorkspaceScreenshotWindow,
+            target: WorkspaceScreenshotTarget::Window,
+            window_id: Some("4194307".to_string()),
+        };
+
+        let detail = screenshot_event_detail(&screenshot);
+
+        assert_eq!(detail["path"], "/tmp/agent-window.png");
+        assert_eq!(detail["source"], "workspace_screenshot_window");
+        assert_eq!(detail["target"], "window");
+        assert_eq!(detail["window_id"], "4194307");
+    }
+
+    #[test]
+    fn legacy_screenshot_response_without_provenance_still_parses() {
+        let json = r#"{
+            "path": "/tmp/agent-window.png",
+            "width": 640,
+            "height": 480,
+            "format": "png",
+            "bytes": 1234,
+            "captured_at_unix": 42
+        }"#;
+
+        let screenshot: WorkspaceScreenshot =
+            serde_json::from_str(json).expect("legacy screenshot should parse");
+
+        assert_eq!(
+            screenshot.source,
+            WorkspaceScreenshotSource::WorkspaceScreenshot
+        );
+        assert_eq!(screenshot.target, WorkspaceScreenshotTarget::Root);
     }
 
     fn status_with_profile_defaults(policy: AppliedWorkspacePolicy) -> WorkspaceStatus {
@@ -8520,6 +9222,98 @@ mod tests {
         let stat = "1234 (agent workspace) Z 1 1234 1234 0 -1 4194560 0 0 0 0";
 
         assert_eq!(process_state_from_proc_stat(stat), Some('Z'));
+    }
+
+    #[test]
+    fn external_browser_snapshot_events_are_metadata_only() {
+        let detail = metadata_only_browser_event_detail(
+            "browser_snapshot",
+            serde_json::json!({
+                "app_id": "app-browser",
+                "target_id": "target-1",
+                "title": "Private Grocery Cart",
+                "url": "https://example-grocery.test/cart",
+                "text": "name, address, phone, and cart contents",
+                "text_chars": 42,
+                "text_truncated": false,
+                "headings": ["Delivery address"],
+                "links": [{"text": "Checkout", "href": "https://example-grocery.test/checkout"}],
+            }),
+        )
+        .expect("browser snapshot event detail sanitizes");
+
+        assert_eq!(detail["app_id"], "app-browser");
+        assert_eq!(detail["target_id"], "target-1");
+        assert_eq!(detail["text_chars"], 42);
+        assert_eq!(detail["raw_text_omitted"], true);
+        assert!(detail.get("text").is_none());
+        assert!(detail.get("headings").is_none());
+        assert!(detail.get("links").is_none());
+    }
+
+    #[test]
+    fn external_browser_search_events_are_metadata_only() {
+        let detail = metadata_only_browser_event_detail(
+            "browser_search_results",
+            serde_json::json!({
+                "app_id": "app-browser",
+                "target_id": "target-2",
+                "title": "GPU Search",
+                "url": "https://www.amazon.com/s?k=gpu",
+                "result_count": 2,
+                "min_vram_gb": 36,
+                "results": [{"title": "Private card title", "href": "https://example.test"}],
+                "text_excerpt": "Private card text",
+            }),
+        )
+        .expect("browser search result event detail sanitizes");
+
+        assert_eq!(detail["result_count"], 2);
+        assert_eq!(detail["min_vram_gb"], 36);
+        assert_eq!(detail["raw_result_text_omitted"], true);
+        assert!(detail.get("results").is_none());
+        assert!(detail.get("text_excerpt").is_none());
+    }
+
+    #[test]
+    fn external_browser_navigate_events_are_metadata_only() {
+        let detail = metadata_only_browser_event_detail(
+            "browser_navigate",
+            serde_json::json!({
+                "app_id": "app-browser",
+                "target_id": "target-3",
+                "url": "https://example-grocery.test/search?q=milk",
+                "frame_id": "frame-1",
+                "snapshot": true,
+                "title": "Milk Search",
+                "current_url": "https://example-grocery.test/search?q=milk",
+                "text": "private search result text",
+                "headings": ["Milk"],
+                "links": [{"text": "Milk", "href": "https://example-grocery.test/item/milk"}],
+            }),
+        )
+        .expect("browser navigate event detail sanitizes");
+
+        assert_eq!(detail["snapshot"], true);
+        assert_eq!(detail["raw_text_omitted"], true);
+        assert_eq!(
+            detail["current_url"],
+            "https://example-grocery.test/search?q=milk"
+        );
+        assert!(detail.get("text").is_none());
+        assert!(detail.get("headings").is_none());
+        assert!(detail.get("links").is_none());
+    }
+
+    #[test]
+    fn external_events_reject_unowned_kinds() {
+        let error =
+            metadata_only_browser_event_detail("type_text", serde_json::json!({"text": "secret"}))
+                .expect_err("non-browser external events should reject");
+
+        assert!(error
+            .to_string()
+            .contains("external workspace event kind \"type_text\" is not allowed"));
     }
 
     fn daemon_state_for_test(name: &str) -> DaemonState {

@@ -26,7 +26,7 @@ pub struct AppPermissionCeiling {
     pub allow: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct McpPermissionState {
     pub configured: bool,
     pub restricted: bool,
@@ -46,6 +46,11 @@ impl Default for McpPermissionState {
 impl McpPermissionState {
     pub fn from_ceiling(source: Option<PathBuf>, ceiling: McpPermissionCeiling) -> Self {
         let configured = source.is_some();
+        let ceiling = if configured {
+            ceiling
+        } else {
+            McpPermissionCeiling::default()
+        };
         let restricted = ceiling.is_restricted();
         let message = match (configured, restricted) {
             (false, _) => {
@@ -466,6 +471,10 @@ mod tests {
         }
     }
 
+    fn configured_state(ceiling: McpPermissionCeiling) -> McpPermissionState {
+        McpPermissionState::from_ceiling(Some(PathBuf::from("/tmp/mcp-permissions.json")), ceiling)
+    }
+
     #[test]
     fn permission_templates_cover_open_closed_and_local() {
         let open = template_permission_ceiling("open", Vec::new(), Vec::new(), Vec::new()).unwrap();
@@ -530,7 +539,19 @@ mod tests {
     }
 
     #[test]
-    fn disabled_network_ceiling_rejects_unprofiled_launch() {
+    fn configured_empty_ceiling_reports_open_and_allows_launch() {
+        let ceiling: McpPermissionCeiling = serde_json::from_str("{}").unwrap();
+        let state = configured_state(ceiling);
+
+        assert!(state.configured);
+        assert!(!state.restricted);
+        state
+            .validate_launch_spec(&launch_spec(&["bash", "-lc", "true"], None))
+            .unwrap();
+    }
+
+    #[test]
+    fn unconfigured_state_drops_accidental_ceiling() {
         let state = McpPermissionState::from_ceiling(
             None,
             McpPermissionCeiling {
@@ -538,10 +559,37 @@ mod tests {
                     mode: NetworkMode::Disabled,
                     allow_hosts: Vec::new(),
                 }),
-                mounts: Vec::new(),
-                apps: AppPermissionCeiling::default(),
+                mounts: vec![mount(
+                    "/home/me/project",
+                    "/workspace/project",
+                    MountMode::ReadOnly,
+                )],
+                apps: AppPermissionCeiling {
+                    allow: vec![PathBuf::from("xterm")],
+                },
             },
         );
+
+        assert!(!state.configured);
+        assert!(!state.restricted);
+        assert!(state.ceiling.network.is_none());
+        assert!(state.ceiling.mounts.is_empty());
+        assert!(state.ceiling.apps.allow.is_empty());
+        state
+            .validate_launch_spec(&launch_spec(&["bash", "-lc", "true"], None))
+            .unwrap();
+    }
+
+    #[test]
+    fn disabled_network_ceiling_rejects_unprofiled_launch() {
+        let state = configured_state(McpPermissionCeiling {
+            network: Some(NetworkPolicy {
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
+            }),
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling::default(),
+        });
 
         let error = state
             .validate_launch_spec(&launch_spec(&["curl", "https://example.com"], None))
@@ -552,17 +600,14 @@ mod tests {
 
     #[test]
     fn disabled_network_ceiling_allows_disabled_profile_launch() {
-        let state = McpPermissionState::from_ceiling(
-            None,
-            McpPermissionCeiling {
-                network: Some(NetworkPolicy {
-                    mode: NetworkMode::Disabled,
-                    allow_hosts: Vec::new(),
-                }),
-                mounts: Vec::new(),
-                apps: AppPermissionCeiling::default(),
-            },
-        );
+        let state = configured_state(McpPermissionCeiling {
+            network: Some(NetworkPolicy {
+                mode: NetworkMode::Disabled,
+                allow_hosts: Vec::new(),
+            }),
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling::default(),
+        });
         let applied = policy(
             Vec::new(),
             NetworkPolicy {
@@ -581,17 +626,14 @@ mod tests {
 
     #[test]
     fn local_only_ceiling_rejects_inherited_network() {
-        let state = McpPermissionState::from_ceiling(
-            None,
-            McpPermissionCeiling {
-                network: Some(NetworkPolicy {
-                    mode: NetworkMode::LocalOnly,
-                    allow_hosts: vec!["localhost:3000".to_string()],
-                }),
-                mounts: Vec::new(),
-                apps: AppPermissionCeiling::default(),
-            },
-        );
+        let state = configured_state(McpPermissionCeiling {
+            network: Some(NetworkPolicy {
+                mode: NetworkMode::LocalOnly,
+                allow_hosts: vec!["localhost:3000".to_string()],
+            }),
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling::default(),
+        });
 
         let error = state
             .validate_launch_spec(&launch_spec(&["curl", "https://example.com"], None))
@@ -625,18 +667,15 @@ mod tests {
 
     #[test]
     fn mount_ceiling_rejects_missing_or_broader_mount_policy() {
-        let state = McpPermissionState::from_ceiling(
-            None,
-            McpPermissionCeiling {
-                network: None,
-                mounts: vec![mount(
-                    "/home/me/project",
-                    "/workspace/project",
-                    MountMode::ReadOnly,
-                )],
-                apps: AppPermissionCeiling::default(),
-            },
-        );
+        let state = configured_state(McpPermissionCeiling {
+            network: None,
+            mounts: vec![mount(
+                "/home/me/project",
+                "/workspace/project",
+                MountMode::ReadOnly,
+            )],
+            apps: AppPermissionCeiling::default(),
+        });
 
         assert!(state
             .validate_launch_spec(&launch_spec(&["ls"], None))
@@ -655,18 +694,15 @@ mod tests {
 
     #[test]
     fn mount_ceiling_allows_child_read_only_mount() {
-        let state = McpPermissionState::from_ceiling(
-            None,
-            McpPermissionCeiling {
-                network: None,
-                mounts: vec![mount(
-                    "/home/me/project",
-                    "/workspace/project",
-                    MountMode::ReadOnly,
-                )],
-                apps: AppPermissionCeiling::default(),
-            },
-        );
+        let state = configured_state(McpPermissionCeiling {
+            network: None,
+            mounts: vec![mount(
+                "/home/me/project",
+                "/workspace/project",
+                MountMode::ReadOnly,
+            )],
+            apps: AppPermissionCeiling::default(),
+        });
         let narrowed = policy(
             vec![mount(
                 "/home/me/project/src",
@@ -703,16 +739,13 @@ mod tests {
 
     #[test]
     fn app_allowlist_limits_launch_programs() {
-        let state = McpPermissionState::from_ceiling(
-            None,
-            McpPermissionCeiling {
-                network: None,
-                mounts: Vec::new(),
-                apps: AppPermissionCeiling {
-                    allow: vec![PathBuf::from("xterm")],
-                },
+        let state = configured_state(McpPermissionCeiling {
+            network: None,
+            mounts: Vec::new(),
+            apps: AppPermissionCeiling {
+                allow: vec![PathBuf::from("xterm")],
             },
-        );
+        });
 
         state
             .validate_launch_spec(&launch_spec(&["xterm"], None))

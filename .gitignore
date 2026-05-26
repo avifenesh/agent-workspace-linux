@@ -1,3 +1,6 @@
 /target
 /.codex/
 .codex/
+__pycache__/
+*.py[cod]
+.playwright-mcp/
