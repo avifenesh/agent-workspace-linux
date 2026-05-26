@@ -3,9 +3,9 @@
 Last updated: 2026-05-26
 
 This repository is ready for public source review and local experimentation, but
-it remains pre-1.0. The release gate is intentionally stricter than "tests pass"
-because the project controls hidden Linux desktop workspaces and host-visible
-viewer windows.
+it remains pre-1.0. The contributor gates are intentionally stricter than "tests
+pass" because the project controls hidden Linux desktop workspaces and
+host-visible viewer windows.
 
 ## Public Surface
 
@@ -18,35 +18,24 @@ viewer windows.
 - The default MCP path remains host-controlled: starting `mcp` without
   `--permissions` does not invent a second permission ceiling.
 
-## Validation Expectations
+## Contributor Gates
 
-Run these before publishing a release candidate:
+Run these before opening a pull request:
 
 ```bash
 cargo fmt --check
 cargo clippy --locked -- -D warnings
 cargo test --locked
 git diff --check
-scripts/prod_readiness_smoke.sh
+scripts/integration_smoke.sh
 ```
 
-The broad smoke generates source-bound release reports under `target/`. Those
-reports are local artifacts, not tracked documentation.
+`scripts/integration_smoke.sh` exercises the workspace lifecycle and MCP smokes
+against a real hidden workspace; it skips the browser sections when
+Chrome/Chromium is not installed.
 
-## Remaining Release Gates
+## Releases
 
-The current automated gate has one manual blocker before a production tag:
-
-- final human diff review marker generated after review
-
-Use these scripts for the current source-bound answer:
-
-```bash
-scripts/release_gate_audit.py
-scripts/final_review_bundle.py
-scripts/objective_completion_audit.py
-scripts/release_next_steps.py
-```
-
-Do not reuse timestamped paths, source hashes, or review-scope hashes from docs
-after source or documentation edits. Regenerate the audit bundle instead.
+Releases are cut by the GitHub Actions workflows in `.github/workflows/`
+(`release.yml` and `npm-release.yml`). Tagging a release runs those workflows;
+there is no separate local release-gate step to run by hand.

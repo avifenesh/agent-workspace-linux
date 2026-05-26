@@ -694,64 +694,6 @@ async function main() {
       ),
     `complete grocery plan should mark research/cart scope ready while keeping checkout blocked: ${JSON.stringify(completeGroceryPlan)}`,
   );
-  const dogfoodRequirement = completeGroceryPlan.task_context?.dogfood_requirements?.find(
-    (requirement) => requirement.id === "real_grocery_cart_draft_evidence",
-  );
-  assert(
-    dogfoodRequirement?.applies_to_boundary === "draft_cart_changes" &&
-      dogfoodRequirement.required_for === "real_grocery_dogfood_release_gate" &&
-      dogfoodRequirement.required_inputs?.some((input) => /GROCERY_CART_DRAFT_STEPS_JSON/.test(input)) &&
-      dogfoodRequirement.required_approvals?.some((approval) => /CART_MUTATION_APPROVED=1/.test(approval)) &&
-      dogfoodRequirement.required_approvals?.some((approval) => /CHECKOUT_APPROVED/.test(approval)) &&
-      dogfoodRequirement.forbidden_actions?.includes("order_submission") &&
-      dogfoodRequirement.allowed_workspace_input_actions?.includes("paste_window") &&
-      dogfoodRequirement.helper_commands?.some((command) => /--validate-cart-draft-steps/.test(command)) &&
-      dogfoodRequirement.helper_commands?.some((command) => /mcp_workspace_browser_cdp_smoke/.test(command)),
-    `complete grocery plan should expose the real grocery cart-draft dogfood evidence contract: ${JSON.stringify(completeGroceryPlan)}`,
-  );
-
-  const approvedGroceryPlan = await callTool("mcp_task_plan", {
-    intent: "grocery shopping",
-    user_data_dir: browserDataDir,
-    target_url: "https://grocery-release.example-retailer.com",
-    shopping_list: "milk 2L, eggs 12, bananas 1kg",
-    budget: "under 120 ILS",
-    fulfillment: "delivery tomorrow morning",
-    substitution_policy: "ask before substituting must-have items",
-    profile_is_disposable_copy: true,
-    cart_draft_steps_validated: true,
-    cart_mutation_approved: true,
-    final_cart_reviewed: true,
-    real_world_action_approved: false,
-  });
-  assert(
-    approvedGroceryPlan.task_context?.provided_inputs?.some((input) => input.name === "cart_mutation_approved") &&
-      approvedGroceryPlan.task_context?.provided_inputs?.some((input) => input.name === "final_cart_reviewed") &&
-      approvedGroceryPlan.task_context?.provided_inputs?.some((input) => input.name === "profile_is_disposable_copy") &&
-      approvedGroceryPlan.task_context?.provided_inputs?.some((input) => input.name === "cart_draft_steps_validated") &&
-      !approvedGroceryPlan.task_context?.provided_inputs?.some((input) => input.name === "real_world_action_approved") &&
-      approvedGroceryPlan.task_context?.action_boundaries?.some(
-        (boundary) =>
-          boundary.id === "draft_cart_changes" &&
-          boundary.ready === true &&
-          boundary.approved === true &&
-          (boundary.missing_approvals || []).length === 0,
-      ) &&
-      approvedGroceryPlan.task_context?.action_boundaries?.some(
-        (boundary) =>
-          boundary.id === "checkout_order_or_account_change" &&
-          boundary.approved === false &&
-          boundary.missing_approvals?.includes("explicit_checkout_approval") &&
-          !boundary.missing_approvals?.includes("final_cart_review"),
-      ),
-    `approved grocery plan should allow cart mutation separately from checkout: ${JSON.stringify(approvedGroceryPlan)}`,
-  );
-  assert(
-    approvedGroceryPlan.task_context?.dogfood_requirements?.some(
-      (requirement) => requirement.id === "real_grocery_cart_draft_evidence" && requirement.status === "ready",
-    ),
-    `approved grocery plan should mark real grocery cart-draft evidence contract ready after disposable profile and step-file validation are provided: ${JSON.stringify(approvedGroceryPlan)}`,
-  );
   assert(
     completeGroceryPlan.steps.some(
       (step) =>

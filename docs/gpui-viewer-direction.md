@@ -66,24 +66,16 @@ workspace-owned MCP browser tools:
 This keeps browser automation inside the workspace profile, permission, event
 log, and audit boundary.
 
-## Release Evidence
+## Viewer Smoke
 
-Run source-bound release checks after source or documentation edits:
+Exercise the GPUI viewer locally with:
 
 ```bash
-scripts/release_gate_audit.py
-scripts/final_review_bundle.py
-scripts/objective_completion_audit.py
-scripts/release_next_steps.py
+scripts/gpui_viewer_smoke.sh
 ```
 
-Use `AGENT_WORKSPACE_NO_NEW_VIEWER=1 scripts/prod_readiness_smoke.sh` when a
-human already has a real viewer open and iterative validation should avoid
-opening another monitor. Run the default smoke when strict visual viewer
-evidence is needed.
-
-Release-only viewer evidence is intentionally tracked by
-`scripts/release_gate_audit.py`, and the current public-readiness checkpoint has
-source-matched local viewer evidence. Do not copy timestamped evidence paths or
-source hashes from docs into release decisions; regenerate the audit and final
-review bundle for the current source.
+It starts a hidden workspace, opens the monitor window through X11/Xwayland, and
+checks the default and opt-in always-on-top window states, compact sizing,
+duplicate-launch reuse, and target-bound viewer teardown. It needs an X11 or
+Xwayland display plus `xclock`, `xdotool`, `xwininfo`, `xprop`, `xwd`, and
+ImageMagick (`convert`/`identify`).

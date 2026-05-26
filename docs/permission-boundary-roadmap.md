@@ -46,9 +46,12 @@ was selected for the workspace.
 ### MCP-Locked Mode
 
 When the MCP is spawned with permission fields through
-`agent-workspace-linux mcp --permissions PATH`, those fields become a hard
-ceiling for the lifetime of that MCP server process. Codex for Linux may show
-the policy, request narrower access, and operate inside it, but it must not
+`agent-workspace-linux mcp --permissions PATH`, those fields form a ceiling that
+is enforced for the lifetime of that MCP server process at two layers: the MCP
+front-end rejects requests exceeding the ceiling, and the workspace daemon
+re-enforces the ceiling on every IPC request, including requests from
+workspace-launched apps and other same-uid callers. Codex for Linux may show
+the policy, request narrower access, and operate inside it, but it cannot
 broaden or rewrite it.
 
 This mode supports non-Codex hosts such as Claude Code, auto-looping agents, and
@@ -113,8 +116,8 @@ Rules:
   matches the launched program, not its arguments; allowing shells, package
   managers, or browsers delegates follow-on behavior to that program inside the
   workspace policy.
-- Spawn-time MCP permissions are immutable. Changing them requires restarting
-  the MCP server with new config.
+- Spawn-time ceiling dimensions cannot be broadened without restarting the MCP
+  server with new config.
 - The active ceiling is visible through the read-only `mcp_permissions` tool.
 - Agents and non-Codex hosts can call read-only `mcp_session_brief` for the
   active ceiling, live control mode, headless state, runtime readiness, known
@@ -183,10 +186,16 @@ Rules:
   `mcp_control_update` requires `confirmed_user_request=true` when the current
   mode is `read_only` or `paused`, and session briefs carry the control update
   actor, timestamp, and reason for host UI and agent explanation.
-- Enforcement currently covers MCP profile template/check/validate/put/import,
-  workspace start/open-profile, direct launch/run, and profile setup/startup
-  launches. The standalone CLI can also generate and validate ceiling files for
-  hosts that do not have the Codex for Linux UI.
+- The permission ceiling (the authoritative boundary) is enforced at two layers:
+  the MCP front-end (profile template/check/validate/put/import, workspace
+  start/open-profile, direct launch/run, and profile setup/startup launches) and
+  the workspace daemon IPC socket (every IPC request, including those from
+  workspace-launched apps and other same-uid callers). Live control state
+  (read_only/paused) is a separate, best-effort convenience layer: the daemon
+  honors a runtime pause when it can read the shared control state and fails open
+  if it cannot, so it is not relied on as a security boundary. The standalone CLI
+  can also generate and validate ceiling files for hosts that do not have the
+  Codex for Linux UI.
 - The CLI also accepts a leading `--permissions PATH` global option. When used,
   profile and workspace actions are checked against the same ceiling. This is
   intended for the Codex for Linux bridge when it discovers a locked MCP server
@@ -254,8 +263,6 @@ Current gate status on 2026-05-25:
 
 Before making permissions hard, validate that the current claims actually hold
 under real usage:
-
-Current evidence is tracked in [Dogfood Validation](dogfood-validation.md).
 
 - Validated: Chrome/Chromium launches inside the agent workspace and is
   controllable through workspace-local window, keyboard, and paste operations
