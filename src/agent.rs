@@ -28,6 +28,8 @@ pub struct AgentTargetHandles {
     pub viewer_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub browser_target_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_ids: Vec<String>,
 }
 
 impl AgentTargetHandles {
@@ -37,5 +39,6 @@ impl AgentTargetHandles {
             && self.window_ids.is_empty()
             && self.viewer_ids.is_empty()
             && self.browser_target_ids.is_empty()
+            && self.terminal_ids.is_empty()
     }
 }

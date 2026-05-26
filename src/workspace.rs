@@ -34,6 +34,12 @@ const DEFAULT_CLICK_COUNT: u8 = 1;
 const DEFAULT_SCROLL_AMOUNT: u8 = 1;
 const MAX_SCROLL_AMOUNT: u8 = 100;
 const DEFAULT_PASTE_KEY: &str = "ctrl+v";
+const DEFAULT_TERMINAL_PROGRAM: &str = "xterm";
+const DEFAULT_TMUX_PROGRAM: &str = "tmux";
+const DEFAULT_TERMINAL_FONT: &str = "Monospace";
+const DEFAULT_TERMINAL_FONT_SIZE: u8 = 16;
+const DEFAULT_TERMINAL_GEOMETRY: &str = "100x30";
+const DEFAULT_TERMINAL_READY_TIMEOUT_MS: u64 = 10_000;
 const ACTIVE_WINDOW_RESPONSE_WAIT_MS: u64 = 250;
 const ACTIVE_WINDOW_RESPONSE_POLL_MS: u64 = 20;
 const DEFAULT_WIDTH: u32 = 1280;
@@ -567,6 +573,64 @@ pub struct WorkspaceClipboard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceTerminal {
+    pub workspace_id: String,
+    pub terminal_id: String,
+    pub session_name: String,
+    pub tmux_socket_path: PathBuf,
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_tty: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceTerminalLaunchPlan {
+    pub terminal_id: String,
+    pub session_name: String,
+    pub tmux_socket_path: PathBuf,
+    pub target: String,
+    pub title: String,
+    pub command: Vec<String>,
+    pub spec: LaunchSpec,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceTerminalScreen {
+    pub terminal: WorkspaceTerminal,
+    pub text: String,
+    pub lines: Vec<String>,
+    pub line_count: usize,
+    pub captured_at_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceTerminalInput {
+    pub terminal: WorkspaceTerminal,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normalized_keys: Vec<String>,
+    #[serde(default)]
+    pub text_bytes: usize,
+    #[serde(default)]
+    pub delay_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_grammar: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -2893,6 +2957,181 @@ pub fn preview_run_app_with_spec(
     })
 }
 
+pub fn terminal_launch_plan(
+    id: &str,
+    terminal_id: Option<String>,
+    title: Option<String>,
+    terminal_program: Option<PathBuf>,
+    command: Vec<String>,
+) -> Result<WorkspaceTerminalLaunchPlan> {
+    let id = sanitize_workspace_id(id)?;
+    let status = status_workspace(&id)?;
+    if !command.is_empty() {
+        validate_command(&command, "terminal command")?;
+    }
+    let terminal_id = sanitize_terminal_id(terminal_id.as_deref().unwrap_or("terminal"))?;
+    let session_name = terminal_id.clone();
+    let target = session_name.clone();
+    let tmux_socket_path = status
+        .runtime_dir
+        .join(format!("terminal-{terminal_id}.tmux.sock"));
+    validate_unix_socket_path(&tmux_socket_path)?;
+    let terminal_program = match terminal_program {
+        Some(path) => path,
+        None => resolve_command_path(DEFAULT_TERMINAL_PROGRAM)
+            .context("xterm not found; pass terminal_program or install xterm")?,
+    };
+    let tmux_program = resolve_command_path(DEFAULT_TMUX_PROGRAM)
+        .context("tmux not found; install tmux to use workspace_run_in_terminal")?;
+    let title = title.unwrap_or_else(|| format!("agent-workspace:{terminal_id}"));
+    let mut launch_command = vec![
+        terminal_program.display().to_string(),
+        "-title".to_string(),
+        title.clone(),
+        "-fa".to_string(),
+        DEFAULT_TERMINAL_FONT.to_string(),
+        "-fs".to_string(),
+        DEFAULT_TERMINAL_FONT_SIZE.to_string(),
+        "-geometry".to_string(),
+        DEFAULT_TERMINAL_GEOMETRY.to_string(),
+        "-e".to_string(),
+        tmux_program.display().to_string(),
+        "-S".to_string(),
+        tmux_socket_path.display().to_string(),
+        "new-session".to_string(),
+        "-A".to_string(),
+        "-s".to_string(),
+        session_name.clone(),
+    ];
+    if !command.is_empty() {
+        launch_command.push("--".to_string());
+        launch_command.extend(command.clone());
+    }
+    Ok(WorkspaceTerminalLaunchPlan {
+        terminal_id,
+        session_name,
+        tmux_socket_path,
+        target,
+        title: title.clone(),
+        command,
+        spec: LaunchSpec {
+            command: launch_command,
+            name: Some(title),
+            profile_id: None,
+            applied_policy: None,
+            user_acknowledged_unenforced_policy: false,
+            cwd: None,
+            env: Vec::new(),
+        },
+    })
+}
+
+pub fn run_in_terminal(
+    id: &str,
+    plan: WorkspaceTerminalLaunchPlan,
+    wait_window: bool,
+    window_timeout_ms: Option<u64>,
+    timeout_ms: Option<u64>,
+) -> Result<(IpcResponse, WorkspaceTerminal)> {
+    let launch = launch_app_with_options(
+        id,
+        plan.spec.clone(),
+        wait_window,
+        window_timeout_ms.or(Some(DEFAULT_APP_WAIT_TIMEOUT_MS)),
+        false,
+    )?;
+    if !launch.ok {
+        bail!(launch.message);
+    }
+    let app_id = launch
+        .apps
+        .as_ref()
+        .and_then(|apps| apps.first())
+        .map(|app| app.id.clone());
+    let terminal = wait_for_terminal(
+        id,
+        &plan.terminal_id,
+        app_id,
+        timeout_ms.unwrap_or(DEFAULT_TERMINAL_READY_TIMEOUT_MS),
+    )?;
+    Ok((launch, terminal))
+}
+
+pub fn read_terminal(
+    id: &str,
+    terminal_id: Option<String>,
+    preserve_trailing_spaces: bool,
+) -> Result<WorkspaceTerminalScreen> {
+    let terminal_id = sanitize_terminal_id(terminal_id.as_deref().unwrap_or("terminal"))?;
+    let terminal = terminal_info(id, &terminal_id, None)?;
+    let output = tmux_capture_pane(&terminal, preserve_trailing_spaces)?;
+    let lines = output.lines().map(str::to_string).collect::<Vec<_>>();
+    Ok(WorkspaceTerminalScreen {
+        terminal,
+        line_count: lines.len(),
+        text: output,
+        lines,
+        captured_at_unix: unix_now(),
+    })
+}
+
+pub fn terminal_input(
+    id: &str,
+    terminal_id: Option<String>,
+    keys: Vec<String>,
+    text: Option<String>,
+    delay_ms: Option<u64>,
+) -> Result<WorkspaceTerminalInput> {
+    let terminal_id = sanitize_terminal_id(terminal_id.as_deref().unwrap_or("terminal"))?;
+    let terminal = terminal_info(id, &terminal_id, None)?;
+    let text = text.unwrap_or_default();
+    if keys.is_empty() && text.is_empty() {
+        bail!("terminal input requires keys or text");
+    }
+    let delay_ms = delay_ms.unwrap_or(0).min(5_000);
+    let text_bytes = text.len();
+    if !text.is_empty() {
+        tmux_send_literal_text(&terminal, &text)?;
+        if delay_ms > 0 && !keys.is_empty() {
+            thread::sleep(Duration::from_millis(delay_ms));
+        }
+    }
+    let normalized_keys = normalize_terminal_keys(&keys)?;
+    if !normalized_keys.is_empty() {
+        if delay_ms == 0 {
+            tmux_send_keys(&terminal, &normalized_keys)?;
+        } else {
+            for key in &normalized_keys {
+                tmux_send_keys(&terminal, std::slice::from_ref(key))?;
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+        }
+    }
+    let refreshed = terminal_info(id, &terminal_id, terminal.app_id.clone()).unwrap_or(terminal);
+    let input = WorkspaceTerminalInput {
+        terminal: refreshed.clone(),
+        keys,
+        normalized_keys,
+        text_bytes,
+        delay_ms,
+        key_grammar: terminal_key_grammar(),
+    };
+    let _ = record_workspace_event(
+        id,
+        "terminal_input",
+        serde_json::json!({
+            "terminal_id": refreshed.terminal_id,
+            "target": refreshed.target,
+            "pane_id": refreshed.pane_id,
+            "key_count": input.normalized_keys.len(),
+            "text_bytes": input.text_bytes,
+            "delay_ms": input.delay_ms,
+            "raw_text_omitted": !text.is_empty(),
+        }),
+    );
+    Ok(input)
+}
+
 pub fn read_events(
     id: &str,
     tail: Option<usize>,
@@ -3508,7 +3747,11 @@ fn record_event(
 fn validate_external_event_kind(kind: &str) -> Result<()> {
     if matches!(
         kind,
-        "browser_snapshot" | "browser_search_results" | "browser_navigate"
+        "browser_snapshot"
+            | "browser_search_results"
+            | "browser_navigate"
+            | "browser_click"
+            | "terminal_input"
     ) {
         Ok(())
     } else {
@@ -3563,6 +3806,29 @@ fn metadata_only_browser_event_detail(
             "title",
             "current_url",
         ][..],
+        "browser_click" => &[
+            "app_id",
+            "target_id",
+            "match_kind",
+            "selector",
+            "text_query",
+            "viewport_x",
+            "viewport_y",
+            "tag_name",
+            "role",
+            "href_present",
+            "snapshot",
+            "title",
+            "current_url",
+        ][..],
+        "terminal_input" => &[
+            "terminal_id",
+            "target",
+            "pane_id",
+            "key_count",
+            "text_bytes",
+            "delay_ms",
+        ][..],
         _ => unreachable!("external event kind was already validated"),
     };
     let mut sanitized = serde_json::Map::new();
@@ -3576,7 +3842,13 @@ fn metadata_only_browser_event_detail(
                 serde_json::Value::Bool(true),
             );
         }
-        "browser_snapshot" | "browser_navigate" => {
+        "browser_snapshot" | "browser_navigate" | "browser_click" => {
+            sanitized.insert(
+                "raw_text_omitted".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+        "terminal_input" => {
             sanitized.insert(
                 "raw_text_omitted".to_string(),
                 serde_json::Value::Bool(true),
@@ -6527,6 +6799,239 @@ fn add_parent_dirs(dirs: &mut BTreeSet<PathBuf>, path: &Path) {
     for parent in parents.into_iter().rev() {
         dirs.insert(parent);
     }
+}
+
+fn wait_for_terminal(
+    id: &str,
+    terminal_id: &str,
+    app_id: Option<String>,
+    timeout_ms: u64,
+) -> Result<WorkspaceTerminal> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(30_000));
+    loop {
+        match terminal_info(id, terminal_id, app_id.clone()) {
+            Ok(terminal) => return Ok(terminal),
+            Err(error) if Instant::now() >= deadline => return Err(error),
+            Err(_) => thread::sleep(Duration::from_millis(100)),
+        }
+    }
+}
+
+fn terminal_info(id: &str, terminal_id: &str, app_id: Option<String>) -> Result<WorkspaceTerminal> {
+    let id = sanitize_workspace_id(id)?;
+    let status = status_workspace(&id)?;
+    let terminal_id = sanitize_terminal_id(terminal_id)?;
+    let tmux_socket_path = status
+        .runtime_dir
+        .join(format!("terminal-{terminal_id}.tmux.sock"));
+    let session_name = terminal_id.clone();
+    let target = session_name.clone();
+    let output = tmux_output(
+        &tmux_socket_path,
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "#{pane_id}\t#{pane_width}\t#{pane_height}\t#{pane_tty}\t#{pane_current_command}\t#{pane_current_path}",
+        ],
+    )?;
+    let fields = output.trim_end().split('\t').collect::<Vec<_>>();
+    let width = fields
+        .get(1)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    let height = fields
+        .get(2)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    Ok(WorkspaceTerminal {
+        workspace_id: id,
+        terminal_id,
+        session_name,
+        tmux_socket_path,
+        target,
+        app_id,
+        pane_id: non_empty_field(fields.first().copied()),
+        pane_tty: non_empty_field(fields.get(3).copied()),
+        current_command: non_empty_field(fields.get(4).copied()),
+        current_path: non_empty_field(fields.get(5).copied()),
+        width,
+        height,
+    })
+}
+
+fn tmux_capture_pane(
+    terminal: &WorkspaceTerminal,
+    preserve_trailing_spaces: bool,
+) -> Result<String> {
+    let mut args = vec!["capture-pane", "-p", "-t", terminal.target.as_str()];
+    if preserve_trailing_spaces {
+        args.insert(2, "-N");
+    }
+    match tmux_output(&terminal.tmux_socket_path, &args) {
+        Ok(output) => Ok(output),
+        Err(error) if preserve_trailing_spaces => {
+            let fallback = tmux_output(
+                &terminal.tmux_socket_path,
+                &["capture-pane", "-p", "-t", terminal.target.as_str()],
+            )?;
+            Ok(format!(
+                "{fallback}\n[warning: tmux capture-pane -N was not available: {error}]"
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn tmux_send_literal_text(terminal: &WorkspaceTerminal, text: &str) -> Result<()> {
+    tmux_status(
+        &terminal.tmux_socket_path,
+        &[
+            "send-keys",
+            "-t",
+            terminal.target.as_str(),
+            "-l",
+            "--",
+            text,
+        ],
+    )
+}
+
+fn tmux_send_keys(terminal: &WorkspaceTerminal, keys: &[String]) -> Result<()> {
+    let mut args = vec!["send-keys", "-t", terminal.target.as_str()];
+    args.extend(keys.iter().map(String::as_str));
+    tmux_status(&terminal.tmux_socket_path, &args)
+}
+
+fn tmux_output(socket_path: &Path, args: &[&str]) -> Result<String> {
+    let output = tmux_command(socket_path, args)
+        .output()
+        .with_context(|| format!("failed to run tmux {}", args.join(" ")))?;
+    if !output.status.success() {
+        bail!(
+            "tmux {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    String::from_utf8(output.stdout).context("tmux output was not UTF-8")
+}
+
+fn tmux_status(socket_path: &Path, args: &[&str]) -> Result<()> {
+    let output = tmux_command(socket_path, args)
+        .output()
+        .with_context(|| format!("failed to run tmux {}", args.join(" ")))?;
+    if !output.status.success() {
+        bail!(
+            "tmux {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn tmux_command(socket_path: &Path, args: &[&str]) -> Command {
+    let tmux = resolve_command_path(DEFAULT_TMUX_PROGRAM)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_TMUX_PROGRAM));
+    let mut command = Command::new(tmux);
+    command.arg("-S").arg(socket_path).args(args);
+    command
+}
+
+fn non_empty_field(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn normalize_terminal_keys(keys: &[String]) -> Result<Vec<String>> {
+    keys.iter().map(|key| normalize_terminal_key(key)).collect()
+}
+
+fn normalize_terminal_key(key: &str) -> Result<String> {
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        bail!("terminal key cannot be empty");
+    }
+    if trimmed.contains('\0') {
+        bail!("terminal key cannot contain NUL bytes");
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let normalized = match lower.as_str() {
+        "return" | "enter" => "Enter".to_string(),
+        "esc" | "escape" => "Escape".to_string(),
+        "space" => "Space".to_string(),
+        "tab" => "Tab".to_string(),
+        "backspace" | "bs" => "BSpace".to_string(),
+        "delete" | "del" => "Delete".to_string(),
+        "up" | "down" | "left" | "right" => {
+            let mut chars = lower.chars();
+            let first = chars.next().unwrap().to_ascii_uppercase();
+            format!("{first}{}", chars.as_str())
+        }
+        value if value.starts_with("ctrl+") && value.len() == "ctrl+".len() + 1 => {
+            let key = value.chars().last().unwrap();
+            format!("C-{}", key.to_ascii_lowercase())
+        }
+        value if value.starts_with("c-") && value.len() == 3 => {
+            format!("C-{}", value.chars().last().unwrap().to_ascii_lowercase())
+        }
+        _ => trimmed.to_string(),
+    };
+    Ok(normalized)
+}
+
+fn terminal_key_grammar() -> Vec<String> {
+    vec![
+        "Enter/Return".to_string(),
+        "Escape/Esc".to_string(),
+        "Tab".to_string(),
+        "Space".to_string(),
+        "Backspace/BSpace".to_string(),
+        "Delete".to_string(),
+        "Up/Down/Left/Right".to_string(),
+        "ctrl+c or C-c".to_string(),
+        "tmux send-keys names such as Home, End, PageUp, PageDown, F1".to_string(),
+    ]
+}
+
+fn sanitize_terminal_id(id: &str) -> Result<String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        bail!("terminal id cannot be empty");
+    }
+    if trimmed.len() > 48 {
+        bail!("terminal id must be at most 48 characters");
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        bail!("terminal id may only contain ASCII letters, numbers, '-', '_' and '.'");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn resolve_command_path(program: &str) -> Option<PathBuf> {
+    if program.contains('/') {
+        let path = PathBuf::from(program);
+        return is_executable_file(&path).then_some(path);
+    }
+    env::var_os("PATH").and_then(|path| {
+        env::split_paths(&path)
+            .map(|dir| dir.join(program))
+            .find(|candidate| is_executable_file(candidate))
+    })
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
 }
 
 fn launch_description(command: &[String]) -> String {

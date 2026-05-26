@@ -204,8 +204,8 @@ async function main() {
     });
     notify("notifications/initialized", {});
     assert(
-      /workspace_launch_app/.test(String(initializeResult.instructions || "")),
-      `initialize instructions should expose workspace launch controls: ${initializeResult.instructions}`,
+      /workspace_open_browser/.test(String(initializeResult.instructions || "")),
+      `initialize instructions should expose workspace browser bootstrap controls: ${initializeResult.instructions}`,
     );
 
     const template = await callTool("profile_template", {
@@ -254,6 +254,8 @@ async function main() {
       "Workspace CDP Ready",
       `
         <p>workspace-cdp-ready</p>
+        <button id="filter-chip" onclick="document.getElementById('clicked').textContent = 'filter clicked'">48GB filter</button>
+        <p id="clicked">not clicked</p>
         <div data-component-type="s-search-result">
           <h2><a href="/dp/GPU48"><span>PNY Test GPU 48GB Workstation Card</span></a></h2>
           <span class="a-price"><span class="a-offscreen">$4,899.00</span></span>
@@ -274,33 +276,24 @@ async function main() {
         </div>
       `,
     );
-    const launch = await callTool(
-      "workspace_launch_app",
+    const openedBrowser = await callTool(
+      "workspace_open_browser",
       {
         id: workspaceId,
-        name: "workspace-chrome-cdp-smoke",
-        wait_window: true,
-        screenshot_window: true,
+        browser_path: browser,
+        user_data_dir: userDataDir,
+        url: initialUrl,
         window_timeout_ms: 15000,
-        command: [
-          browser,
-          `--user-data-dir=${userDataDir}`,
-          "--no-sandbox",
-          "--disable-dev-shm-usage",
-          "--remote-debugging-address=127.0.0.1",
-          "--remote-debugging-port=0",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--ozone-platform=x11",
-          "--new-window",
-          initialUrl,
-        ],
+        timeout_ms: 10000,
       },
       20000,
     );
-    assert(launch.ok === true, `workspace_launch_app failed: ${JSON.stringify(launch)}`);
-    assert(launch.screenshot?.bytes > 0, `launch should capture browser window evidence: ${JSON.stringify(launch)}`);
-    const launchedAppId = launch.apps?.[0]?.id;
+    assert(openedBrowser.ok === true, `workspace_open_browser failed: ${JSON.stringify(openedBrowser)}`);
+    assert(
+      openedBrowser.app_id && openedBrowser.target_handles?.browser_target_ids?.length >= 1,
+      `workspace_open_browser should return stable app and browser target handles: ${JSON.stringify(openedBrowser)}`,
+    );
+    const launchedAppId = openedBrowser.app_id;
 
     const mcpTargets = await callTool(
       "workspace_browser_targets",
@@ -352,6 +345,32 @@ async function main() {
       `browser_snapshot event should mark raw page text omitted: ${JSON.stringify(snapshotEvent)}`,
     );
     assertNoRawBrowserEventContent(snapshotEvent);
+
+    const clicked = await callTool(
+      "workspace_browser_click",
+      {
+        id: workspaceId,
+        app_id: launchedAppId,
+        target_id: target.id,
+        text: "48GB filter",
+        wait_ms: 250,
+        snapshot: true,
+        max_text_chars: 4000,
+        timeout_ms: 8000,
+      },
+      10000,
+    );
+    assert(
+      clicked.ok === true &&
+        clicked.click?.match_kind === "text" &&
+        /filter clicked/.test(clicked.page?.text || ""),
+      `workspace_browser_click should click by visible text without window coordinates: ${JSON.stringify(clicked)}`,
+    );
+    const clickEvents = await callTool("workspace_events", { id: workspaceId, tail: 10 });
+    const clickEvent = eventOfKind(clickEvents.events, "browser_click");
+    assert(clickEvent, `workspace_browser_click should record a browser_click event: ${JSON.stringify(clickEvents.events)}`);
+    assertNoRawBrowserEventContent(clickEvent, ["clicked_text"]);
+
     const structuredResults = await callTool(
       "workspace_browser_search_results",
       {

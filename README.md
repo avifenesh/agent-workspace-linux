@@ -1006,8 +1006,11 @@ The MCP server currently exposes the same control surface: `mcp_permissions`,
 `workspace_list_viewers`, `workspace_close_viewer`, `workspace_cleanup_stale`,
 `workspace_status`, `workspace_manifest`, `workspace_artifacts`,
 `workspace_ipc_info`, `workspace_env`, `workspace_launch_app`, `workspace_run_app`,
-`workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_browser_targets`,
-`workspace_browser_snapshot`, `workspace_browser_navigate`, `workspace_list_windows`,
+`workspace_launch_profile_apps`, `workspace_list_apps`, `workspace_open_browser`,
+`workspace_browser_targets`, `workspace_browser_snapshot`,
+`workspace_browser_search_results`, `workspace_browser_navigate`,
+`workspace_browser_click`, `workspace_run_in_terminal`,
+`workspace_terminal_read`, `workspace_terminal_input`, `workspace_list_windows`,
 `workspace_active_window`, `workspace_pointer`, `workspace_observe`,
 `workspace_wait_window`,
 `workspace_screenshot`, `workspace_screenshot_window`, `workspace_focus_window`,
@@ -1091,20 +1094,24 @@ Browser/shopping plans carry the sequence through
 approved profile start and post-start observation, and only suggest the floating
 viewer after the plan has a runnable browser workspace step. They also name the
 workspace-owned Chrome DevTools path as the preferred browser-control surface
-when a launched workspace browser exposes `DevToolsActivePort`; `workspace_browser_targets`
-derives that endpoint from the running workspace app's `--user-data-dir`, maps
+when a launched workspace browser exposes `DevToolsActivePort`;
+`workspace_open_browser` launches Chrome/Chromium with a workspace-owned profile
+and loopback DevTools flags, `workspace_browser_targets` derives that endpoint
+from the running workspace app's `--user-data-dir`, maps
 `/workspace/browser-user-data` back to the approved host profile copy when a
 mount profile is used, and returns the workspace Chrome page targets.
 `workspace_browser_snapshot` reads title, URL, visible text, headings, and links
 through that same workspace-owned target, `workspace_browser_search_results`
 extracts structured product/search cards when the page is a results list, can
-filter GPU-like results with `min_vram_gb`, and
-`workspace_browser_navigate` changes the workspace browser page while logging a
-`browser_navigate` event. Browser tool responses warn when the workspace event
-log cannot be updated, which helps catch stale daemons or IPC/schema skew. This
-keeps shopping/browser automation inside the isolated workspace rather than
-attaching to the user's normal Chrome bridge or asking agents to invent their
-own CDP/Playwright/curl side path. For
+filter GPU-like results with `min_vram_gb`, `workspace_browser_navigate` changes
+the workspace browser page while logging a `browser_navigate` event, and
+`workspace_browser_click` clicks by CSS selector, visible text, or page
+viewport-relative coordinates without subtracting browser toolbar pixels.
+Browser tool responses warn when the workspace event log cannot be updated,
+which helps catch stale daemons or IPC/schema skew. This keeps
+shopping/browser automation inside the isolated workspace rather than attaching
+to the user's normal Chrome bridge or asking agents to invent their own
+CDP/Playwright/curl side path. For
 shopping/grocery intents, including natural phrases like "buy", "purchase",
 "add to cart", "checkout", "order", or "delivery", `mcp_task_plan` also asks
 for task inputs such as
@@ -1123,6 +1130,15 @@ profile steps are preflighted against the active MCP
 permission ceiling, and saved-profile plan steps are checked against the same
 ceiling, so agents can see permission blockers before attempting the next tool
 call.
+
+For terminal/TUI work, `workspace_run_in_terminal` launches a workspace xterm
+backed by a per-workspace tmux socket and returns a stable `terminal_id`.
+`workspace_terminal_read` captures the pane text grid directly from tmux, and
+`workspace_terminal_input` writes literal text plus batched key sequences
+through tmux instead of relying on compositor focus or one-key-per-round-trip
+window events. The documented key grammar covers `Enter`/`Return`,
+`Escape`/`Esc`, arrows, `Tab`, `Backspace`, `Delete`, `ctrl+c`/`C-c`, and tmux
+key names such as `Home`, `End`, `PageUp`, `PageDown`, and `F1`.
 
 `mcp_control_state` reports the live MCP mode shared by the server and GPUI
 viewer: `active`, `read_only`, or `paused`. `mcp_control_update` changes that

@@ -82,6 +82,7 @@ run node --check scripts/mcp_no_host_display_viewer_smoke.js
 run node --check scripts/mcp_viewer_lifecycle_smoke.js
 run node --check scripts/lib/chrome_cdp.js
 run node --check scripts/mcp_workspace_browser_cdp_smoke.js
+run node --check scripts/mcp_terminal_tui_smoke.js
 run node --check scripts/real_grocery_dogfood_probe.js
 run node scripts/github_explore_dogfood_probe.js --self-test
 run node scripts/prepare_grocery_profile_copy.js --self-test
@@ -124,6 +125,7 @@ else
   run node scripts/mcp_viewer_lifecycle_smoke.js
 fi
 run node scripts/mcp_workspace_browser_cdp_smoke.js
+run node scripts/mcp_terminal_tui_smoke.js
 
 run scripts/app_qa_dogfood_smoke.sh
 if [[ "$NO_NEW_VIEWER" == "1" ]]; then

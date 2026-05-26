@@ -4,6 +4,42 @@ This file records real MCP dogfood results that gate the later permission
 hardening work. It is intentionally evidence-oriented: verified behavior goes
 here, while policy design stays in `permission-boundary-roadmap.md`.
 
+## 2026-05-26 Browser Bootstrap and TUI Ergonomics MCP Pass
+
+Environment:
+
+- Ran against the local repository build from
+  `<repo-root>`.
+- The pass focused on removing the browser and terminal/TUI workarounds found
+  while dogfooding external agents against the direct MCP.
+
+Verified:
+
+- `workspace_open_browser` launches a workspace-owned Chrome/Chromium app with
+  `--user-data-dir`, loopback `--remote-debugging-address=127.0.0.1`, and
+  `--remote-debugging-port=0`, waits for a window, and returns stable `app_id`
+  plus `browser_target_id` handles so agents do not hand-build Chrome flags.
+- `workspace_browser_click` targets a workspace browser page by CSS selector,
+  visible text, or page viewport-relative coordinates through DevTools, so page
+  clicks no longer require screenshot pixel guessing or toolbar-height
+  subtraction.
+- `workspace_run_in_terminal`, `workspace_terminal_read`, and
+  `workspace_terminal_input` provide a tmux-backed terminal handle, exact pane
+  text readout, batched key input, literal text input, and documented key/chord
+  grammar without depending on X focus.
+- Browser click and terminal input events are metadata-only: they include
+  handles, counts, target kind, and omission markers, but not raw page text or
+  typed terminal content.
+
+Finding:
+
+- Browser bootstrap and TUI automation now have first-class MCP paths. The
+  efficient dogfood route is to open the workspace viewer by default, call
+  `workspace_open_browser` for browser work, and call
+  `workspace_run_in_terminal` followed by terminal read/input tools for TUI
+  work, rather than dropping to shell-launched Chrome, screenshots, curl,
+  Playwright, or window-focus key synthesis.
+
 ## 2026-05-26 Workspace-Owned Browser CDP MCP Pass
 
 Environment:

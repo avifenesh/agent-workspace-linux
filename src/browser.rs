@@ -4,11 +4,16 @@ use anyhow::{anyhow, bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::env;
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const DEFAULT_BROWSER_OPEN_TIMEOUT_MS: u64 = 15_000;
+const DEFAULT_BROWSER_WINDOW_TIMEOUT_MS: u64 = 15_000;
+const DEFAULT_BROWSER_URL: &str = "about:blank";
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkspaceBrowserTargets {
@@ -39,6 +44,57 @@ pub struct WorkspaceBrowserTargets {
     pub recovery_hints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct WorkspaceBrowserOpen {
+    pub ok: bool,
+    pub message: String,
+    pub id: String,
+    pub url: String,
+    pub browser_path: PathBuf,
+    pub user_data_dir: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<WorkspaceApp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<workspace::WorkspaceWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targets: Option<WorkspaceBrowserTargets>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+impl WorkspaceBrowserOpen {
+    pub fn error(id: String, url: String, error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        Self {
+            ok: false,
+            message: message.clone(),
+            id,
+            url,
+            browser_path: PathBuf::new(),
+            user_data_dir: PathBuf::new(),
+            app: None,
+            app_id: None,
+            app_pid: None,
+            windows: Vec::new(),
+            targets: None,
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: browser_recovery_hints(&message),
+            warnings: Vec::new(),
+        }
+    }
 }
 
 impl WorkspaceBrowserTargets {
@@ -196,6 +252,102 @@ pub struct WorkspaceBrowserNavigate {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserClickMatch {
+    Selector,
+    Text,
+    Viewport,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct BrowserClickResult {
+    pub match_kind: BrowserClickMatch,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport_x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport_y: Option<i32>,
+    #[serde(default)]
+    pub tag_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub clicked_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub href: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rect: Option<BrowserElementRect>,
+    #[serde(default)]
+    pub viewport_width: u32,
+    #[serde(default)]
+    pub viewport_height: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct BrowserElementRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct WorkspaceBrowserClick {
+    pub ok: bool,
+    pub message: String,
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devtools_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<BrowserTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_target_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub click: Option<BrowserClickResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<BrowserPageSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+impl WorkspaceBrowserClick {
+    pub fn error(id: String, error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        let recovery_hints = browser_recovery_hints(&message);
+        let target_handles = Some(browser_target_handles(Some(id.clone()), None, Vec::new()));
+        Self {
+            ok: false,
+            message,
+            id,
+            app_id: None,
+            app_pid: None,
+            devtools_endpoint: None,
+            target: None,
+            browser_target_id: None,
+            click: None,
+            page: None,
+            agent_mode: None,
+            target_handles,
+            recovery_hints,
+            warnings: Vec::new(),
+        }
+    }
+}
+
 impl WorkspaceBrowserNavigate {
     pub fn error(id: String, url: String, error: anyhow::Error) -> Self {
         let message = error.to_string();
@@ -340,7 +492,7 @@ fn browser_recovery_hints(message: &str) -> Vec<String> {
         || lower.contains("user-data-dir")
     {
         hints.push(
-            "Relaunch the workspace browser with --user-data-dir and --remote-debugging-port=0."
+            "Call workspace_open_browser to launch Chrome/Chromium with --user-data-dir and loopback DevTools flags."
                 .to_string(),
         );
     }
@@ -377,6 +529,106 @@ struct SelectedBrowserTarget {
     targets: WorkspaceBrowserTargets,
     target: BrowserTarget,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceBrowserOpenPlan {
+    pub spec: workspace::LaunchSpec,
+    pub browser_path: PathBuf,
+    pub user_data_dir: PathBuf,
+    pub url: String,
+}
+
+pub fn workspace_browser_open_plan(
+    id: &str,
+    browser_path: Option<PathBuf>,
+    user_data_dir: Option<PathBuf>,
+    url: Option<String>,
+) -> Result<WorkspaceBrowserOpenPlan> {
+    let status = workspace::status_workspace(id)?;
+    let browser_path = browser_path
+        .or_else(|| env::var_os("BROWSER_BIN").map(PathBuf::from))
+        .or_else(find_browser_executable)
+        .context("Chrome/Chromium not found; pass browser_path or set BROWSER_BIN")?;
+    let user_data_dir = user_data_dir.unwrap_or_else(|| status.runtime_dir.join("browser-profile"));
+    let url = url.unwrap_or_else(|| DEFAULT_BROWSER_URL.to_string());
+    validate_navigation_url(&url)?;
+    let command = workspace_browser_command(&browser_path, &user_data_dir, &url);
+    Ok(WorkspaceBrowserOpenPlan {
+        spec: workspace::LaunchSpec {
+            command,
+            name: Some("workspace-browser".to_string()),
+            profile_id: None,
+            applied_policy: None,
+            user_acknowledged_unenforced_policy: false,
+            cwd: None,
+            env: Vec::new(),
+        },
+        browser_path,
+        user_data_dir,
+        url,
+    })
+}
+
+pub fn workspace_open_browser(
+    id: &str,
+    plan: WorkspaceBrowserOpenPlan,
+    wait_window: bool,
+    window_timeout_ms: Option<u64>,
+    timeout_ms: Option<u64>,
+) -> Result<WorkspaceBrowserOpen> {
+    fs::create_dir_all(&plan.user_data_dir).with_context(|| {
+        format!(
+            "failed to create browser user-data-dir {}",
+            plan.user_data_dir.display()
+        )
+    })?;
+    let launch = workspace::launch_app_with_options(
+        id,
+        plan.spec,
+        wait_window,
+        window_timeout_ms.or(Some(DEFAULT_BROWSER_WINDOW_TIMEOUT_MS)),
+        false,
+    )?;
+    if !launch.ok {
+        bail!(launch.message);
+    }
+    let app = launch
+        .apps
+        .as_ref()
+        .and_then(|apps| apps.first())
+        .cloned()
+        .context("workspace browser launch did not return an app")?;
+    let targets = workspace_browser_targets(
+        id,
+        Some(app.id.clone()),
+        Some(plan.user_data_dir.clone()),
+        Some(timeout_ms.unwrap_or(DEFAULT_BROWSER_OPEN_TIMEOUT_MS)),
+    )?;
+    let target_handles = Some(browser_target_handles(
+        Some(id.to_string()),
+        Some(app.id.clone()),
+        targets.browser_target_ids.clone(),
+    ));
+    let mut warnings = Vec::new();
+    warnings.extend(targets.warnings.clone());
+    Ok(WorkspaceBrowserOpen {
+        ok: true,
+        message: "workspace browser opened with loopback Chrome DevTools".to_string(),
+        id: id.to_string(),
+        url: plan.url,
+        browser_path: plan.browser_path,
+        user_data_dir: plan.user_data_dir,
+        app_id: Some(app.id.clone()),
+        app_pid: Some(app.pid),
+        app: Some(app),
+        windows: launch.windows.unwrap_or_default(),
+        targets: Some(targets),
+        agent_mode: None,
+        target_handles,
+        recovery_hints: Vec::new(),
+        warnings,
+    })
 }
 
 pub fn workspace_browser_targets(
@@ -802,6 +1054,120 @@ pub(crate) fn workspace_browser_navigate_from_status(
     Ok(response)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn workspace_browser_click(
+    id: &str,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    selector: Option<String>,
+    text: Option<String>,
+    viewport_x: Option<i32>,
+    viewport_y: Option<i32>,
+    wait_ms: Option<u64>,
+    snapshot: bool,
+    max_text_chars: Option<usize>,
+    timeout_ms: Option<u64>,
+) -> Result<WorkspaceBrowserClick> {
+    let status = workspace::status_workspace(id)?;
+    let mut response = workspace_browser_click_from_status(
+        &status,
+        app_id,
+        user_data_dir,
+        target_id,
+        title_contains,
+        url_contains,
+        selector,
+        text,
+        viewport_x,
+        viewport_y,
+        wait_ms,
+        snapshot,
+        max_text_chars,
+        timeout_ms,
+    )?;
+    if let Some(warning) = record_browser_event(
+        &response.id,
+        "browser_click",
+        browser_click_event_detail(&response),
+    ) {
+        response.warnings.push(warning);
+    }
+    Ok(response)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn workspace_browser_click_from_status(
+    status: &WorkspaceStatus,
+    app_id: Option<String>,
+    user_data_dir: Option<PathBuf>,
+    target_id: Option<String>,
+    title_contains: Option<String>,
+    url_contains: Option<String>,
+    selector: Option<String>,
+    text: Option<String>,
+    viewport_x: Option<i32>,
+    viewport_y: Option<i32>,
+    wait_ms: Option<u64>,
+    snapshot: bool,
+    max_text_chars: Option<usize>,
+    timeout_ms: Option<u64>,
+) -> Result<WorkspaceBrowserClick> {
+    validate_browser_click_request(selector.as_deref(), text.as_deref(), viewport_x, viewport_y)?;
+    let selected = select_browser_target_from_status(
+        status,
+        app_id,
+        user_data_dir,
+        target_id,
+        title_contains,
+        url_contains,
+        timeout_ms,
+    )?;
+    let timeout = cdp_timeout(timeout_ms);
+    let click = click_target(
+        &selected.target,
+        selector.as_deref(),
+        text.as_deref(),
+        viewport_x,
+        viewport_y,
+        timeout,
+    )?;
+    std::thread::sleep(Duration::from_millis(wait_ms.unwrap_or(250).min(30_000)));
+    let page = if snapshot {
+        Some(read_page_snapshot(
+            &selected.target,
+            max_text_chars.unwrap_or(12_000).min(200_000),
+            timeout,
+        )?)
+    } else {
+        None
+    };
+    let mut warnings = selected.targets.warnings.clone();
+    warnings.extend(selected.warnings.clone());
+    Ok(WorkspaceBrowserClick {
+        ok: true,
+        message: "workspace browser clicked through workspace-owned Chrome DevTools".to_string(),
+        id: selected.targets.id.clone(),
+        app_id: selected.targets.app_id.clone(),
+        app_pid: selected.targets.app_pid,
+        devtools_endpoint: selected.targets.devtools_endpoint.clone(),
+        target: Some(selected.target.clone()),
+        browser_target_id: Some(selected.target.id.clone()),
+        click: Some(click),
+        page,
+        agent_mode: None,
+        target_handles: Some(browser_target_handles(
+            Some(selected.targets.id.clone()),
+            selected.targets.app_id.clone(),
+            vec![selected.target.id.clone()],
+        )),
+        recovery_hints: Vec::new(),
+        warnings,
+    })
+}
+
 fn select_browser_target_from_status(
     status: &WorkspaceStatus,
     app_id: Option<String>,
@@ -906,6 +1272,29 @@ pub(crate) fn browser_navigate_event_detail(
         "target_id": response.target.as_ref().map(|target| target.id.as_str()),
         "url": &response.url,
         "frame_id": response.navigation.as_ref().and_then(|navigation| navigation.frame_id.as_deref()),
+        "snapshot": response.page.is_some(),
+        "title": response.page.as_ref().map(|page| page.title.as_str()),
+        "current_url": response.page.as_ref().map(|page| page.url.as_str()),
+        "raw_text_omitted": response.page.is_some(),
+    })
+}
+
+pub(crate) fn browser_click_event_detail(response: &WorkspaceBrowserClick) -> serde_json::Value {
+    json!({
+        "app_id": response.app_id.as_deref(),
+        "target_id": response.target.as_ref().map(|target| target.id.as_str()),
+        "match_kind": response.click.as_ref().map(|click| match click.match_kind {
+            BrowserClickMatch::Selector => "selector",
+            BrowserClickMatch::Text => "text",
+            BrowserClickMatch::Viewport => "viewport",
+        }),
+        "selector": response.click.as_ref().and_then(|click| click.selector.as_deref()),
+        "text_query": response.click.as_ref().and_then(|click| click.text.as_deref()),
+        "viewport_x": response.click.as_ref().and_then(|click| click.viewport_x),
+        "viewport_y": response.click.as_ref().and_then(|click| click.viewport_y),
+        "tag_name": response.click.as_ref().map(|click| click.tag_name.as_str()),
+        "role": response.click.as_ref().and_then(|click| click.role.as_deref()),
+        "href_present": response.click.as_ref().and_then(|click| click.href.as_ref()).is_some(),
         "snapshot": response.page.is_some(),
         "title": response.page.as_ref().map(|page| page.title.as_str()),
         "current_url": response.page.as_ref().map(|page| page.url.as_str()),
@@ -1123,6 +1512,35 @@ fn navigate_target(
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
     })
+}
+
+fn click_target(
+    target: &BrowserTarget,
+    selector: Option<&str>,
+    text: Option<&str>,
+    viewport_x: Option<i32>,
+    viewport_y: Option<i32>,
+    timeout: Duration,
+) -> Result<BrowserClickResult> {
+    let value = cdp_request(
+        target,
+        "Runtime.evaluate",
+        json!({
+            "expression": click_expression(selector, text, viewport_x, viewport_y),
+            "returnByValue": true,
+            "awaitPromise": true,
+        }),
+        timeout,
+    )?;
+    if let Some(exception) = value.get("exceptionDetails") {
+        bail!("browser click Runtime.evaluate failed: {exception}");
+    }
+    let click_value = value
+        .get("result")
+        .and_then(|result| result.get("value"))
+        .cloned()
+        .context("browser click Runtime.evaluate did not return a JSON value")?;
+    serde_json::from_value(click_value).context("failed to parse browser click result")
 }
 
 fn cdp_request(
@@ -1373,6 +1791,111 @@ fn search_results_expression(max_results: usize, min_vram_gb: Option<u32>) -> St
     )
 }
 
+fn click_expression(
+    selector: Option<&str>,
+    text: Option<&str>,
+    viewport_x: Option<i32>,
+    viewport_y: Option<i32>,
+) -> String {
+    let selector = json_literal(selector);
+    let text = json_literal(text);
+    let viewport_x = viewport_x
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    let viewport_y = viewport_y
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        r#"(async () => {{
+  const selector = {selector};
+  const textQuery = {text};
+  const viewportX = {viewport_x};
+  const viewportY = {viewport_y};
+  const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const visible = (element) => {{
+    if (!element || !(element instanceof Element)) return false;
+    const style = getComputedStyle(element);
+    if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }};
+  const clickableRoot = (element) =>
+    element && element.closest("button,a,input,select,textarea,label,summary,[role='button'],[role='link'],[onclick],[tabindex]");
+  const describe = (element, matchKind) => {{
+    const rect = element.getBoundingClientRect();
+    const href = element.href || (element.closest && element.closest("a[href]") && element.closest("a[href]").href) || null;
+    return {{
+      match_kind: matchKind,
+      selector,
+      text: textQuery,
+      viewport_x: viewportX,
+      viewport_y: viewportY,
+      tag_name: String(element.tagName || "").toLowerCase(),
+      role: element.getAttribute("role") || null,
+      clicked_text: clean(element.innerText || element.textContent || element.value || element.getAttribute("aria-label") || element.title || ""),
+      href,
+      rect: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
+      viewport_width: window.innerWidth || 0,
+      viewport_height: window.innerHeight || 0
+    }};
+  }};
+  const clickElement = async (rawElement, matchKind, clientX = null, clientY = null) => {{
+    let element = clickableRoot(rawElement) || rawElement;
+    if (!element || !(element instanceof Element)) throw new Error("matched browser element is not clickable");
+    if (element.disabled || element.getAttribute("aria-disabled") === "true") throw new Error("matched browser element is disabled");
+    if (matchKind !== "viewport") {{
+      element.scrollIntoView({{ block: "center", inline: "center" }});
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }}
+    const rect = element.getBoundingClientRect();
+    const x = clientX === null ? rect.left + Math.max(1, rect.width / 2) : clientX;
+    const y = clientY === null ? rect.top + Math.max(1, rect.height / 2) : clientY;
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {{
+      const event = type.startsWith("pointer")
+        ? new PointerEvent(type, {{ bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: "mouse", isPrimary: true }})
+        : new MouseEvent(type, {{ bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 }});
+      element.dispatchEvent(event);
+    }}
+    return describe(element, matchKind);
+  }};
+  if (selector !== null) {{
+    const element = document.querySelector(selector);
+    if (!element) throw new Error(`no element matched selector ${{selector}}`);
+    if (!visible(element)) throw new Error(`element matched selector ${{selector}} but is not visible`);
+    return await clickElement(element, "selector");
+  }}
+  if (textQuery !== null) {{
+    const needle = clean(textQuery).toLowerCase();
+    if (!needle) throw new Error("text query cannot be empty");
+    const preferred = Array.from(document.querySelectorAll("button,a,input,select,textarea,label,summary,[role='button'],[role='link'],[onclick],[tabindex]"));
+    const fallback = Array.from(document.querySelectorAll("body *"));
+    const candidates = [...preferred, ...fallback]
+      .filter(visible)
+      .map((element) => ({{ element, text: clean(element.innerText || element.textContent || element.value || element.getAttribute("aria-label") || element.title || "") }}))
+      .filter((candidate) => candidate.text.toLowerCase().includes(needle))
+      .sort((a, b) => a.text.length - b.text.length);
+    if (!candidates.length) throw new Error(`no visible element contained text ${{textQuery}}`);
+    return await clickElement(candidates[0].element, "text");
+  }}
+  if (viewportX !== null && viewportY !== null) {{
+    if (viewportX < 0 || viewportY < 0 || viewportX >= window.innerWidth || viewportY >= window.innerHeight) {{
+      throw new Error(`viewport coordinates ${{viewportX}},${{viewportY}} are outside the page viewport ${{window.innerWidth}}x${{window.innerHeight}}`);
+    }}
+    const element = document.elementFromPoint(viewportX, viewportY);
+    if (!element) throw new Error(`no browser element at viewport coordinates ${{viewportX}},${{viewportY}}`);
+    return await clickElement(element, "viewport", viewportX, viewportY);
+  }}
+  throw new Error("selector, text, or viewport_x + viewport_y is required");
+}})()"#
+    )
+}
+
+fn json_literal(value: Option<&str>) -> String {
+    value
+        .map(|value| serde_json::to_string(value).expect("string serialization cannot fail"))
+        .unwrap_or_else(|| "null".to_string())
+}
+
 fn validate_navigation_url(url: &str) -> Result<()> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
@@ -1387,6 +1910,36 @@ fn validate_navigation_url(url: &str) -> Result<()> {
         return Ok(());
     }
     bail!("browser navigation URL must start with http://, https://, data:, or be about:blank")
+}
+
+fn validate_browser_click_request(
+    selector: Option<&str>,
+    text: Option<&str>,
+    viewport_x: Option<i32>,
+    viewport_y: Option<i32>,
+) -> Result<()> {
+    let selector = selector.map(str::trim).filter(|value| !value.is_empty());
+    let text = text.map(str::trim).filter(|value| !value.is_empty());
+    let has_viewport = viewport_x.is_some() || viewport_y.is_some();
+    let count =
+        usize::from(selector.is_some()) + usize::from(text.is_some()) + usize::from(has_viewport);
+    if count == 0 {
+        bail!("browser click requires selector, text, or viewport_x plus viewport_y");
+    }
+    if count > 1 {
+        bail!(
+            "browser click accepts only one target mode: selector, text, or viewport coordinates"
+        );
+    }
+    if has_viewport && (viewport_x.is_none() || viewport_y.is_none()) {
+        bail!("browser click viewport mode requires both viewport_x and viewport_y");
+    }
+    if let (Some(x), Some(y)) = (viewport_x, viewport_y) {
+        if x < 0 || y < 0 {
+            bail!("browser click viewport coordinates must be non-negative");
+        }
+    }
+    Ok(())
 }
 
 fn record_browser_event(id: &str, kind: &str, detail: serde_json::Value) -> Option<String> {
@@ -1526,7 +2079,7 @@ fn select_browser_app(
             bail!("no running workspace browser app matched app id/name/pid {app_id:?}");
         }
         bail!(
-            "no running workspace browser app exposes --user-data-dir and Chrome DevTools; launch Chrome inside the workspace with --remote-debugging-address=127.0.0.1 --remote-debugging-port=0"
+            "no running workspace browser app exposes --user-data-dir and Chrome DevTools; call workspace_open_browser or launch Chrome inside the workspace with --remote-debugging-address=127.0.0.1 --remote-debugging-port=0"
         );
     }
     if candidates.len() > 1 && app_id.is_none() && user_data_dir.is_none() {
@@ -1583,6 +2136,66 @@ fn map_mount_path(mounts: &[ProfileMount], workspace_path: &Path) -> Option<Path
         let relative = workspace_path.strip_prefix(&mount.workspace_path).ok()?;
         Some(mount.host_path.join(relative))
     })
+}
+
+fn workspace_browser_command(browser_path: &Path, user_data_dir: &Path, url: &str) -> Vec<String> {
+    vec![
+        browser_path.display().to_string(),
+        format!("--user-data-dir={}", user_data_dir.display()),
+        "--no-sandbox".to_string(),
+        "--disable-dev-shm-usage".to_string(),
+        "--remote-debugging-address=127.0.0.1".to_string(),
+        "--remote-debugging-port=0".to_string(),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+        "--ozone-platform=x11".to_string(),
+        "--new-window".to_string(),
+        url.to_string(),
+    ]
+}
+
+fn find_browser_executable() -> Option<PathBuf> {
+    for candidate in [
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+    ] {
+        if let Some(path) = resolve_executable(candidate) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn resolve_executable(program: &str) -> Option<PathBuf> {
+    if program.contains('/') {
+        let path = PathBuf::from(program);
+        return is_executable_file(&path).then_some(path);
+    }
+    env::var_os("PATH").and_then(|path| {
+        env::split_paths(&path)
+            .map(|dir| dir.join(program))
+            .find(|candidate| is_executable_file(candidate))
+    })
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn command_user_data_dir(command: &[String]) -> Option<PathBuf> {

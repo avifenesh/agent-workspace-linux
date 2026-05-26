@@ -103,6 +103,14 @@ impl AgentWorkspaceLinux {
         response
     }
 
+    fn decorate_browser_open(
+        &self,
+        mut response: browser::WorkspaceBrowserOpen,
+    ) -> browser::WorkspaceBrowserOpen {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
+
     fn decorate_browser_snapshot(
         &self,
         mut response: browser::WorkspaceBrowserSnapshot,
@@ -123,6 +131,14 @@ impl AgentWorkspaceLinux {
         &self,
         mut response: browser::WorkspaceBrowserNavigate,
     ) -> browser::WorkspaceBrowserNavigate {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
+
+    fn decorate_browser_click(
+        &self,
+        mut response: browser::WorkspaceBrowserClick,
+    ) -> browser::WorkspaceBrowserClick {
         response.agent_mode = Some(build_agent_mode_summary(self.headless));
         response
     }
@@ -1362,6 +1378,172 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "workspace_run_in_terminal",
+        description = "Launch an xterm inside an isolated workspace backed by a per-workspace tmux socket. Returns a terminal_id, tmux pane target, pane tty, app_id, and window handles so TUI agents can use workspace_terminal_read and workspace_terminal_input instead of screenshots and coordinate guessing. The command is optional; when omitted tmux starts the default shell.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_run_in_terminal(
+        &self,
+        Parameters(params): Parameters<WorkspaceRunInTerminalParams>,
+    ) -> Json<WorkspaceTerminalRunResult> {
+        let id = params
+            .id
+            .clone()
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(
+            match workspace::terminal_launch_plan(
+                &id,
+                params.terminal_id,
+                params.title,
+                params.terminal_program,
+                params.command,
+            )
+            .and_then(|plan| {
+                self.enforce_agent_mutation("workspace_run_in_terminal")?;
+                self.permissions.validate_launch_spec(&plan.spec)?;
+                workspace::run_in_terminal(
+                    &id,
+                    plan,
+                    params.wait_window.unwrap_or(true),
+                    params.window_timeout_ms,
+                    params.timeout_ms,
+                )
+            }) {
+                Ok((launch, terminal)) => {
+                    let app = launch.apps.as_ref().and_then(|apps| apps.first()).cloned();
+                    WorkspaceTerminalRunResult {
+                        ok: true,
+                        message: "workspace terminal launched with tmux text control".to_string(),
+                        target_handles: Some(terminal_target_handles(
+                            &terminal,
+                            app.as_ref(),
+                            &launch.windows,
+                        )),
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: Vec::new(),
+                        windows: launch.windows.unwrap_or_default(),
+                        app,
+                        terminal: Some(terminal),
+                    }
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    WorkspaceTerminalRunResult {
+                        ok: false,
+                        message: message.clone(),
+                        terminal: None,
+                        app: None,
+                        windows: Vec::new(),
+                        target_handles: None,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                    }
+                }
+            },
+        )
+    }
+
+    #[tool(
+        name = "workspace_terminal_read",
+        description = "Read the current text grid from a workspace terminal launched by workspace_run_in_terminal. This uses tmux capture-pane through the terminal_id handle, so TUI state is exact text instead of a PNG screenshot. Set preserve_trailing_spaces=true when fixed-width board layout matters.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_terminal_read(
+        &self,
+        Parameters(params): Parameters<WorkspaceTerminalReadParams>,
+    ) -> Json<WorkspaceTerminalReadResult> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(
+            match workspace::read_terminal(&id, params.terminal_id, params.preserve_trailing_spaces)
+            {
+                Ok(screen) => WorkspaceTerminalReadResult {
+                    ok: true,
+                    message: "workspace terminal text returned".to_string(),
+                    target_handles: Some(terminal_screen_target_handles(&screen)),
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
+                    screen: Some(screen),
+                },
+                Err(error) => {
+                    let message = error.to_string();
+                    WorkspaceTerminalReadResult {
+                        ok: false,
+                        message: message.clone(),
+                        screen: None,
+                        target_handles: None,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                    }
+                }
+            },
+        )
+    }
+
+    #[tool(
+        name = "workspace_terminal_input",
+        description = "Send literal text and/or a batch of keys to a workspace terminal launched by workspace_run_in_terminal. This writes through the tmux pane target, bypassing window-manager focus. Keys use tmux send-keys grammar: Enter/Return, Escape/Esc, Tab, Space, Backspace/BSpace, Delete, Up/Down/Left/Right, ctrl+c or C-c, plus tmux names such as Home, End, PageUp, PageDown, and F1. Optional delay_ms inserts a bounded pause between keys.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn workspace_terminal_input(
+        &self,
+        Parameters(params): Parameters<WorkspaceTerminalInputParams>,
+    ) -> Json<WorkspaceTerminalInputResult> {
+        let id = params
+            .id
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(
+            match self
+                .enforce_agent_mutation("workspace_terminal_input")
+                .and_then(|_| {
+                    workspace::terminal_input(
+                        &id,
+                        params.terminal_id,
+                        params.keys,
+                        params.text,
+                        params.delay_ms,
+                    )
+                }) {
+                Ok(input) => WorkspaceTerminalInputResult {
+                    ok: true,
+                    message: "workspace terminal input sent".to_string(),
+                    target_handles: Some(terminal_input_target_handles(&input)),
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
+                    input: Some(input),
+                },
+                Err(error) => {
+                    let message = error.to_string();
+                    WorkspaceTerminalInputResult {
+                        ok: false,
+                        message: message.clone(),
+                        input: None,
+                        target_handles: None,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                    }
+                }
+            },
+        )
+    }
+
+    #[tool(
         name = "workspace_list_apps",
         description = "List apps launched inside an isolated agent workspace, optionally filtering by app id/pid/name, app name substring, command substring, profile id, or running/stopped state. Falls back to the saved app snapshot when the workspace daemon has stopped.",
         annotations(
@@ -1386,6 +1568,52 @@ impl AgentWorkspaceLinux {
             params.profile_id,
             params.running,
         )))
+    }
+
+    #[tool(
+        name = "workspace_open_browser",
+        description = "Launch Chrome/Chromium inside an already-running isolated workspace with the correct workspace-owned browser-control flags: --user-data-dir, --remote-debugging-address=127.0.0.1, and --remote-debugging-port=0. Defaults to a disposable per-workspace browser profile and about:blank, waits for the first window, then returns app_id and browser_target_id handles. Use this before workspace_browser_navigate/snapshot/click so agents do not need to shell out or hand-build Chrome flags.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_open_browser(
+        &self,
+        Parameters(params): Parameters<WorkspaceOpenBrowserParams>,
+    ) -> Json<browser::WorkspaceBrowserOpen> {
+        let id = params
+            .id
+            .clone()
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        let url = params
+            .url
+            .clone()
+            .unwrap_or_else(|| "about:blank".to_string());
+        Json(
+            self.decorate_browser_open(
+                (|| -> Result<browser::WorkspaceBrowserOpen> {
+                    self.enforce_agent_mutation("workspace_open_browser")?;
+                    let plan = browser::workspace_browser_open_plan(
+                        &id,
+                        params.browser_path,
+                        params.user_data_dir,
+                        params.url,
+                    )?;
+                    self.permissions.validate_launch_spec(&plan.spec)?;
+                    browser::workspace_open_browser(
+                        &id,
+                        plan,
+                        params.wait_window.unwrap_or(true),
+                        params.window_timeout_ms,
+                        params.timeout_ms,
+                    )
+                })()
+                .unwrap_or_else(|error| browser::WorkspaceBrowserOpen::error(id, url, error)),
+            ),
+        )
     }
 
     #[tool(
@@ -1528,6 +1756,50 @@ impl AgentWorkspaceLinux {
                     )
                 })()
                 .unwrap_or_else(|error| browser::WorkspaceBrowserNavigate::error(id, url, error)),
+            ),
+        )
+    }
+
+    #[tool(
+        name = "workspace_browser_click",
+        description = "Click inside a workspace-owned Chrome/Chromium page target through Chrome DevTools. Target by CSS selector, visible text, or viewport_x/viewport_y page coordinates; viewport coordinates are page viewport-relative, not window/screenshot coordinates, so agents do not subtract browser toolbar height. This mutates only the isolated workspace browser, records a metadata-only browser_click event, and can return a post-click page snapshot.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    fn workspace_browser_click(
+        &self,
+        Parameters(params): Parameters<WorkspaceBrowserClickParams>,
+    ) -> Json<browser::WorkspaceBrowserClick> {
+        let id = params
+            .id
+            .clone()
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+        Json(
+            self.decorate_browser_click(
+                (|| -> Result<browser::WorkspaceBrowserClick> {
+                    self.enforce_agent_mutation("workspace_browser_click")?;
+                    browser::workspace_browser_click(
+                        &id,
+                        params.app_id,
+                        params.user_data_dir,
+                        params.target_id,
+                        params.title_contains,
+                        params.url_contains,
+                        params.selector,
+                        params.text,
+                        params.viewport_x,
+                        params.viewport_y,
+                        params.wait_ms,
+                        params.snapshot,
+                        params.max_text_chars,
+                        params.timeout_ms,
+                    )
+                })()
+                .unwrap_or_else(|error| browser::WorkspaceBrowserClick::error(id, error)),
             ),
         )
     }
@@ -2771,6 +3043,7 @@ Use mcp_agent_context for one low-noise snapshot with active/read_only/paused, h
 If configured=true, any populated permission dimensions are an immutable spawn-time ceiling for profile, start, launch, setup, and startup actions; clients may only narrow those dimensions. If configured=true but restricted=false, the MCP has an explicit empty/open ceiling, so enforcement stays open while the configured state remains visible. If configured=false, the MCP does not impose its own ceiling; respect the host/client harness boundary and use mcp_action_catalog plus each tool's annotations and description to classify the action type before acting. \
 Use mcp_control_update only when the user or controlling UI asks to switch active/read_only/paused; when reactivating from read_only or paused to active, pass confirmed_user_request=true only after explicit user or controlling UI approval. read_only and paused block mutating agent actions while preserving inspection and safety stop. \
 workspace_start and workspace_open_profile are host-visible/open-world by default because non-headless sessions with workspace_doctor.ready_for_host_viewer=true auto-open the GPUI monitor; pass open_viewer=false only when the user or embedding host explicitly wants no monitor. \
+Use workspace_open_browser to launch workspace-owned Chrome/Chromium with --user-data-dir and loopback DevTools flags before browser navigation, snapshots, search extraction, or browser clicks. Use workspace_browser_click for CSS selector, visible text, or page viewport-coordinate clicks. Use workspace_run_in_terminal for TUI apps, then workspace_terminal_read for exact pane text and workspace_terminal_input for batched focus-independent keys/text. \
 workspace_open_viewer is host-visible and open-world; it can launch the GPUI monitor unless this MCP process was started with --headless or workspace_doctor reports ready_for_host_viewer=false, in which case it must run without host-visible UI. Use workspace_list_viewers and workspace_close_viewer for repo-owned GPUI viewer lifecycle control when compositor/window automation cannot see or close the viewer; workspace_close_viewer only signals registered viewer pids whose command line still matches the registry entry, and dry_run=true previews the close. Use workspace_guardrails to inspect acknowledgement, dry-run, explicit override, timeout-termination, and workspace-scope rules for UI approval flows. Use workspace_doctor to check runtime readiness, viewer host-display readiness, and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_validate/profile_template/profile_put/profile_import/profile_export/profile_delete to manage saved environment profiles. Use profile_validate to preflight a local JSON profile file without saving it. Use profile_export to return a saved profile and optionally write it to output_path; set replace=true only when intentionally overwriting an existing file. Use profile_put with dry_run=true to preview whether a profile would be created, replaced, or rejected without writing. Use profile_import when the UI has a local JSON file path instead of an already parsed profile object. Use profile_delete with dry_run=true to return the saved profile without deleting it. profile_template can generate starter JSON such as project-dev, restricted-chrome, and browser-session before saving with profile_put; restricted-chrome and browser-session intentionally expose their --no-sandbox browser commands for bubblewrap namespace compatibility. browser-session requires user_data_dir and is intended only for explicitly user-approved browser data directories. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. Preview scope matters: workspace_start dry_run=true and workspace_open_profile dry_run=true are pre-daemon approval previews that do not create runtime state; workspace_launch_app, workspace_run_app, workspace_run_profile_setup, and workspace_launch_profile_apps dry_run=true are daemon-attached previews and require an already running workspace. Dry-run preview responses include an approval bundle when acknowledgement UI data is available. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. Pass purpose when a human-readable reason should be shown in workspace_status and the start event. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles, disabled-network profiles, and local_only network profiles are enforced with bubblewrap when bubblewrap is available; local_only uses a loopback-only sandbox namespace and does not bridge host localhost services. The current product network modes are closed/disabled, local/local_only, and open/inherit_host; allowlist network profiles are advanced/legacy declared intent only and are not enforced by the X11 runtime. workspace_status reports live daemon state, including the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_manifest to inspect saved manifest state from disk for live or stopped workspaces without contacting the workspace daemon. Use workspace_artifacts to inventory saved runtime files such as manifest, event log, daemon logs, app logs, and screenshots when present; set existing_only=true when only present paths are needed. Use workspace_ipc_info to verify daemon IPC protocol metadata, transport, framing, encoding, and socket path. Use workspace_env to get DISPLAY, XAUTHORITY, runtime directory, and control socket values for external tools that need to attach to the hidden workspace. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale with dry_run=true to preview unreachable runtime directories and verified orphan process cleanup before deletion. Use workspace_list_apps to inspect launched apps, including named apps and running/stopped state; it can read the saved app snapshot after a workspace has stopped. Use workspace_browser_targets after launching Chrome/Chromium with --remote-debugging-port=0 to discover workspace-owned page targets, workspace_browser_snapshot to read page title/text/links, and workspace_browser_navigate to change the workspace browser page without using the host Chrome bridge or external browser automation. App action and log-read responses include the directly affected app in the top-level apps field when available. Use workspace_open_profile to start a profile-backed workspace, optionally wait for setup, and open startup apps after setup succeeds in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr; set kill_on_timeout=true to terminate timed-out commands. workspace_wait_app also accepts kill_on_timeout=true to terminate an already launched app when its wait timeout elapses. workspace_launch_app and workspace_run_app accept optional names, workspace_list_apps can filter by app name or running pid or app_id, and named apps can be referenced anywhere an app target is accepted, including logs, waits, kill dry-runs, kills, and window app_id filters. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_focus_matching_window, workspace_close_window, workspace_close_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click, workspace_click_window, workspace_move_pointer, workspace_move_pointer_window, workspace_drag, workspace_drag_window, workspace_scroll, workspace_scroll_window, workspace_key, workspace_key_window, workspace_type_text, workspace_type_window, workspace_set_clipboard, workspace_get_clipboard, workspace_paste_text, and workspace_paste_window run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_wait_window, workspace_active_window, workspace_pointer, workspace_observe, workspace_focus_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click_window, workspace_move_pointer_window, workspace_drag_window, workspace_scroll_window, workspace_key_window, workspace_type_window, or workspace_paste_window after launching GUI apps. Prefer window-targeted tools when acting on a specific app window rather than the workspace root or current focus. Window match filters accept title_contains, class_contains, pid, or app_id; class_contains matches wm_class and wm_instance. Use workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, and workspace_show_window to arrange app windows before screenshots or repeated QA interactions. workspace_show_window match filters include hidden windows, so it can restore minimized apps by title/class/pid/app without first listing its raw X11 id. Use workspace_list_windows with title_contains, class_contains, pid, or app_id filters to inspect specific current app windows. Use workspace_list_windows or workspace_observe with include_hidden=true when a minimized or hidden app needs to be found again; returned windows include wm_class, wm_instance, and app_id when X11/process metadata is available. Use workspace_paste_text or workspace_paste_window when inserting long text is more reliable than synthetic typing. Use workspace_run_profile_setup with wait=true when setup command completion matters; set kill_on_timeout=true to clean up timed-out setup commands. Use workspace_status or workspace_observe when a full live app snapshot is useful. Use workspace_observe, workspace_screenshot, workspace_screenshot_window, workspace_list_apps, workspace_browser_targets, workspace_browser_snapshot, workspace_list_windows, workspace_active_window, workspace_pointer, workspace_wait_app, workspace_read_app_log, workspace_get_clipboard, and workspace_events to inspect the workspace before acting. For incremental event polling, pass workspace_events since_sequence with the last seen event sequence. workspace_screenshot_window captures a specific app window by id/title/class/pid/app filters. workspace_read_app_log can read saved stdout/stderr after a workspace has stopped when its manifest remains on disk. workspace_events records IPC activity without storing raw typed text, raw clipboard-set text, or raw pasted text, and can read saved event history after a workspace has stopped. workspace_close_window, workspace_close_matching_window, workspace_kill_app, workspace_minimize_window, and workspace_show_window affect only workspace-local windows/apps. workspace_close_window and workspace_close_matching_window with dry_run=true resolve the targeted window without closing it. workspace_kill_app with dry_run=true resolves the matched app without terminating it. workspace_stop with dry_run=true previews currently running apps without stopping; without dry_run it terminates the workspace and apps launched inside it, then waits for the daemon IPC socket to close."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
@@ -7466,6 +7739,74 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 "Tell the user the timeout cleanup behavior before running long commands.",
             ),
             mcp_action(
+                "workspace_run_in_terminal",
+                "terminal",
+                false,
+                true,
+                false,
+                false,
+                false,
+                "blocked_when_not_active",
+                "Starts an xterm backed by a per-workspace tmux socket and returns terminal_id, pane tty, app_id, and window handles. Use this for TUI apps instead of hand-rolled xterm launch commands.",
+            )
+            .with_parameter_note(
+                "command",
+                "set",
+                "Runs a command inside the tmux-backed terminal; when omitted, tmux starts the default shell.",
+                "Blocked while live control is read_only or paused because this launches an app.",
+                "Use for games, editors, REPLs, and other terminal UIs that need text readback.",
+            )
+            .with_parameter_note(
+                "terminal_id",
+                "set",
+                "Creates a stable terminal handle used by workspace_terminal_read and workspace_terminal_input.",
+                "Blocked while live control is read_only or paused because this launches an app.",
+                "Pick a short semantic id when several terminals will be active.",
+            ),
+            mcp_action(
+                "workspace_terminal_read",
+                "terminal",
+                true,
+                false,
+                false,
+                false,
+                false,
+                "observation_allowed",
+                "Reads exact terminal pane text through tmux capture-pane instead of a screenshot.",
+            )
+            .with_parameter_note(
+                "preserve_trailing_spaces",
+                "true",
+                "Asks tmux to preserve trailing spaces when fixed-width cell layout matters.",
+                "Allowed while live control is read_only or paused.",
+                "Use for board/grid TUIs where empty cells matter.",
+            ),
+            mcp_action(
+                "workspace_terminal_input",
+                "terminal",
+                false,
+                true,
+                false,
+                false,
+                false,
+                "blocked_when_not_active",
+                "Sends literal text and/or an array of keys to a tmux-backed terminal, bypassing window focus and batching multiple keypresses in one call.",
+            )
+            .with_parameter_note(
+                "keys",
+                "set",
+                "Sends a sequence such as [\"Up\", \"Left\", \"Enter\"] using tmux send-keys grammar.",
+                "Blocked while live control is read_only or paused because it mutates terminal state.",
+                "Use arrays for TUI navigation instead of one MCP round trip per key.",
+            )
+            .with_parameter_note(
+                "text",
+                "set",
+                "Sends literal text with tmux send-keys -l; raw text is omitted from workspace events.",
+                "Blocked while live control is read_only or paused because it mutates terminal state.",
+                "Use with keys=[\"Enter\"] to submit commands in one call.",
+            ),
+            mcp_action(
                 "workspace_list_apps",
                 "observation",
                 true,
@@ -7475,6 +7816,38 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 false,
                 "observation_allowed",
                 "Lists launched app records.",
+            ),
+            mcp_action(
+                "workspace_open_browser",
+                "browser",
+                false,
+                true,
+                false,
+                false,
+                true,
+                "blocked_when_not_active",
+                "Launches a workspace-owned Chrome/Chromium app with a disposable profile by default and the required loopback DevTools flags. Returns app_id and browser_target_id handles so agents can navigate, snapshot, search, or click without shelling out.",
+            )
+            .with_parameter_note(
+                "browser_path",
+                "set",
+                "Pins the Chrome/Chromium executable when auto-discovery is not enough.",
+                "Blocked while live control is read_only or paused because this launches an app.",
+                "Use only an explicitly available browser binary; permission ceilings may allowlist app commands.",
+            )
+            .with_parameter_note(
+                "user_data_dir",
+                "set",
+                "Uses a specific browser profile directory instead of the disposable workspace runtime profile.",
+                "Blocked while live control is read_only or paused because this launches an app.",
+                "Use a disposable copy for authenticated sessions unless the user explicitly approved the profile path.",
+            )
+            .with_parameter_note(
+                "url",
+                "set",
+                "Opens the initial page and may contact external web services for http(s) URLs.",
+                "Blocked while live control is read_only or paused.",
+                "For shopping/grocery tasks, keep checkout, purchase, payment, and account changes behind separate real-world approval.",
             ),
             mcp_action(
                 "workspace_browser_targets",
@@ -7582,6 +7955,38 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 "Skips the post-navigation DOM readback.",
                 "Blocked while live control is read_only or paused because navigation still mutates browser state.",
                 "Leave enabled when collecting dogfood evidence so the result proves the visible page state.",
+            ),
+            mcp_action(
+                "workspace_browser_click",
+                "browser",
+                false,
+                true,
+                false,
+                false,
+                true,
+                "blocked_when_not_active",
+                "Clicks a workspace-owned browser page through Chrome DevTools by selector, visible text, or page viewport coordinates. Viewport coordinates are page-relative, not Chrome-window-relative, so browser toolbar height is not part of the coordinate math.",
+            )
+            .with_parameter_note(
+                "selector",
+                "set",
+                "Clicks the visible element matched by a CSS selector.",
+                "Blocked while live control is read_only or paused because clicking mutates browser state.",
+                "Prefer selector when the DOM surface is stable.",
+            )
+            .with_parameter_note(
+                "text",
+                "set",
+                "Clicks the shortest visible clickable element whose text, value, aria-label, or title contains the requested text.",
+                "Blocked while live control is read_only or paused because clicking mutates browser state.",
+                "Prefer text for filter chips, buttons, and links when a screenshot would otherwise require pixel guessing.",
+            )
+            .with_parameter_note(
+                "viewport_x/viewport_y",
+                "set",
+                "Clicks the element at page viewport coordinates from document.elementFromPoint.",
+                "Blocked while live control is read_only or paused because clicking mutates browser state.",
+                "Use as a visual fallback after a browser screenshot; do not subtract browser toolbar height.",
             ),
             mcp_action(
                 "workspace_list_windows",
@@ -8299,6 +8704,52 @@ struct WorkspaceRunResult {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
+struct WorkspaceTerminalRunResult {
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    terminal: Option<workspace::WorkspaceTerminal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app: Option<workspace::WorkspaceApp>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    windows: Vec<workspace::WorkspaceWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct WorkspaceTerminalReadResult {
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    screen: Option<workspace::WorkspaceTerminalScreen>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct WorkspaceTerminalInputResult {
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    input: Option<workspace::WorkspaceTerminalInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct WorkspaceViewerAutoOpen {
     requested: bool,
     attempted: bool,
@@ -8527,6 +8978,24 @@ struct WorkspaceListAppsParams {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceOpenBrowserParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    browser_path: Option<PathBuf>,
+    #[serde(default)]
+    user_data_dir: Option<PathBuf>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    wait_window: Option<bool>,
+    #[serde(default)]
+    window_timeout_ms: Option<u64>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 struct WorkspaceBrowserTargetsParams {
     #[serde(default)]
     id: Option<String>,
@@ -8607,6 +9076,38 @@ struct WorkspaceBrowserNavigateParams {
 
 fn default_browser_navigate_snapshot() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceBrowserClickParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    app_id: Option<String>,
+    #[serde(default)]
+    user_data_dir: Option<PathBuf>,
+    #[serde(default)]
+    target_id: Option<String>,
+    #[serde(default)]
+    title_contains: Option<String>,
+    #[serde(default)]
+    url_contains: Option<String>,
+    #[serde(default)]
+    selector: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    viewport_x: Option<i32>,
+    #[serde(default)]
+    viewport_y: Option<i32>,
+    #[serde(default)]
+    wait_ms: Option<u64>,
+    #[serde(default = "default_browser_navigate_snapshot")]
+    snapshot: bool,
+    #[serde(default)]
+    max_text_chars: Option<usize>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -8729,6 +9230,50 @@ impl WorkspaceRunParams {
         }
         Ok(spec)
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceRunInTerminalParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    terminal_id: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    terminal_program: Option<PathBuf>,
+    #[serde(default)]
+    command: Vec<String>,
+    #[serde(default)]
+    wait_window: Option<bool>,
+    #[serde(default)]
+    window_timeout_ms: Option<u64>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceTerminalReadParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    terminal_id: Option<String>,
+    #[serde(default)]
+    preserve_trailing_spaces: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct WorkspaceTerminalInputParams {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    terminal_id: Option<String>,
+    #[serde(default)]
+    keys: Vec<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    delay_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -9333,6 +9878,65 @@ fn workspace_run_target_handles(
     (!handles.is_empty()).then_some(handles)
 }
 
+fn terminal_target_handles(
+    terminal: &workspace::WorkspaceTerminal,
+    app: Option<&workspace::WorkspaceApp>,
+    windows: &Option<Vec<workspace::WorkspaceWindow>>,
+) -> AgentTargetHandles {
+    let mut handles = AgentTargetHandles {
+        workspace_id: Some(terminal.workspace_id.clone()),
+        ..Default::default()
+    };
+    push_unique(&mut handles.terminal_ids, terminal.terminal_id.clone());
+    if let Some(app) = app {
+        push_unique(&mut handles.app_ids, app.id.clone());
+    }
+    if let Some(app_id) = terminal.app_id.clone() {
+        push_unique(&mut handles.app_ids, app_id);
+    }
+    if let Some(windows) = windows {
+        for window in windows {
+            push_unique(&mut handles.window_ids, window.id.clone());
+            if let Some(app_id) = window.app_id.clone() {
+                push_unique(&mut handles.app_ids, app_id);
+            }
+        }
+    }
+    handles
+}
+
+fn terminal_screen_target_handles(
+    screen: &workspace::WorkspaceTerminalScreen,
+) -> AgentTargetHandles {
+    let mut handles = AgentTargetHandles {
+        workspace_id: Some(screen.terminal.workspace_id.clone()),
+        ..Default::default()
+    };
+    push_unique(
+        &mut handles.terminal_ids,
+        screen.terminal.terminal_id.clone(),
+    );
+    if let Some(app_id) = screen.terminal.app_id.clone() {
+        push_unique(&mut handles.app_ids, app_id);
+    }
+    handles
+}
+
+fn terminal_input_target_handles(input: &workspace::WorkspaceTerminalInput) -> AgentTargetHandles {
+    let mut handles = AgentTargetHandles {
+        workspace_id: Some(input.terminal.workspace_id.clone()),
+        ..Default::default()
+    };
+    push_unique(
+        &mut handles.terminal_ids,
+        input.terminal.terminal_id.clone(),
+    );
+    if let Some(app_id) = input.terminal.app_id.clone() {
+        push_unique(&mut handles.app_ids, app_id);
+    }
+    handles
+}
+
 fn viewer_target_handles(viewer_id: &str) -> AgentTargetHandles {
     let mut handles = AgentTargetHandles {
         workspace_id: Some(viewer_id.to_string()),
@@ -9401,6 +10005,9 @@ fn merge_target_handles(target: &mut AgentTargetHandles, source: AgentTargetHand
     for value in source.browser_target_ids {
         push_unique(&mut target.browser_target_ids, value);
     }
+    for value in source.terminal_ids {
+        push_unique(&mut target.terminal_ids, value);
+    }
 }
 
 fn recovery_hints_for_message(message: &str) -> Vec<String> {
@@ -9441,8 +10048,16 @@ fn recovery_hints_for_message(message: &str) -> Vec<String> {
         || lower.contains("target")
         || lower.contains("remote-debugging")
     {
+        hints.push("Call workspace_open_browser to launch workspace Chrome with --user-data-dir and loopback DevTools flags.".to_string());
         hints.push("Call workspace_browser_targets to select a browser_target_id, then retry with target_id.".to_string());
         hints.push("Call workspace_list_apps to choose the browser app_id if more than one browser is running.".to_string());
+    }
+    if lower.contains("terminal")
+        || lower.contains("tmux")
+        || lower.contains("pane")
+        || lower.contains("tty")
+    {
+        hints.push("Call workspace_run_in_terminal to create a tmux-backed terminal_id, then use workspace_terminal_read and workspace_terminal_input.".to_string());
     }
     if lower.contains("workspace") || lower.contains("socket") || lower.contains("not running") {
         hints.push(
