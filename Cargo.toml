@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Isolated Linux desktop workspaces for AI agents."
+readme = "README.md"
+keywords = ["mcp", "linux", "desktop", "automation", "workspace"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
 
 [dependencies]
 anyhow = "1.0"

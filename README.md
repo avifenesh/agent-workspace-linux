@@ -2,6 +2,11 @@
 
 Isolated Linux desktop workspaces for AI agents.
 
+Status: pre-1.0, Linux-focused, and actively dogfooded. The repository is ready
+for public source review and local experimentation; production release gates are
+tracked separately in [Public Readiness](docs/public-readiness.md) and
+[Prod Readiness Audit](docs/prod-readiness-audit-2026-05-25.md).
+
 This project is intentionally separate from `computer-use-linux`. The existing
 MCP controls the user's current desktop. This repo is for an agent-owned
 workspace that can launch and control apps without stealing the user's real
@@ -57,7 +62,38 @@ boundary in Codex for Linux is still being dogfooded. See
 authority model and validation gates, and
 [Dogfood Validation](docs/dogfood-validation.md) for the current evidence log.
 The current requirement-by-requirement readiness state is tracked in
-[Prod Readiness Audit](docs/prod-readiness-audit-2026-05-25.md).
+[Prod Readiness Audit](docs/prod-readiness-audit-2026-05-25.md). The native
+viewer direction is summarized in
+[GPUI Viewer Direction](docs/gpui-viewer-direction.md).
+
+## Quick Start
+
+Install the runtime dependencies, build the binary, and ask the runtime doctor
+what this Linux desktop can support:
+
+```bash
+sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip bubblewrap pkg-config libxkbcommon-x11-dev
+cargo build --locked
+cargo run -- doctor
+```
+
+Start with dry-run previews before creating a hidden workspace:
+
+```bash
+cargo run -- workspace start --dry-run
+cargo run -- workspace start --ack-hidden-workspace --purpose "QA run"
+cargo run -- viewer
+```
+
+For MCP hosts, the clean/default registration does not add an MCP-level
+permission ceiling:
+
+```bash
+cargo run -- mcp
+```
+
+Use `mcp --permissions ./permissions.json` only when the host or user wants a
+fixed spawn-time ceiling for that MCP process.
 
 ## Commands
 

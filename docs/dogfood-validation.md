@@ -9,7 +9,7 @@ here, while policy design stays in `permission-boundary-roadmap.md`.
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on replacing host Chrome bridge assumptions with a
   workspace-owned browser-control surface that agents can discover through the
   repo-owned MCP.
@@ -141,7 +141,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on making app-QA planning as machine-readable as the
   browser/shopping plan, so host UI can show the user's likely next boundary
   without scraping step prose.
@@ -177,7 +177,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on turning the existing flat approval checkpoint list into a
   host-renderable next-boundary summary.
 
@@ -209,7 +209,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on letting `mcp_session_brief` expose a first approval
   boundary before a host has called `mcp_task_plan`.
 
@@ -242,7 +242,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on a concrete browser/grocery dogfood loop rather than only
   planning metadata.
 
@@ -276,7 +276,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on representing cart approval separately from checkout
   approval in `mcp_task_plan`.
 
@@ -311,7 +311,7 @@ Environment:
 - Added a broad local pre-release gate at `scripts/prod_readiness_smoke.sh`.
 - The gate is intentionally local-first: it can run the runtime checks in this
   repository and the sibling Codex Desktop agent-workspace tests when
-  `/home/avifenesh/projects/codex-desktop-linux` is present.
+  `../codex-desktop-linux` is present.
 
 Verified:
 
@@ -494,7 +494,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on the long-running MCP lifecycle behavior of detached
   host-visible viewer launches.
 
@@ -639,7 +639,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on routing ordinary user phrasing into the existing
   browser/shopping/grocery safety plan instead of requiring exact "grocery
   shopping" wording.
@@ -675,9 +675,9 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
-- The pass focused on moving GPUI viewer prerequisites out of the handover and
-  into the product-facing doctor/install surface.
+  `<repo-root>`.
+- The pass focused on moving GPUI viewer prerequisites out of implementation
+  notes and into the product-facing doctor/install surface.
 
 Verified:
 
@@ -716,7 +716,7 @@ Finding:
 - The next Linux install gap is smaller: users and MCP hosts can now distinguish
   "hidden workspace can run" from "this session can open the host-visible GPUI
   viewer", and source builders get an explicit signal for the xkbcommon package
-  that previously only appeared in handover notes.
+  that previously only appeared in implementation notes.
 
 ## 2026-05-25 Non-Headless MCP Viewer Planning Pass
 
@@ -777,7 +777,7 @@ Finding:
 
 Environment:
 
-- Patched `/home/avifenesh/projects/codex-desktop-linux` on branch
+- Patched `../codex-desktop-linux` on branch
   `agent-workspace-linux-feature`.
 - The pass focused on making Codex Desktop a thin launcher/status bridge for the
   GPUI viewer owned by this runtime repo.
@@ -891,7 +891,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on the read-only MCP planning surface for grocery/browser
   tasks once the user has already supplied task details.
 
@@ -956,7 +956,7 @@ Finding:
 Environment:
 
 - Ran against the local repository build from
-  `/home/avifenesh/projects/agent-workspace-linux`.
+  `<repo-root>`.
 - The pass focused on the read-only MCP planning surface, not on changing the
   runtime permission ceiling.
 
@@ -1299,7 +1299,7 @@ Findings:
 Environment:
 
 - Auto-loop A/B/C gate pass ran from
-  `/home/avifenesh/projects/agent-workspace-linux` with the current local tree.
+  `<repo-root>` with the current local tree.
 - `scripts/integration_smoke.sh` passed end to end. This revalidated MCP
   permission ceilings, profile import/export/delete/validate, `workspace
   open-profile --dry-run`, real setup/startup, local-only networking,
@@ -1310,7 +1310,7 @@ Environment:
   installed, crashed-daemon stale cleanup, and self-stop from inside a workspace
   app.
 - The same smoke was rerun against the installed user-facing binary with
-  `BIN=/home/avifenesh/.local/bin/agent-workspace-linux scripts/integration_smoke.sh`.
+  `BIN=~/.local/bin/agent-workspace-linux scripts/integration_smoke.sh`.
   It passed, confirming the installed CLI path used by the Codex app/MCP has
   the same current behavior as the repo build for permission ceilings, network
   isolation, mount enforcement, browser QA, screenshots/input/clipboard, events,
@@ -1320,7 +1320,7 @@ Environment:
   requirements, workspace socket-path validation, stop behavior, browser-session
   template behavior, and profile validation.
 - The Codex for Linux side-by-side dev app was rebuilt from
-  `/home/avifenesh/projects/codex-desktop-linux` with `make build-dev-app` and
+  `../codex-desktop-linux` with `make build-dev-app` and
   launched inside the hidden `mcp-visible` workspace. A launcher bug was found
   and fixed: inherited `ELECTRON_RENDERER_URL` from the host Codex app could
   make the dev app render the wrong webview. The launcher now uses the managed
@@ -1459,7 +1459,7 @@ Verified:
 - A project mount at `/workspace/project` with `mode=read_write` allowed writes
   through the bubblewrap mount namespace.
 - Rust QA worked when the profile explicitly mounted the project read-write,
-  mounted `/home/avifenesh/.cargo` and `/home/avifenesh/.rustup` read-only, and
+  mounted `~/.cargo` and `~/.rustup` read-only, and
   set `CARGO_HOME`, `RUSTUP_HOME`, and `PATH` to those mounted locations. In
   that environment, `cargo test --quiet` passed for the then-current 21 tests.
 - A project mount at `/workspace/project` with `mode=read_only` rejected writes
@@ -1540,7 +1540,7 @@ Previous post-patch verification:
   captured a screenshot/events snapshot, and `workspace_stop` terminated both
   the dev server and Chrome before stale cleanup removed the runtime directory.
 - MCP dogfood covered a real Codex desktop QA run through the MCP surface using
-  a temporary profile for `/home/avifenesh/projects/codex-desktop-linux`
+  a temporary profile for `../codex-desktop-linux`
   mounted read-write at `/workspace/project`, `network.mode=disabled`, and
   `require_enforced_policy=true`. `profile_check` and `workspace_open_profile
   --dry-run` reported bubblewrap enforcement for mounts and disabled networking
@@ -1585,7 +1585,7 @@ Previous post-patch verification:
   explicit.
 - MCP dogfood covered the Codex for Linux conversation-visibility slice with the
   real side-by-side dev app. A hidden workspace launched
-  `/home/avifenesh/projects/codex-desktop-linux/bin/codex-cua-lab` and rendered a
+  `../codex-desktop-linux/bin/codex-cua-lab` and rendered a
   `codex-cua-lab` window. `workspace_observe --screenshot` captured the Codex app
   with the embedded Agent Workspace panel visible inside the conversation view,
   including a live recursive workspace screenshot, profile/app metadata, and
@@ -1631,7 +1631,7 @@ Previous post-patch verification:
   start preparation, and daemon startup before spawning workspace processes; unit
   coverage verifies the boundary.
 - After the socket guard, the MCP workspace surface launched
-  `/home/avifenesh/projects/codex-desktop-linux/bin/codex-cua-lab` in a short-id
+  `../codex-desktop-linux/bin/codex-cua-lab` in a short-id
   hidden workspace, found the `codex-cua-lab` window, captured a window
   screenshot plus root screenshot/events, stopped the app/workspace cleanly, and
   removed the stopped runtime through `workspace_cleanup_stale` dry-run plus
@@ -1640,7 +1640,7 @@ Previous post-patch verification:
   now exits with the explicit socket-path error before start, and the process
   count check showed no new workspace X11/window-manager process was spawned.
 - A second real-project QA pass used the freshly installed CLI against
-  `/home/avifenesh/projects/agent-chrome-bridge`. The temporary profile mounted
+  `../agent-chrome-bridge`. The temporary profile mounted
   the project read-only at `/workspace/project`, set that as the profile cwd,
   requested `network.mode=disabled`, and required enforcement. The workspace
   reported `bubblewrap_mount_namespace` plus `bubblewrap_unshare_net`, and
@@ -1669,10 +1669,10 @@ Previous post-patch verification:
 - 2026-05-25 installed-app B-gate dogfood verified the conversation embedded
   workspace panel against the patched user-facing Codex app bundle. A hidden
   workspace launched
-  `/home/avifenesh/.local/opt/codex-desktop-linux/codex-app/start.sh
+  `~/.local/opt/codex-desktop-linux/codex-app/start.sh
   --new-instance -- --remote-debugging-port=9338` with real
-  `CODEX_HOME=/home/avifenesh/.codex` and
-  `CODEX_AGENT_WORKSPACE_BIN=/home/avifenesh/.local/bin/agent-workspace-linux`.
+  `CODEX_HOME=~/.codex` and
+  `CODEX_AGENT_WORKSPACE_BIN=~/.local/bin/agent-workspace-linux`.
   Chrome DevTools Protocol attached to the installed Electron renderer at
   `http://127.0.0.1:5175/?mcpAppSandboxDevtools=1`. The conversation surface
   showed `Codex app nonoptional MCP card dogfood`, Refresh/Stop/Revoke controls,
@@ -1740,9 +1740,9 @@ Previous post-patch verification:
 - 2026-05-25 installed-app B-gate v12 dogfood verified the polished embedded
   viewer in the patched installed Codex app bundle. A hidden workspace
   `codex-v12` launched
-  `/home/avifenesh/.local/opt/codex-desktop-linux/codex-app/start.sh
+  `~/.local/opt/codex-desktop-linux/codex-app/start.sh
   --new-instance -- --remote-debugging-port=9340` with
-  `CODEX_AGENT_WORKSPACE_BIN=/home/avifenesh/.local/bin/agent-workspace-linux`.
+  `CODEX_AGENT_WORKSPACE_BIN=~/.local/bin/agent-workspace-linux`.
   After Electron painted, `workspace_observe --screenshot` showed the installed
   app conversation surface with the embedded Agent Workspace panel, live
   recursive screenshot, and Refresh/Details/Stop/Revoke controls. A

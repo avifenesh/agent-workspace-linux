@@ -666,7 +666,7 @@ def build_bundle(desktop_repo: Path) -> dict[str, Any]:
             "Confirm the sibling Desktop diff remains a thin integration layer and does not duplicate the main GPUI viewer surface.",
             "Review the generated runtime and sibling Desktop diff artifacts and preserve their hashes in the marker template.",
             "Confirm generated lockfile and dependency changes are intentional.",
-            "Confirm handover/audit docs should stay tracked or move to release artifacts.",
+            "Confirm audit docs should stay tracked or move to release artifacts.",
             "Run strict release evidence collection before creating the human-review marker.",
         ],
     }

@@ -4,3 +4,18 @@
 __pycache__/
 *.py[cod]
 .playwright-mcp/
+
+# Local credentials, copied browser profiles, and per-machine examples.
+.env
+.env.*
+*.local.json
+permissions.local.json
+profile.local.json
+profile-export.json
+.agent-workspace-grocery-profile-copy.json
+
+# Desktop/editor noise.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
