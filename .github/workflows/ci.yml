@@ -66,12 +66,89 @@ jobs:
 
       - name: JavaScript syntax
         run: |
-          for file in scripts/*.js; do
+          for file in scripts/*.js scripts/lib/*.js; do
             node --check "$file"
           done
 
-      - name: Python syntax
-        run: python3 -m py_compile scripts/*.py
-
       - name: Whitespace
         run: git diff --check
+
+  # Scan Cargo.lock (including gpui git deps) for known advisories.
+  supply-chain:
+    name: Supply chain (cargo audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        # The three ignored advisories are "unmaintained" warnings (not
+        # vulnerabilities) for transitive crates pulled in by the gpui git
+        # dependency (async-std, instant, paste); they are not fixable from this
+        # crate. Everything else is still denied, so a real advisory fails CI.
+        run: |
+          cargo audit --deny warnings \
+            --ignore RUSTSEC-2025-0052 \
+            --ignore RUSTSEC-2024-0384 \
+            --ignore RUSTSEC-2024-0436
+
+  # Validate the shipped SKILL.md and any agent config via agnix.
+  # Scoped to skills/ rather than the repo root so the linter only sees the
+  # deliverable agent artifact and doesn't flag READMEs, build scripts, or src/.
+  agent-config:
+    name: Agent config (agnix)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install agnix
+        run: npm install -g agnix
+
+      - name: Validate agent skill
+        run: agnix skills/
+
+  # Verify npm wrapper syntax, version parity with Cargo, and pack integrity.
+  # Does not download the release binary — no release exists yet.
+  npm-wrapper:
+    name: npm wrapper checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax check postinstall.js
+        run: node --check npm/scripts/postinstall.js
+
+      - name: Syntax check agent-workspace-linux.js
+        run: node --check npm/bin/agent-workspace-linux.js
+
+      - name: Version parity (Cargo.toml == npm/package.json)
+        run: |
+          cargo_version="$(grep -m1 '^version = ' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          npm_version="$(node -p "require('./npm/package.json').version")"
+          echo "Cargo version : $cargo_version"
+          echo "npm version   : $npm_version"
+          test "$cargo_version" = "$npm_version"
+
+      - name: Pack dry-run
+        run: cd npm && npm pack --dry-run

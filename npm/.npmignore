@@ -1,0 +1,6 @@
+# Exclude the downloaded native binary so it never ships inside the tarball.
+# The binary is placed here by postinstall at install-time on the user's machine.
+bin/agent-workspace-linux
+
+# Keep .gitkeep out of the package too.
+bin/.gitkeep

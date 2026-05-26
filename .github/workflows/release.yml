@@ -1,0 +1,105 @@
+name: Release
+
+# Trigger on version tags (e.g. v0.1.0) or manual dispatch.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Write permission is required to create the GitHub Release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    # fail-fast: false so a failure on one arch doesn't cancel the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86_64 native build on a standard Linux runner.
+          - target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+          # aarch64 native build on GitHub's free ARM64 runner (public repos).
+          # Using a native runner avoids cross-compiling gpui's X11/Wayland/
+          # xkbcommon-x11 system deps with a foreign-arch sysroot, which is
+          # fragile for this dependency tree. Requires the repository to be
+          # public (free-tier ARM64 runners are public-repo-only on GitHub).
+          - target: aarch64-unknown-linux-gnu
+            runs-on: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.runs-on }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Install the same system packages as ci.yml so the gpui / X11 / Wayland
+      # / xkbcommon build succeeds.  Source: .github/workflows/ci.yml (the
+      # authoritative list); the README carries a shorter runtime-only subset.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bubblewrap \
+            imagemagick \
+            libfontconfig1-dev \
+            libssl-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-util-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xinerama0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            openbox \
+            pkg-config \
+            x11-utils \
+            xauth \
+            xclip \
+            xdotool \
+            xvfb
+
+      - name: Install Rust (stable) with target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Register the rustup target so cargo can cross-compile; on the
+          # native ARM runner this is still needed when --target is passed.
+          targets: ${{ matrix.target }}
+
+      # Cache keyed per target so x86_64 and aarch64 don't overwrite each other.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      # The npm wrapper expects assets named agent-workspace-linux-<target>.
+      # cargo places the binary at target/<target>/release/agent-workspace-linux,
+      # so rename it before upload.  This naming is a CONTRACT — do not change.
+      - name: Rename binary for release asset
+        run: |
+          cp target/${{ matrix.target }}/release/agent-workspace-linux \
+             agent-workspace-linux-${{ matrix.target }}
+
+      # Upload to the GitHub Release only when triggered by a version tag.
+      # workflow_dispatch without a tag skips this step (avoids a missing-tag
+      # error) while still exercising the build.
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: agent-workspace-linux-${{ matrix.target }}
+          generate_release_notes: true
