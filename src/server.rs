@@ -1,3 +1,4 @@
+use crate::agent::{AgentModeSummary, AgentTargetHandles};
 use crate::browser;
 use crate::control::{self, McpControlMode};
 use crate::guardrails;
@@ -54,13 +55,84 @@ impl AgentWorkspaceLinux {
             self.enforce_agent_mutation(action)
         }
     }
+
+    fn result_response(&self, result: Result<IpcResponse>) -> IpcResponse {
+        self.decorate_ipc_response(result_response(result))
+    }
+
+    fn decorate_ipc_response(&self, mut response: IpcResponse) -> IpcResponse {
+        if response.agent_mode.is_none() {
+            response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        }
+        if response.target_handles.is_none() {
+            let handles = target_handles_from_ipc_response(&response);
+            if !handles.is_empty() {
+                response.target_handles = Some(handles);
+            }
+        }
+        if !response.ok && response.recovery_hints.is_empty() {
+            response.recovery_hints = recovery_hints_for_message(&response.message);
+        }
+        response
+    }
+
+    fn decorate_profile_put_result(
+        &self,
+        mut response: profile::ProfilePutResult,
+    ) -> profile::ProfilePutResult {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        if !response.ok && response.recovery_hints.is_empty() {
+            response.recovery_hints = recovery_hints_for_message(&response.message);
+        }
+        response
+    }
+
+    fn decorate_profile_delete_result(
+        &self,
+        mut response: profile::ProfileDeleteResult,
+    ) -> profile::ProfileDeleteResult {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
+
+    fn decorate_browser_targets(
+        &self,
+        mut response: browser::WorkspaceBrowserTargets,
+    ) -> browser::WorkspaceBrowserTargets {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
+
+    fn decorate_browser_snapshot(
+        &self,
+        mut response: browser::WorkspaceBrowserSnapshot,
+    ) -> browser::WorkspaceBrowserSnapshot {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
+
+    fn decorate_browser_search_results(
+        &self,
+        mut response: browser::WorkspaceBrowserSearchResults,
+    ) -> browser::WorkspaceBrowserSearchResults {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
+
+    fn decorate_browser_navigate(
+        &self,
+        mut response: browser::WorkspaceBrowserNavigate,
+    ) -> browser::WorkspaceBrowserNavigate {
+        response.agent_mode = Some(build_agent_mode_summary(self.headless));
+        response
+    }
 }
 
 #[tool_router]
 impl AgentWorkspaceLinux {
     #[tool(
         name = "workspace_guardrails",
-        description = "Return the machine-readable guardrail summary for isolated workspace actions, including acknowledgement, policy mode, dry-run, explicit override, and timeout-termination requirements.",
+        description = "Return machine-readable guardrails for isolated workspace actions, including concise agent_rules with allowed, blocked, requires_ack, and exact_parameter fields plus detailed acknowledgement, dry-run, override, policy, and timeout rules.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -115,8 +187,29 @@ impl AgentWorkspaceLinux {
     }
 
     #[tool(
+        name = "mcp_agent_context",
+        description = "Return one compact read-only agent context snapshot: mode, permissions, selected workspace, active app/window handles, browser target handles, viewer handles, and exact next recovery tools. This is the low-noise orientation call before acting.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn mcp_agent_context(
+        &self,
+        Parameters(params): Parameters<McpAgentContextParams>,
+    ) -> Json<McpAgentContext> {
+        Json(build_mcp_agent_context(
+            params,
+            &self.permissions,
+            self.headless,
+        ))
+    }
+
+    #[tool(
         name = "mcp_task_plan",
-        description = "Return a read-only intent-aware MCP plan for common user tasks such as app QA, browser/shopping workflows, observation, or cleanup. The plan suggests safe preview tools, profile templates, approval points, structured task_context input state, grocery dogfood evidence requirements, and live-control constraints without executing anything.",
+        description = "Return a read-only intent-aware MCP plan for common user tasks such as app QA, browser/shopping workflows, observation, or cleanup. The plan suggests safe preview tools, viewer-first visibility when available, profile templates, approval points, structured task_context input state, dogfood evidence requirements, and live-control constraints without executing anything.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -404,22 +497,24 @@ impl AgentWorkspaceLinux {
     ) -> Json<profile::ProfilePutResult> {
         let requested_profile = params.profile.clone();
         Json(
-            self.enforce_agent_mutation_unless_dry_run(params.dry_run, "profile_put")
-                .and_then(|_| {
-                    self.permissions
-                        .validate_profile(&params.profile)
-                        .and_then(|_| {
-                            profile::put_profile(params.profile, params.replace, params.dry_run)
-                        })
-                })
-                .unwrap_or_else(|error| {
-                    profile::ProfilePutResult::error(
-                        requested_profile,
-                        params.replace,
-                        params.dry_run,
-                        error.to_string(),
-                    )
-                }),
+            self.decorate_profile_put_result(
+                self.enforce_agent_mutation_unless_dry_run(params.dry_run, "profile_put")
+                    .and_then(|_| {
+                        self.permissions
+                            .validate_profile(&params.profile)
+                            .and_then(|_| {
+                                profile::put_profile(params.profile, params.replace, params.dry_run)
+                            })
+                    })
+                    .unwrap_or_else(|error| {
+                        profile::ProfilePutResult::error(
+                            requested_profile,
+                            params.replace,
+                            params.dry_run,
+                            error.to_string(),
+                        )
+                    }),
+            ),
         )
     }
 
@@ -438,34 +533,36 @@ impl AgentWorkspaceLinux {
         Parameters(params): Parameters<ProfileImportParams>,
     ) -> Json<profile::ProfilePutResult> {
         Json(
-            match self
-                .enforce_agent_mutation_unless_dry_run(params.dry_run, "profile_import")
-                .and_then(|_| profile::read_profile_json_file(&params.json_path))
-            {
-                Ok(requested_profile) => self
-                    .permissions
-                    .validate_profile(&requested_profile)
-                    .and_then(|_| {
-                        profile::put_profile(
-                            requested_profile.clone(),
-                            params.replace,
-                            params.dry_run,
-                        )
-                    })
-                    .unwrap_or_else(|error| {
-                        profile::ProfilePutResult::error(
-                            requested_profile,
-                            params.replace,
-                            params.dry_run,
-                            error.to_string(),
-                        )
-                    }),
-                Err(error) => profile::ProfilePutResult::import_error(
-                    params.replace,
-                    params.dry_run,
-                    error.to_string(),
-                ),
-            },
+            self.decorate_profile_put_result(
+                match self
+                    .enforce_agent_mutation_unless_dry_run(params.dry_run, "profile_import")
+                    .and_then(|_| profile::read_profile_json_file(&params.json_path))
+                {
+                    Ok(requested_profile) => self
+                        .permissions
+                        .validate_profile(&requested_profile)
+                        .and_then(|_| {
+                            profile::put_profile(
+                                requested_profile.clone(),
+                                params.replace,
+                                params.dry_run,
+                            )
+                        })
+                        .unwrap_or_else(|error| {
+                            profile::ProfilePutResult::error(
+                                requested_profile,
+                                params.replace,
+                                params.dry_run,
+                                error.to_string(),
+                            )
+                        }),
+                    Err(error) => profile::ProfilePutResult::import_error(
+                        params.replace,
+                        params.dry_run,
+                        error.to_string(),
+                    ),
+                },
+            ),
         )
     }
 
@@ -499,13 +596,20 @@ impl AgentWorkspaceLinux {
                     } else {
                         "profile returned".to_string()
                     },
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
                     export: Some(export),
                 },
-                Err(error) => ProfileExportResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    export: None,
-                },
+                Err(error) => {
+                    let message = error.to_string();
+                    ProfileExportResponse {
+                        ok: false,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                        message,
+                        export: None,
+                    }
+                }
             },
         )
     }
@@ -525,15 +629,18 @@ impl AgentWorkspaceLinux {
         Parameters(params): Parameters<ProfileDeleteParams>,
     ) -> Json<profile::ProfileDeleteResult> {
         Json(
-            self.enforce_agent_mutation_unless_dry_run(params.dry_run, "profile_delete")
-                .and_then(|_| profile::delete_profile(&params.id, params.dry_run))
-                .unwrap_or(profile::ProfileDeleteResult {
-                    id: params.id,
-                    deleted: false,
-                    would_delete: false,
-                    dry_run: params.dry_run,
-                    profile: None,
-                }),
+            self.decorate_profile_delete_result(
+                self.enforce_agent_mutation_unless_dry_run(params.dry_run, "profile_delete")
+                    .and_then(|_| profile::delete_profile(&params.id, params.dry_run))
+                    .unwrap_or(profile::ProfileDeleteResult {
+                        id: params.id,
+                        deleted: false,
+                        would_delete: false,
+                        dry_run: params.dry_run,
+                        profile: None,
+                        agent_mode: None,
+                    }),
+            ),
         )
     }
 
@@ -566,7 +673,7 @@ impl AgentWorkspaceLinux {
                 workspace::start_workspace(options)
             }
         });
-        Json(result_response(result))
+        Json(self.result_response(result))
     }
 
     #[tool(
@@ -610,15 +717,24 @@ impl AgentWorkspaceLinux {
                     } else {
                         "profile workspace opened".to_string()
                     },
+                    target_handles: profile_open_target_handles(open.as_ref(), preview.as_ref()),
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
                     open,
                     preview,
                 },
-                Err(error) => ProfileWorkspaceOpenResult {
-                    ok: false,
-                    message: error.to_string(),
-                    open: None,
-                    preview: None,
-                },
+                Err(error) => {
+                    let message = error.to_string();
+                    ProfileWorkspaceOpenResult {
+                        ok: false,
+                        target_handles: None,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                        message,
+                        open: None,
+                        preview: None,
+                    }
+                }
             },
         )
     }
@@ -640,30 +756,35 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(match workspace::status_workspace(&id) {
-            Ok(status) => IpcResponse {
-                ok: true,
-                message: "workspace status returned".to_string(),
-                apps: Some(status.apps.clone()),
-                status: Some(status),
-                start_preview: None,
-                launch_preview: None,
-                ipc: None,
-                environment: None,
-                windows: None,
-                active_window: None,
-                pointer: None,
-                screenshot: None,
-                app_log: None,
-                clipboard: None,
-                events: None,
-                browser_targets: None,
-                browser_snapshot: None,
-                browser_search_results: None,
-                browser_navigate: None,
-            },
-            Err(error) => error_response(error.to_string(), None),
-        })
+        Json(
+            self.decorate_ipc_response(match workspace::status_workspace(&id) {
+                Ok(status) => IpcResponse {
+                    ok: true,
+                    message: "workspace status returned".to_string(),
+                    apps: Some(status.apps.clone()),
+                    status: Some(status),
+                    start_preview: None,
+                    launch_preview: None,
+                    ipc: None,
+                    environment: None,
+                    windows: None,
+                    active_window: None,
+                    pointer: None,
+                    screenshot: None,
+                    app_log: None,
+                    clipboard: None,
+                    events: None,
+                    browser_targets: None,
+                    browser_snapshot: None,
+                    browser_search_results: None,
+                    browser_navigate: None,
+                    agent_mode: None,
+                    target_handles: None,
+                    recovery_hints: Vec::new(),
+                },
+                Err(error) => error_response(error.to_string(), None),
+            }),
+        )
     }
 
     #[tool(
@@ -723,7 +844,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::ipc_info(&id)))
+        Json(self.result_response(workspace::ipc_info(&id)))
     }
 
     #[tool(
@@ -743,7 +864,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::environment(&id)))
+        Json(self.result_response(workspace::environment(&id)))
     }
 
     #[tool(
@@ -789,20 +910,28 @@ impl AgentWorkspaceLinux {
         Parameters(params): Parameters<WorkspaceOpenViewerParams>,
     ) -> Json<WorkspaceOpenViewerResponse> {
         if self.headless {
+            let message = "workspace_open_viewer is disabled because this MCP process was started with --headless".to_string();
             return Json(WorkspaceOpenViewerResponse {
                 ok: false,
-                message: "workspace_open_viewer is disabled because this MCP process was started with --headless".to_string(),
+                recovery_hints: recovery_hints_for_message(&message),
+                agent_mode: Some(build_agent_mode_summary(self.headless)),
+                target_handles: None,
+                message,
                 launch: None,
             });
         }
         let doctor = workspace::doctor_report();
         if !doctor.ready_for_host_viewer {
+            let message = format!(
+                "workspace_open_viewer cannot open a host-visible viewer in this environment: {}",
+                doctor.viewer_blockers.join("; ")
+            );
             return Json(WorkspaceOpenViewerResponse {
                 ok: false,
-                message: format!(
-                    "workspace_open_viewer cannot open a host-visible viewer in this environment: {}",
-                    doctor.viewer_blockers.join("; ")
-                ),
+                recovery_hints: recovery_hints_for_message(&message),
+                agent_mode: Some(build_agent_mode_summary(self.headless)),
+                target_handles: None,
+                message,
                 launch: None,
             });
         }
@@ -815,13 +944,22 @@ impl AgentWorkspaceLinux {
                     } else {
                         "workspace viewer opened".to_string()
                     },
+                    target_handles: Some(viewer_target_handles(&launch.id)),
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
                     launch: Some(launch),
                 },
-                Err(error) => WorkspaceOpenViewerResponse {
-                    ok: false,
-                    message: error.to_string(),
-                    launch: None,
-                },
+                Err(error) => {
+                    let message = error.to_string();
+                    WorkspaceOpenViewerResponse {
+                        ok: false,
+                        recovery_hints: recovery_hints_for_message(&message),
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        target_handles: None,
+                        message,
+                        launch: None,
+                    }
+                }
             },
         )
     }
@@ -842,6 +980,7 @@ impl AgentWorkspaceLinux {
                 registry_dir: std::path::PathBuf::new(),
                 viewers: vec![viewer::ViewerListEntry {
                     id: "error".to_string(),
+                    viewer_id: "error".to_string(),
                     pid: 0,
                     backend: "error".to_string(),
                     always_on_top: false,
@@ -878,13 +1017,22 @@ impl AgentWorkspaceLinux {
                 } else {
                     "viewer close complete".to_string()
                 },
+                target_handles: Some(viewer_close_target_handles(&close)),
+                agent_mode: Some(build_agent_mode_summary(self.headless)),
+                recovery_hints: Vec::new(),
                 close: Some(close),
             }),
-            Err(error) => Json(WorkspaceCloseViewerResponse {
-                ok: false,
-                message: error.to_string(),
-                close: None,
-            }),
+            Err(error) => {
+                let message = error.to_string();
+                Json(WorkspaceCloseViewerResponse {
+                    ok: false,
+                    recovery_hints: recovery_hints_for_message(&message),
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    target_handles: None,
+                    message,
+                    close: None,
+                })
+            }
         }
     }
 
@@ -942,8 +1090,8 @@ impl AgentWorkspaceLinux {
         let window_timeout_ms = params.window_timeout_ms;
         let screenshot_window = params.screenshot_window;
         let dry_run = params.dry_run;
-        Json(result_response(params.into_launch_spec().and_then(
-            |spec| {
+        Json(
+            self.result_response(params.into_launch_spec().and_then(|spec| {
                 self.enforce_agent_mutation_unless_dry_run(dry_run, "workspace_launch_app")?;
                 self.permissions.validate_launch_spec(&spec)?;
                 if dry_run {
@@ -962,8 +1110,8 @@ impl AgentWorkspaceLinux {
                     window_timeout_ms,
                     screenshot_window,
                 )
-            },
-        )))
+            })),
+        )
     }
 
     #[tool(
@@ -1020,15 +1168,24 @@ impl AgentWorkspaceLinux {
                     } else {
                         "workspace run dry run returned".to_string()
                     },
+                    target_handles: workspace_run_target_handles(run.as_ref(), preview.as_ref()),
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
                     run,
                     preview,
                 },
-                Err(error) => WorkspaceRunResult {
-                    ok: false,
-                    message: error.to_string(),
-                    run: None,
-                    preview: None,
-                },
+                Err(error) => {
+                    let message = error.to_string();
+                    WorkspaceRunResult {
+                        ok: false,
+                        target_handles: None,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                        message,
+                        run: None,
+                        preview: None,
+                    }
+                }
             },
         )
     }
@@ -1050,7 +1207,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::list_apps(
+        Json(self.result_response(workspace::list_apps(
             &id,
             params.app_id,
             params.name_contains,
@@ -1079,13 +1236,15 @@ impl AgentWorkspaceLinux {
             .clone()
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
         Json(
-            browser::workspace_browser_targets(
-                &id,
-                params.app_id,
-                params.user_data_dir,
-                params.timeout_ms,
-            )
-            .unwrap_or_else(|error| browser::WorkspaceBrowserTargets::error(id, error)),
+            self.decorate_browser_targets(
+                browser::workspace_browser_targets(
+                    &id,
+                    params.app_id,
+                    params.user_data_dir,
+                    params.timeout_ms,
+                )
+                .unwrap_or_else(|error| browser::WorkspaceBrowserTargets::error(id, error)),
+            ),
         )
     }
 
@@ -1108,17 +1267,19 @@ impl AgentWorkspaceLinux {
             .clone()
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
         Json(
-            browser::workspace_browser_snapshot(
-                &id,
-                params.app_id,
-                params.user_data_dir,
-                params.target_id,
-                params.title_contains,
-                params.url_contains,
-                params.max_text_chars,
-                params.timeout_ms,
-            )
-            .unwrap_or_else(|error| browser::WorkspaceBrowserSnapshot::error(id, error)),
+            self.decorate_browser_snapshot(
+                browser::workspace_browser_snapshot(
+                    &id,
+                    params.app_id,
+                    params.user_data_dir,
+                    params.target_id,
+                    params.title_contains,
+                    params.url_contains,
+                    params.max_text_chars,
+                    params.timeout_ms,
+                )
+                .unwrap_or_else(|error| browser::WorkspaceBrowserSnapshot::error(id, error)),
+            ),
         )
     }
 
@@ -1141,18 +1302,20 @@ impl AgentWorkspaceLinux {
             .clone()
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
         Json(
-            browser::workspace_browser_search_results(
-                &id,
-                params.app_id,
-                params.user_data_dir,
-                params.target_id,
-                params.title_contains,
-                params.url_contains,
-                params.max_results,
-                params.min_vram_gb,
-                params.timeout_ms,
-            )
-            .unwrap_or_else(|error| browser::WorkspaceBrowserSearchResults::error(id, error)),
+            self.decorate_browser_search_results(
+                browser::workspace_browser_search_results(
+                    &id,
+                    params.app_id,
+                    params.user_data_dir,
+                    params.target_id,
+                    params.title_contains,
+                    params.url_contains,
+                    params.max_results,
+                    params.min_vram_gb,
+                    params.timeout_ms,
+                )
+                .unwrap_or_else(|error| browser::WorkspaceBrowserSearchResults::error(id, error)),
+            ),
         )
     }
 
@@ -1176,23 +1339,25 @@ impl AgentWorkspaceLinux {
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
         let url = params.url.clone();
         Json(
-            (|| -> Result<browser::WorkspaceBrowserNavigate> {
-                self.enforce_agent_mutation("workspace_browser_navigate")?;
-                browser::workspace_browser_navigate(
-                    &id,
-                    params.app_id,
-                    params.user_data_dir,
-                    params.target_id,
-                    params.title_contains,
-                    params.url_contains,
-                    params.url,
-                    params.wait_ms,
-                    params.snapshot,
-                    params.max_text_chars,
-                    params.timeout_ms,
-                )
-            })()
-            .unwrap_or_else(|error| browser::WorkspaceBrowserNavigate::error(id, url, error)),
+            self.decorate_browser_navigate(
+                (|| -> Result<browser::WorkspaceBrowserNavigate> {
+                    self.enforce_agent_mutation("workspace_browser_navigate")?;
+                    browser::workspace_browser_navigate(
+                        &id,
+                        params.app_id,
+                        params.user_data_dir,
+                        params.target_id,
+                        params.title_contains,
+                        params.url_contains,
+                        params.url,
+                        params.wait_ms,
+                        params.snapshot,
+                        params.max_text_chars,
+                        params.timeout_ms,
+                    )
+                })()
+                .unwrap_or_else(|error| browser::WorkspaceBrowserNavigate::error(id, url, error)),
+            ),
         )
     }
 
@@ -1213,7 +1378,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::list_windows(
+        Json(self.result_response(workspace::list_windows(
             &id,
             params.include_hidden,
             params.title_contains,
@@ -1240,7 +1405,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::active_window(&id)))
+        Json(self.result_response(workspace::active_window(&id)))
     }
 
     #[tool(
@@ -1260,7 +1425,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::pointer(&id)))
+        Json(self.result_response(workspace::pointer(&id)))
     }
 
     #[tool(
@@ -1280,7 +1445,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::observe(
+        Json(self.result_response(workspace::observe(
             &id,
             params.screenshot,
             params.include_hidden,
@@ -1308,7 +1473,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::wait_window(
+        Json(self.result_response(workspace::wait_window(
             &id,
             params.title_contains,
             params.class_contains,
@@ -1335,10 +1500,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::screenshot(
-            &id,
-            params.output_path,
-        )))
+        Json(self.result_response(workspace::screenshot(&id, params.output_path)))
     }
 
     #[tool(
@@ -1358,7 +1520,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::screenshot_window(
+        Json(self.result_response(workspace::screenshot_window(
             &id,
             params.window_id,
             params.title_contains,
@@ -1387,10 +1549,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_focus_window")
-                .and_then(|_| workspace::focus_window(&id, params.window_id)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_focus_window")
+                    .and_then(|_| workspace::focus_window(&id, params.window_id)),
+            ),
+        )
     }
 
     #[tool(
@@ -1410,19 +1574,21 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_focus_matching_window")
-                .and_then(|_| {
-                    workspace::focus_matching_window(
-                        &id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_focus_matching_window")
+                    .and_then(|_| {
+                        workspace::focus_matching_window(
+                            &id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1442,10 +1608,15 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation_unless_dry_run(params.dry_run, "workspace_close_window")
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation_unless_dry_run(
+                    params.dry_run,
+                    "workspace_close_window",
+                )
                 .and_then(|_| workspace::close_window(&id, params.window_id, params.dry_run)),
-        ))
+            ),
+        )
     }
 
     #[tool(
@@ -1465,23 +1636,25 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation_unless_dry_run(
-                params.dry_run,
-                "workspace_close_matching_window",
-            )
-            .and_then(|_| {
-                workspace::close_matching_window(
-                    &id,
-                    params.title_contains,
-                    params.class_contains,
-                    params.pid,
-                    params.app_id,
-                    params.timeout_ms,
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation_unless_dry_run(
                     params.dry_run,
+                    "workspace_close_matching_window",
                 )
-            }),
-        ))
+                .and_then(|_| {
+                    workspace::close_matching_window(
+                        &id,
+                        params.title_contains,
+                        params.class_contains,
+                        params.pid,
+                        params.app_id,
+                        params.timeout_ms,
+                        params.dry_run,
+                    )
+                }),
+            ),
+        )
     }
 
     #[tool(
@@ -1501,22 +1674,24 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_move_window")
-                .and_then(|_| {
-                    workspace::move_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.x,
-                        params.y,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_move_window")
+                    .and_then(|_| {
+                        workspace::move_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.x,
+                            params.y,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1536,22 +1711,24 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_resize_window")
-                .and_then(|_| {
-                    workspace::resize_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.width,
-                        params.height,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_resize_window")
+                    .and_then(|_| {
+                        workspace::resize_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.width,
+                            params.height,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1571,20 +1748,22 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_raise_window")
-                .and_then(|_| {
-                    workspace::raise_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_raise_window")
+                    .and_then(|_| {
+                        workspace::raise_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1604,20 +1783,22 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_minimize_window")
-                .and_then(|_| {
-                    workspace::minimize_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_minimize_window")
+                    .and_then(|_| {
+                        workspace::minimize_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1637,20 +1818,22 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_show_window")
-                .and_then(|_| {
-                    workspace::show_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_show_window")
+                    .and_then(|_| {
+                        workspace::show_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1670,12 +1853,14 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_click")
-                .and_then(|_| {
-                    workspace::click(&id, params.x, params.y, params.button, params.count)
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_click")
+                    .and_then(|_| {
+                        workspace::click(&id, params.x, params.y, params.button, params.count)
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1695,24 +1880,26 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_click_window")
-                .and_then(|_| {
-                    workspace::click_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.x,
-                        params.y,
-                        params.button,
-                        params.count,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_click_window")
+                    .and_then(|_| {
+                        workspace::click_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.x,
+                            params.y,
+                            params.button,
+                            params.count,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1732,10 +1919,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_move_pointer")
-                .and_then(|_| workspace::move_pointer(&id, params.x, params.y)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_move_pointer")
+                    .and_then(|_| workspace::move_pointer(&id, params.x, params.y)),
+            ),
+        )
     }
 
     #[tool(
@@ -1755,22 +1944,24 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_move_pointer_window")
-                .and_then(|_| {
-                    workspace::move_pointer_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.x,
-                        params.y,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_move_pointer_window")
+                    .and_then(|_| {
+                        workspace::move_pointer_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.x,
+                            params.y,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1790,8 +1981,8 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_drag").and_then(|_| {
+        Json(
+            self.result_response(self.enforce_agent_mutation("workspace_drag").and_then(|_| {
                 workspace::drag(
                     &id,
                     params.from_x,
@@ -1800,8 +1991,8 @@ impl AgentWorkspaceLinux {
                     params.to_y,
                     params.button,
                 )
-            }),
-        ))
+            })),
+        )
     }
 
     #[tool(
@@ -1821,25 +2012,27 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_drag_window")
-                .and_then(|_| {
-                    workspace::drag_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.from_x,
-                        params.from_y,
-                        params.to_x,
-                        params.to_y,
-                        params.button,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_drag_window")
+                    .and_then(|_| {
+                        workspace::drag_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.from_x,
+                            params.from_y,
+                            params.to_x,
+                            params.to_y,
+                            params.button,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1859,12 +2052,14 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_scroll")
-                .and_then(|_| {
-                    workspace::scroll(&id, params.x, params.y, params.direction, params.amount)
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_scroll")
+                    .and_then(|_| {
+                        workspace::scroll(&id, params.x, params.y, params.direction, params.amount)
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1884,24 +2079,26 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_scroll_window")
-                .and_then(|_| {
-                    workspace::scroll_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.x,
-                        params.y,
-                        params.direction,
-                        params.amount,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_scroll_window")
+                    .and_then(|_| {
+                        workspace::scroll_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.x,
+                            params.y,
+                            params.direction,
+                            params.amount,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1921,10 +2118,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_key")
-                .and_then(|_| workspace::key(&id, params.key)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_key")
+                    .and_then(|_| workspace::key(&id, params.key)),
+            ),
+        )
     }
 
     #[tool(
@@ -1944,21 +2143,23 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_key_window")
-                .and_then(|_| {
-                    workspace::key_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.key,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_key_window")
+                    .and_then(|_| {
+                        workspace::key_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.key,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -1978,10 +2179,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_type_text")
-                .and_then(|_| workspace::type_text(&id, params.text)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_type_text")
+                    .and_then(|_| workspace::type_text(&id, params.text)),
+            ),
+        )
     }
 
     #[tool(
@@ -2001,21 +2204,23 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_type_window")
-                .and_then(|_| {
-                    workspace::type_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.text,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_type_window")
+                    .and_then(|_| {
+                        workspace::type_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.text,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -2035,10 +2240,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_set_clipboard")
-                .and_then(|_| workspace::set_clipboard(&id, params.text)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_set_clipboard")
+                    .and_then(|_| workspace::set_clipboard(&id, params.text)),
+            ),
+        )
     }
 
     #[tool(
@@ -2058,7 +2265,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::get_clipboard(&id)))
+        Json(self.result_response(workspace::get_clipboard(&id)))
     }
 
     #[tool(
@@ -2078,10 +2285,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_paste_text")
-                .and_then(|_| workspace::paste_text(&id, params.text, params.key)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_paste_text")
+                    .and_then(|_| workspace::paste_text(&id, params.text, params.key)),
+            ),
+        )
     }
 
     #[tool(
@@ -2101,22 +2310,24 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation("workspace_paste_window")
-                .and_then(|_| {
-                    workspace::paste_window(
-                        &id,
-                        params.window_id,
-                        params.title_contains,
-                        params.class_contains,
-                        params.pid,
-                        params.app_id,
-                        params.text,
-                        params.key,
-                        params.timeout_ms,
-                    )
-                }),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation("workspace_paste_window")
+                    .and_then(|_| {
+                        workspace::paste_window(
+                            &id,
+                            params.window_id,
+                            params.title_contains,
+                            params.class_contains,
+                            params.pid,
+                            params.app_id,
+                            params.text,
+                            params.key,
+                            params.timeout_ms,
+                        )
+                    }),
+            ),
+        )
     }
 
     #[tool(
@@ -2136,7 +2347,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::read_app_log(
+        Json(self.result_response(workspace::read_app_log(
             &id,
             params.app_id,
             params.stream.unwrap_or_else(|| "stdout".to_string()),
@@ -2161,20 +2372,22 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation_unless_dry_run(
-                !params.kill_on_timeout,
-                "workspace_wait_app kill_on_timeout",
-            )
-            .and_then(|_| {
-                workspace::wait_app(
-                    &id,
-                    params.app_id,
-                    params.timeout_ms,
-                    params.kill_on_timeout,
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation_unless_dry_run(
+                    !params.kill_on_timeout,
+                    "workspace_wait_app kill_on_timeout",
                 )
-            }),
-        ))
+                .and_then(|_| {
+                    workspace::wait_app(
+                        &id,
+                        params.app_id,
+                        params.timeout_ms,
+                        params.kill_on_timeout,
+                    )
+                }),
+            ),
+        )
     }
 
     #[tool(
@@ -2194,7 +2407,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::read_events(
+        Json(self.result_response(workspace::read_events(
             &id,
             params.tail,
             params.since_sequence,
@@ -2250,13 +2463,20 @@ impl AgentWorkspaceLinux {
                     } else {
                         "profile setup launched".to_string()
                     },
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
                     run: Some(run),
                 },
-                Err(error) => ProfileSetupResult {
-                    ok: false,
-                    message: error.to_string(),
-                    run: None,
-                },
+                Err(error) => {
+                    let message = error.to_string();
+                    ProfileSetupResult {
+                        ok: false,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                        message,
+                        run: None,
+                    }
+                }
             },
         )
     }
@@ -2304,13 +2524,20 @@ impl AgentWorkspaceLinux {
                     } else {
                         "profile startup apps launched".to_string()
                     },
+                    agent_mode: Some(build_agent_mode_summary(self.headless)),
+                    recovery_hints: Vec::new(),
                     run: Some(run),
                 },
-                Err(error) => ProfileStartupResult {
-                    ok: false,
-                    message: error.to_string(),
-                    run: None,
-                },
+                Err(error) => {
+                    let message = error.to_string();
+                    ProfileStartupResult {
+                        ok: false,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints: recovery_hints_for_message(&message),
+                        message,
+                        run: None,
+                    }
+                }
             },
         )
     }
@@ -2332,10 +2559,12 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(
-            self.enforce_agent_mutation_unless_dry_run(params.dry_run, "workspace_kill_app")
-                .and_then(|_| workspace::kill_app(&id, params.app_id, params.dry_run)),
-        ))
+        Json(
+            self.result_response(
+                self.enforce_agent_mutation_unless_dry_run(params.dry_run, "workspace_kill_app")
+                    .and_then(|_| workspace::kill_app(&id, params.app_id, params.dry_run)),
+            ),
+        )
     }
 
     #[tool(
@@ -2355,7 +2584,7 @@ impl AgentWorkspaceLinux {
         let id = params
             .id
             .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
-        Json(result_response(workspace::stop_workspace(
+        Json(self.result_response(workspace::stop_workspace(
             &id,
             params.timeout_ms,
             params.dry_run,
@@ -2367,7 +2596,7 @@ impl AgentWorkspaceLinux {
     name = "agent-workspace-linux",
     version = "0.1.0",
     instructions = "\
-Use mcp_permissions first when the host may have spawned this MCP with a permissions ceiling, mcp_control_state to check whether live user control has put the server in active, read_only, or paused mode, mcp_action_catalog when deciding whether a tool is read-only, idempotent, destructive, host-visible/open-world, or blocked by live control, mcp_session_brief when you need a condensed session summary with suggested next actions, and mcp_task_plan when the user intent is app QA, browser/shopping, observation, or cleanup and you need a safe read-only plan before calling mutating tools. \
+Use mcp_agent_context for one low-noise snapshot with active/read_only/paused, headless/no-host-display, viewer, app_id/window_id/viewer_id/browser_target_id handles, and recovery hints. Use mcp_permissions first when the host may have spawned this MCP with a permissions ceiling, mcp_control_state to check whether live user control has put the server in active, read_only, or paused mode, mcp_action_catalog when deciding whether a tool is read-only, idempotent, destructive, host-visible/open-world, or blocked by live control, mcp_session_brief when you need a condensed session summary with suggested next actions, and mcp_task_plan when the user intent is app QA, browser/shopping, observation, or cleanup and you need a safe read-only plan before calling mutating tools. \
 If configured=true, any populated permission dimensions are an immutable spawn-time ceiling for profile, start, launch, setup, and startup actions; clients may only narrow those dimensions. If configured=true but restricted=false, the MCP has an explicit empty/open ceiling, so enforcement stays open while the configured state remains visible. If configured=false, the MCP does not impose its own ceiling; respect the host/client harness boundary and use mcp_action_catalog plus each tool's annotations and description to classify the action type before acting. \
 Use mcp_control_update only when the user or controlling UI asks to switch active/read_only/paused; when reactivating from read_only or paused to active, pass confirmed_user_request=true only after explicit user or controlling UI approval. read_only and paused block mutating agent actions while preserving inspection and safety stop. \
 workspace_open_viewer is host-visible and open-world; it can launch the GPUI monitor unless this MCP process was started with --headless or workspace_doctor reports ready_for_host_viewer=false, in which case it must run without host-visible UI. Use workspace_list_viewers and workspace_close_viewer for repo-owned GPUI viewer lifecycle control when compositor/window automation cannot see or close the viewer; workspace_close_viewer only signals registered viewer pids whose command line still matches the registry entry, and dry_run=true previews the close. Use workspace_guardrails to inspect acknowledgement, dry-run, explicit override, timeout-termination, and workspace-scope rules for UI approval flows. Use workspace_doctor to check runtime readiness, viewer host-display readiness, and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_validate/profile_template/profile_put/profile_import/profile_export/profile_delete to manage saved environment profiles. Use profile_validate to preflight a local JSON profile file without saving it. Use profile_export to return a saved profile and optionally write it to output_path; set replace=true only when intentionally overwriting an existing file. Use profile_put with dry_run=true to preview whether a profile would be created, replaced, or rejected without writing. Use profile_import when the UI has a local JSON file path instead of an already parsed profile object. Use profile_delete with dry_run=true to return the saved profile without deleting it. profile_template can generate starter JSON such as project-dev, restricted-chrome, and browser-session before saving with profile_put; restricted-chrome and browser-session intentionally expose their --no-sandbox browser commands for bubblewrap namespace compatibility. browser-session requires user_data_dir and is intended only for explicitly user-approved browser data directories. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. Preview scope matters: workspace_start dry_run=true and workspace_open_profile dry_run=true are pre-daemon approval previews that do not create runtime state; workspace_launch_app, workspace_run_app, workspace_run_profile_setup, and workspace_launch_profile_apps dry_run=true are daemon-attached previews and require an already running workspace. Dry-run preview responses include an approval bundle when acknowledgement UI data is available. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. Pass purpose when a human-readable reason should be shown in workspace_status and the start event. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles, disabled-network profiles, and local_only network profiles are enforced with bubblewrap when bubblewrap is available; local_only uses a loopback-only sandbox namespace and does not bridge host localhost services. The current product network modes are closed/disabled, local/local_only, and open/inherit_host; allowlist network profiles are advanced/legacy declared intent only and are not enforced by the X11 runtime. workspace_status reports live daemon state, including the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_manifest to inspect saved manifest state from disk for live or stopped workspaces without contacting the workspace daemon. Use workspace_artifacts to inventory saved runtime files such as manifest, event log, daemon logs, app logs, and screenshots when present; set existing_only=true when only present paths are needed. Use workspace_ipc_info to verify daemon IPC protocol metadata, transport, framing, encoding, and socket path. Use workspace_env to get DISPLAY, XAUTHORITY, runtime directory, and control socket values for external tools that need to attach to the hidden workspace. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale with dry_run=true to preview unreachable runtime directories and verified orphan process cleanup before deletion. Use workspace_list_apps to inspect launched apps, including named apps and running/stopped state; it can read the saved app snapshot after a workspace has stopped. Use workspace_browser_targets after launching Chrome/Chromium with --remote-debugging-port=0 to discover workspace-owned page targets, workspace_browser_snapshot to read page title/text/links, and workspace_browser_navigate to change the workspace browser page without using the host Chrome bridge or external browser automation. App action and log-read responses include the directly affected app in the top-level apps field when available. Use workspace_open_profile to start a profile-backed workspace, optionally wait for setup, and open startup apps after setup succeeds in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr; set kill_on_timeout=true to terminate timed-out commands. workspace_wait_app also accepts kill_on_timeout=true to terminate an already launched app when its wait timeout elapses. workspace_launch_app and workspace_run_app accept optional names, workspace_list_apps can filter by app name or running pid or app_id, and named apps can be referenced anywhere an app target is accepted, including logs, waits, kill dry-runs, kills, and window app_id filters. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_focus_matching_window, workspace_close_window, workspace_close_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click, workspace_click_window, workspace_move_pointer, workspace_move_pointer_window, workspace_drag, workspace_drag_window, workspace_scroll, workspace_scroll_window, workspace_key, workspace_key_window, workspace_type_text, workspace_type_window, workspace_set_clipboard, workspace_get_clipboard, workspace_paste_text, and workspace_paste_window run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_wait_window, workspace_active_window, workspace_pointer, workspace_observe, workspace_focus_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click_window, workspace_move_pointer_window, workspace_drag_window, workspace_scroll_window, workspace_key_window, workspace_type_window, or workspace_paste_window after launching GUI apps. Prefer window-targeted tools when acting on a specific app window rather than the workspace root or current focus. Window match filters accept title_contains, class_contains, pid, or app_id; class_contains matches wm_class and wm_instance. Use workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, and workspace_show_window to arrange app windows before screenshots or repeated QA interactions. workspace_show_window match filters include hidden windows, so it can restore minimized apps by title/class/pid/app without first listing its raw X11 id. Use workspace_list_windows with title_contains, class_contains, pid, or app_id filters to inspect specific current app windows. Use workspace_list_windows or workspace_observe with include_hidden=true when a minimized or hidden app needs to be found again; returned windows include wm_class, wm_instance, and app_id when X11/process metadata is available. Use workspace_paste_text or workspace_paste_window when inserting long text is more reliable than synthetic typing. Use workspace_run_profile_setup with wait=true when setup command completion matters; set kill_on_timeout=true to clean up timed-out setup commands. Use workspace_status or workspace_observe when a full live app snapshot is useful. Use workspace_observe, workspace_screenshot, workspace_screenshot_window, workspace_list_apps, workspace_browser_targets, workspace_browser_snapshot, workspace_list_windows, workspace_active_window, workspace_pointer, workspace_wait_app, workspace_read_app_log, workspace_get_clipboard, and workspace_events to inspect the workspace before acting. For incremental event polling, pass workspace_events since_sequence with the last seen event sequence. workspace_screenshot_window captures a specific app window by id/title/class/pid/app filters. workspace_read_app_log can read saved stdout/stderr after a workspace has stopped when its manifest remains on disk. workspace_events records IPC activity without storing raw typed text, raw clipboard-set text, or raw pasted text, and can read saved event history after a workspace has stopped. workspace_close_window, workspace_close_matching_window, workspace_kill_app, workspace_minimize_window, and workspace_show_window affect only workspace-local windows/apps. workspace_close_window and workspace_close_matching_window with dry_run=true resolve the targeted window without closing it. workspace_kill_app with dry_run=true resolves the matched app without terminating it. workspace_stop with dry_run=true previews currently running apps without stopping; without dry_run it terminates the workspace and apps launched inside it, then waits for the daemon IPC socket to close."
@@ -2445,6 +2674,93 @@ struct McpSessionBrief {
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+struct McpAgentContextParams {
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    browser_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct McpAgentContext {
+    version: u32,
+    mode: AgentModeSummary,
+    permissions: McpPermissionState,
+    workspace: McpAgentWorkspaceContext,
+    viewers: Vec<McpAgentViewerContext>,
+    handles: AgentTargetHandles,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    next_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct McpAgentWorkspaceContext {
+    id: String,
+    running: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile_id: Option<String>,
+    app_count: usize,
+    running_app_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_window: Option<McpAgentWindowRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    windows: Vec<McpAgentWindowRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    browser: Option<McpAgentBrowserContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct McpAgentWindowRef {
+    window_id: String,
+    title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pid: Option<u32>,
+    visible: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct McpAgentBrowserContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    targets: Vec<McpAgentBrowserTargetRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct McpAgentBrowserTargetRef {
+    browser_target_id: String,
+    title: String,
+    url: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct McpAgentViewerContext {
+    viewer_id: String,
+    pid: u32,
+    backend: String,
+    alive: bool,
+    always_on_top: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct McpTaskPlanParams {
     intent: String,
@@ -2478,6 +2794,8 @@ struct McpTaskPlanParams {
     final_cart_reviewed: bool,
     #[serde(default)]
     real_world_action_approved: bool,
+    #[serde(default)]
+    open_viewer: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -3078,16 +3396,16 @@ fn build_mcp_task_plan_with_context(
                         "Use active_window.id or a stable app_id from observe_running_project_workspace/list_running_project_apps.",
                     ),
                 );
-                if viewer_available {
+                if viewer_available && params.open_viewer != Some(false) {
                     steps.push(mcp_task_step(
                         "open_viewer_for_running_project",
-                        7,
+                        2,
                         "Open the viewer for the running app QA workspace",
                         "workspace_open_viewer",
                         serde_json::json!({ "id": workspace_id }),
-                        false,
-                        "For interactive app QA, the user may want to watch, pause, or switch the agent read-only from the floating viewer.",
-                        "Open-world host-visible UI; call only when the user or host wants the floating viewer.",
+                        true,
+                        "Viewer-first default: open or reuse the floating viewer immediately so the user can watch, pause, or switch the agent read-only while QA continues.",
+                        "Open-world host-visible UI; skipped only when open_viewer=false or the MCP is headless/no-host-display.",
                         false,
                         true,
                         false,
@@ -3407,7 +3725,10 @@ fn build_mcp_task_plan_with_context(
                         ),
                     );
                 }
-                if viewer_available && project_run_step_id.is_some() {
+                if viewer_available
+                    && params.open_viewer != Some(false)
+                    && project_run_step_id.is_some()
+                {
                     let mut viewer_step = mcp_task_step(
                         "open_viewer_when_project_runs",
                         11,
@@ -3415,8 +3736,8 @@ fn build_mcp_task_plan_with_context(
                     "workspace_open_viewer",
                     serde_json::json!({ "id": workspace_id }),
                     false,
-                    "For interactive app QA, the user may want to watch, pause, or switch the agent read-only from the floating viewer.",
-                    "Open-world host-visible UI; call only when the user or host wants the floating viewer.",
+                    "Viewer-first default after start: open or reuse the floating viewer as soon as the project workspace exists.",
+                    "Open-world host-visible UI; skipped only when open_viewer=false or the MCP is headless/no-host-display.",
                     false,
                     true,
                     false,
@@ -3679,16 +4000,16 @@ fn build_mcp_task_plan_with_context(
                         "Use active_window.id or a stable browser app_id from observe_running_browser_workspace/list_running_browser_apps.",
                     ),
                 );
-                if viewer_available {
+                if viewer_available && params.open_viewer != Some(false) {
                     steps.push(mcp_task_step(
                         "open_viewer_for_running_browser",
-                        10,
+                        2,
                         "Open the viewer for the running browser workspace",
                         "workspace_open_viewer",
                         serde_json::json!({ "id": workspace_id }),
-                        false,
-                        "For shopping-style tasks, the user should be able to watch and pause the agent while it works in the browser.",
-                        "Open-world host-visible UI; call only when the user or host wants the floating viewer.",
+                        true,
+                        "Viewer-first default: open or reuse the floating viewer immediately so the user can watch and pause the agent while it works in the workspace browser.",
+                        "Open-world host-visible UI; skipped only when open_viewer=false or the MCP is headless/no-host-display.",
                         false,
                         true,
                         false,
@@ -4127,7 +4448,10 @@ fn build_mcp_task_plan_with_context(
                         ),
                     );
                 }
-                if viewer_available && browser_run_step_id.is_some() {
+                if viewer_available
+                    && params.open_viewer != Some(false)
+                    && browser_run_step_id.is_some()
+                {
                     let mut viewer_step = mcp_task_step(
                         "open_viewer_when_browser_runs",
                         14,
@@ -4135,8 +4459,8 @@ fn build_mcp_task_plan_with_context(
                     "workspace_open_viewer",
                     serde_json::json!({ "id": workspace_id }),
                     false,
-                    "For shopping-style tasks, the user should be able to watch and pause the agent while it works in the browser.",
-                    "Open-world host-visible UI; call only when the user or host wants the floating viewer.",
+                    "Viewer-first default after start: open or reuse the floating viewer as soon as the browser workspace exists.",
+                    "Open-world host-visible UI; skipped only when open_viewer=false or the MCP is headless/no-host-display.",
                     false,
                     true,
                     false,
@@ -4177,16 +4501,16 @@ fn build_mcp_task_plan_with_context(
                 false,
                 false,
             ));
-            if viewer_available {
+            if viewer_available && params.open_viewer != Some(false) {
                 steps.push(mcp_task_step(
                     "open_viewer",
-                    3,
+                    2,
                     "Open the floating viewer",
                     "workspace_open_viewer",
                     serde_json::json!({ "id": workspace_id }),
-                    false,
-                    "The viewer gives the user live visibility and control without turning the MCP into an always-visible app.",
-                    "Open-world host-visible UI; call only when requested by the user or host UI.",
+                    true,
+                    "Viewer-first default: open or reuse the floating viewer immediately for live visibility and control.",
+                    "Open-world host-visible UI; skipped only when open_viewer=false or the MCP is headless/no-host-display.",
                     false,
                     true,
                     false,
@@ -4341,6 +4665,42 @@ fn read_mcp_control_brief() -> McpSessionControlBrief {
             updated_at_unix: None,
             updated_by: None,
             reason: None,
+        },
+    }
+}
+
+fn build_agent_mode_summary(headless: bool) -> AgentModeSummary {
+    let doctor = workspace::doctor_report();
+    let (control_mode, allows_agent_mutation) = match control::control_status() {
+        Ok(status) => (
+            Some(status.state.mode.as_str().to_string()),
+            status.state.mode.allows_agent_mutation(),
+        ),
+        Err(_) => (None, false),
+    };
+    let viewer_available = !headless && doctor.ready_for_host_viewer;
+    let viewer_unavailable_reason = if headless {
+        Some("--headless disables workspace_open_viewer.".to_string())
+    } else if !doctor.ready_for_host_viewer {
+        Some("no host display is ready; workspace_doctor.ready_for_host_viewer=false".to_string())
+    } else {
+        None
+    };
+    AgentModeSummary {
+        control_mode,
+        allows_agent_mutation,
+        headless,
+        ready_for_x11_workspace: doctor.ready_for_x11_workspace,
+        ready_for_host_viewer: doctor.ready_for_host_viewer,
+        viewer_available,
+        viewer_unavailable_reason,
+        exact_reactivation_parameters: if allows_agent_mutation {
+            Vec::new()
+        } else {
+            vec![
+                "mode=active".to_string(),
+                "confirmed_user_request=true".to_string(),
+            ]
         },
     }
 }
@@ -5389,6 +5749,19 @@ fn build_mcp_session_brief(permissions: &McpPermissionState, headless: bool) -> 
     };
 
     let mut recommendations = Vec::new();
+    recommendations.push(mcp_recommendation(
+        "capture_agent_context",
+        100,
+        "orient_agent",
+        "Read compact agent context",
+        "mcp_agent_context",
+        serde_json::json!({}),
+        "Get active/read_only/paused mode, headless/no-host-display status, viewer state, and stable app_id/window_id/viewer_id/browser_target_id handles in one low-noise snapshot.",
+        "Read-only; no user approval required.",
+        true,
+        false,
+        false,
+    ));
     if permissions.restricted {
         recommendations.push(mcp_recommendation(
             "review_permission_ceiling",
@@ -5718,6 +6091,278 @@ fn build_mcp_session_brief(permissions: &McpPermissionState, headless: bool) -> 
     }
 }
 
+fn build_mcp_agent_context(
+    params: McpAgentContextParams,
+    permissions: &McpPermissionState,
+    headless: bool,
+) -> McpAgentContext {
+    let mut warnings = Vec::new();
+    let mode = build_agent_mode_summary(headless);
+    let workspace_list = match workspace::list_workspaces() {
+        Ok(list) => Some(list),
+        Err(error) => {
+            warnings.push(format!("workspace_list failed: {error}"));
+            None
+        }
+    };
+    let workspace_id = params
+        .workspace_id
+        .clone()
+        .or_else(|| {
+            workspace_list.as_ref().and_then(|list| {
+                list.workspaces
+                    .iter()
+                    .find(|entry| entry.running)
+                    .or_else(|| list.workspaces.first())
+                    .map(|entry| entry.id.clone())
+            })
+        })
+        .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+
+    let status = match workspace::status_workspace(&workspace_id) {
+        Ok(status) => Some(status),
+        Err(error) => {
+            if workspace_list
+                .as_ref()
+                .is_none_or(|list| list.workspaces.iter().any(|entry| entry.id == workspace_id))
+            {
+                warnings.push(format!(
+                    "workspace_status failed for {workspace_id}: {error}"
+                ));
+            }
+            workspace_list.as_ref().and_then(|list| {
+                list.workspaces
+                    .iter()
+                    .find(|entry| entry.id == workspace_id)
+                    .and_then(|entry| entry.status.clone())
+            })
+        }
+    };
+    let running = status.is_some()
+        || workspace_list.as_ref().is_some_and(|list| {
+            list.workspaces
+                .iter()
+                .any(|entry| entry.id == workspace_id && entry.running)
+        });
+
+    let mut handles = AgentTargetHandles {
+        workspace_id: Some(workspace_id.clone()),
+        ..Default::default()
+    };
+    let mut active_window_ref = None;
+    let mut window_refs = Vec::new();
+    if running {
+        match workspace::active_window(&workspace_id) {
+            Ok(response) => {
+                if let Some(window) = response.active_window {
+                    active_window_ref = Some(mcp_agent_window_ref(&window));
+                    push_unique(&mut handles.window_ids, window.id.clone());
+                    if let Some(app_id) = window.app_id {
+                        push_unique(&mut handles.app_ids, app_id);
+                    }
+                }
+            }
+            Err(error) => warnings.push(format!(
+                "workspace_active_window failed for {workspace_id}: {error}"
+            )),
+        }
+        match workspace::list_windows(&workspace_id, true, None, None, None, None) {
+            Ok(response) => {
+                if let Some(windows) = response.windows {
+                    for window in windows.into_iter().take(8) {
+                        push_unique(&mut handles.window_ids, window.id.clone());
+                        if let Some(app_id) = window.app_id.clone() {
+                            push_unique(&mut handles.app_ids, app_id);
+                        }
+                        window_refs.push(mcp_agent_window_ref(&window));
+                    }
+                }
+            }
+            Err(error) => warnings.push(format!(
+                "workspace_list_windows failed for {workspace_id}: {error}"
+            )),
+        }
+    }
+
+    let apps = status
+        .as_ref()
+        .map(|status| status.apps.clone())
+        .unwrap_or_default();
+    for app in &apps {
+        push_unique(&mut handles.app_ids, app.id.clone());
+    }
+    let active_app_id = active_window_ref
+        .as_ref()
+        .and_then(|window| window.app_id.clone())
+        .or_else(|| {
+            apps.iter()
+                .find(|app| app.running)
+                .map(|app| app.id.clone())
+        });
+
+    let browser = if running {
+        match browser::workspace_browser_targets(
+            &workspace_id,
+            None,
+            None,
+            Some(params.browser_timeout_ms.unwrap_or(500).min(5_000)),
+        ) {
+            Ok(targets) => {
+                for target_id in &targets.browser_target_ids {
+                    push_unique(&mut handles.browser_target_ids, target_id.clone());
+                }
+                Some(McpAgentBrowserContext {
+                    app_id: targets.app_id.clone(),
+                    targets: targets
+                        .targets
+                        .iter()
+                        .take(8)
+                        .map(|target| McpAgentBrowserTargetRef {
+                            browser_target_id: target.id.clone(),
+                            title: target.title.clone(),
+                            url: target.url.clone(),
+                        })
+                        .collect(),
+                    warnings: targets.warnings,
+                    error: None,
+                })
+            }
+            Err(error) => Some(McpAgentBrowserContext {
+                app_id: active_app_id.clone(),
+                targets: Vec::new(),
+                warnings: Vec::new(),
+                error: Some(error.to_string()),
+            }),
+        }
+    } else {
+        None
+    };
+
+    let viewers = match viewer::list_viewers() {
+        Ok(list) => list
+            .viewers
+            .into_iter()
+            .filter(|viewer| viewer.id == workspace_id || params.workspace_id.is_none())
+            .take(8)
+            .map(|viewer| {
+                push_unique(&mut handles.viewer_ids, viewer.viewer_id.clone());
+                McpAgentViewerContext {
+                    viewer_id: viewer.viewer_id,
+                    pid: viewer.pid,
+                    backend: viewer.backend,
+                    alive: viewer.alive,
+                    always_on_top: viewer.always_on_top,
+                }
+            })
+            .collect(),
+        Err(error) => {
+            warnings.push(format!("workspace_list_viewers failed: {error}"));
+            Vec::new()
+        }
+    };
+
+    let workspace = McpAgentWorkspaceContext {
+        id: workspace_id.clone(),
+        running,
+        session_id: status.as_ref().map(|status| status.session_id.clone()),
+        purpose: status.as_ref().and_then(|status| status.purpose.clone()),
+        profile_id: status.as_ref().and_then(|status| status.profile_id.clone()),
+        app_count: apps.len(),
+        running_app_count: apps.iter().filter(|app| app.running).count(),
+        active_app_id,
+        active_window: active_window_ref,
+        windows: window_refs,
+        browser,
+        error: (!running).then_some("workspace is not currently running".to_string()),
+    };
+    let next_tools = mcp_agent_context_next_tools(&mode, &workspace);
+    let recovery_hints = mcp_agent_context_recovery_hints(&mode, &workspace);
+
+    McpAgentContext {
+        version: 1,
+        mode,
+        permissions: permissions.clone(),
+        workspace,
+        viewers,
+        handles,
+        next_tools,
+        recovery_hints,
+        warnings,
+    }
+}
+
+fn mcp_agent_window_ref(window: &workspace::WorkspaceWindow) -> McpAgentWindowRef {
+    McpAgentWindowRef {
+        window_id: window.id.clone(),
+        title: window.title.clone(),
+        app_id: window.app_id.clone(),
+        pid: window.pid,
+        visible: window.visible,
+    }
+}
+
+fn mcp_agent_context_next_tools(
+    mode: &AgentModeSummary,
+    workspace: &McpAgentWorkspaceContext,
+) -> Vec<String> {
+    let mut tools = vec![
+        "mcp_agent_context".to_string(),
+        "mcp_action_catalog".to_string(),
+    ];
+    if mode.viewer_available {
+        tools.push("workspace_open_viewer".to_string());
+    } else {
+        tools.push("workspace_doctor".to_string());
+    }
+    if workspace.running {
+        tools.extend(
+            [
+                "workspace_observe",
+                "workspace_list_windows",
+                "workspace_list_apps",
+                "workspace_browser_targets",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+    } else {
+        tools.extend(
+            [
+                "workspace_list",
+                "workspace_start",
+                "workspace_open_profile",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+    }
+    if !mode.allows_agent_mutation {
+        tools.push("mcp_control_update".to_string());
+    }
+    tools
+}
+
+fn mcp_agent_context_recovery_hints(
+    mode: &AgentModeSummary,
+    workspace: &McpAgentWorkspaceContext,
+) -> Vec<String> {
+    let mut hints = Vec::new();
+    if !mode.allows_agent_mutation {
+        hints.push(live_control_reactivation_hint().to_string());
+    }
+    if !mode.viewer_available {
+        hints.push(
+            "Call workspace_doctor before expecting workspace_open_viewer to work.".to_string(),
+        );
+    }
+    if workspace.running {
+        hints.push("Use returned app_id, window_id, viewer_id, and browser_target_id handles instead of rediscovering by title.".to_string());
+    } else {
+        hints.push("No running workspace is selected; use workspace_start or workspace_open_profile before window/app/browser tools.".to_string());
+    }
+    hints
+}
+
 fn mcp_workspace_activity_brief(
     entry: &workspace::WorkspaceListEntry,
 ) -> McpSessionWorkspaceActivityBrief {
@@ -5895,6 +6540,7 @@ fn mcp_recommendation_is_idempotent(
             "mcp_permissions"
                 | "mcp_action_catalog"
                 | "mcp_session_brief"
+                | "mcp_agent_context"
                 | "mcp_task_plan"
                 | "mcp_control_state"
                 | "workspace_open_viewer"
@@ -6139,7 +6785,7 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 true,
                 false,
                 "always_allowed",
-                "Static guardrail metadata for approval UX.",
+                "Static guardrail metadata for approval UX, including concise agent_rules.allowed/blocked/requires_ack/exact_parameter wording.",
             ),
             mcp_action(
                 "mcp_permissions",
@@ -6173,6 +6819,17 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 false,
                 "always_allowed",
                 "Read-only session summary with suggested next actions and approval hints.",
+            ),
+            mcp_action(
+                "mcp_agent_context",
+                "control_plane",
+                true,
+                false,
+                false,
+                false,
+                false,
+                "always_allowed",
+                "Compact agent context snapshot with active/read_only/paused, headless/no-host-display, app_id/window_id/viewer_id/browser_target_id handles, and recovery hints.",
             ),
             mcp_action(
                 "mcp_task_plan",
@@ -7332,6 +7989,10 @@ struct ProfileExportResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     export: Option<profile::ProfileExportResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -7377,6 +8038,10 @@ struct ProfileSetupResult {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<profile::ProfileSetupRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -7385,6 +8050,10 @@ struct ProfileStartupResult {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<profile::ProfileStartupRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -7395,6 +8064,12 @@ struct ProfileWorkspaceOpenResult {
     open: Option<profile::ProfileWorkspaceOpen>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview: Option<profile::ProfileWorkspaceOpenPreview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -7405,6 +8080,12 @@ struct WorkspaceRunResult {
     run: Option<workspace::WorkspaceRun>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview: Option<workspace::WorkspaceRunPreview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -7413,6 +8094,12 @@ struct WorkspaceOpenViewerResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     launch: Option<viewer::ViewerLaunch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -7421,6 +8108,12 @@ struct WorkspaceCloseViewerResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     close: Option<viewer::ViewerClose>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_handles: Option<AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -8277,6 +8970,241 @@ fn error_response(message: String, status: Option<WorkspaceStatus>) -> IpcRespon
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
+    }
+}
+
+fn target_handles_from_ipc_response(response: &IpcResponse) -> AgentTargetHandles {
+    let mut handles = AgentTargetHandles::default();
+    if let Some(status) = response.status.as_ref() {
+        handles.workspace_id = Some(status.id.clone());
+        for app in &status.apps {
+            push_unique(&mut handles.app_ids, app.id.clone());
+        }
+    }
+    if handles.workspace_id.is_none() {
+        if let Some(environment) = response.environment.as_ref() {
+            handles.workspace_id = Some(environment.workspace_id.clone());
+        } else if let Some(ipc) = response.ipc.as_ref() {
+            handles.workspace_id = Some(ipc.workspace_id.clone());
+        }
+    }
+    if let Some(apps) = response.apps.as_ref() {
+        for app in apps {
+            push_unique(&mut handles.app_ids, app.id.clone());
+        }
+    }
+    if let Some(windows) = response.windows.as_ref() {
+        for window in windows {
+            push_unique(&mut handles.window_ids, window.id.clone());
+            if let Some(app_id) = window.app_id.clone() {
+                push_unique(&mut handles.app_ids, app_id);
+            }
+        }
+    }
+    if let Some(window) = response.active_window.as_ref() {
+        push_unique(&mut handles.window_ids, window.id.clone());
+        if let Some(app_id) = window.app_id.clone() {
+            push_unique(&mut handles.app_ids, app_id);
+        }
+    }
+    if let Some(pointer) = response.pointer.as_ref() {
+        if let Some(window_id) = pointer.window_id.clone() {
+            push_unique(&mut handles.window_ids, window_id);
+        }
+    }
+    if let Some(app_log) = response.app_log.as_ref() {
+        push_unique(&mut handles.app_ids, app_log.app_id.clone());
+    }
+    if let Some(browser_targets) = response.browser_targets.as_ref() {
+        handles.workspace_id = Some(browser_targets.id.clone());
+        if let Some(app_id) = browser_targets.app_id.clone() {
+            push_unique(&mut handles.app_ids, app_id);
+        }
+        for target_id in &browser_targets.browser_target_ids {
+            push_unique(&mut handles.browser_target_ids, target_id.clone());
+        }
+    }
+    if let Some(snapshot) = response.browser_snapshot.as_ref() {
+        handles.workspace_id = Some(snapshot.id.clone());
+        if let Some(app_id) = snapshot.app_id.clone() {
+            push_unique(&mut handles.app_ids, app_id);
+        }
+        if let Some(target_id) = snapshot.browser_target_id.clone() {
+            push_unique(&mut handles.browser_target_ids, target_id);
+        }
+    }
+    if let Some(results) = response.browser_search_results.as_ref() {
+        handles.workspace_id = Some(results.id.clone());
+        if let Some(app_id) = results.app_id.clone() {
+            push_unique(&mut handles.app_ids, app_id);
+        }
+        if let Some(target_id) = results.browser_target_id.clone() {
+            push_unique(&mut handles.browser_target_ids, target_id);
+        }
+    }
+    if let Some(navigate) = response.browser_navigate.as_ref() {
+        handles.workspace_id = Some(navigate.id.clone());
+        if let Some(app_id) = navigate.app_id.clone() {
+            push_unique(&mut handles.app_ids, app_id);
+        }
+        if let Some(target_id) = navigate.browser_target_id.clone() {
+            push_unique(&mut handles.browser_target_ids, target_id);
+        }
+    }
+    handles
+}
+
+fn profile_open_target_handles(
+    open: Option<&profile::ProfileWorkspaceOpen>,
+    preview: Option<&profile::ProfileWorkspaceOpenPreview>,
+) -> Option<AgentTargetHandles> {
+    let mut handles = AgentTargetHandles::default();
+    if let Some(open) = open {
+        handles.workspace_id = Some(open.workspace_id.clone());
+        merge_target_handles(&mut handles, target_handles_from_ipc_response(&open.start));
+        if let Some(setup) = open.setup.as_ref() {
+            for launch in &setup.launched {
+                merge_target_handles(&mut handles, target_handles_from_ipc_response(launch));
+            }
+        }
+        if let Some(startup) = open.startup.as_ref() {
+            for launch in &startup.launched {
+                merge_target_handles(&mut handles, target_handles_from_ipc_response(launch));
+            }
+        }
+    }
+    if let Some(preview) = preview {
+        handles.workspace_id = Some(preview.workspace_id.clone());
+        merge_target_handles(
+            &mut handles,
+            target_handles_from_ipc_response(&preview.start),
+        );
+    }
+    (!handles.is_empty()).then_some(handles)
+}
+
+fn workspace_run_target_handles(
+    run: Option<&workspace::WorkspaceRun>,
+    preview: Option<&workspace::WorkspaceRunPreview>,
+) -> Option<AgentTargetHandles> {
+    let mut handles = AgentTargetHandles::default();
+    if let Some(run) = run {
+        push_unique(&mut handles.app_ids, run.app_id.clone());
+        merge_target_handles(&mut handles, target_handles_from_ipc_response(&run.launch));
+        merge_target_handles(&mut handles, target_handles_from_ipc_response(&run.wait));
+        if let Some(kill) = run.kill.as_ref() {
+            merge_target_handles(&mut handles, target_handles_from_ipc_response(kill));
+        }
+    }
+    if let Some(preview) = preview {
+        handles.workspace_id = Some(preview.workspace_id.clone());
+    }
+    (!handles.is_empty()).then_some(handles)
+}
+
+fn viewer_target_handles(viewer_id: &str) -> AgentTargetHandles {
+    let mut handles = AgentTargetHandles {
+        workspace_id: Some(viewer_id.to_string()),
+        ..Default::default()
+    };
+    handles.viewer_ids.push(viewer_id.to_string());
+    handles
+}
+
+fn viewer_close_target_handles(close: &viewer::ViewerClose) -> AgentTargetHandles {
+    let mut handles = AgentTargetHandles::default();
+    if let Some(target_id) = close.target_id.clone() {
+        handles.workspace_id = Some(target_id.clone());
+        push_unique(&mut handles.viewer_ids, target_id);
+    }
+    for entry in close
+        .candidates
+        .iter()
+        .chain(close.closed.iter())
+        .chain(close.skipped.iter())
+    {
+        push_unique(&mut handles.viewer_ids, entry.viewer_id.clone());
+    }
+    handles
+}
+
+fn merge_target_handles(target: &mut AgentTargetHandles, source: AgentTargetHandles) {
+    if target.workspace_id.is_none() {
+        target.workspace_id = source.workspace_id;
+    }
+    for value in source.app_ids {
+        push_unique(&mut target.app_ids, value);
+    }
+    for value in source.window_ids {
+        push_unique(&mut target.window_ids, value);
+    }
+    for value in source.viewer_ids {
+        push_unique(&mut target.viewer_ids, value);
+    }
+    for value in source.browser_target_ids {
+        push_unique(&mut target.browser_target_ids, value);
+    }
+}
+
+fn recovery_hints_for_message(message: &str) -> Vec<String> {
+    let lower = message.to_ascii_lowercase();
+    let mut hints = Vec::new();
+    if lower.contains("live control")
+        || lower.contains("read_only")
+        || lower.contains("paused")
+        || lower.contains("reactivat")
+    {
+        hints.push(live_control_reactivation_hint().to_string());
+        hints.push(
+            "Call mcp_control_state to confirm active/read_only/paused before retrying."
+                .to_string(),
+        );
+    }
+    if lower.contains("headless") || lower.contains("host-visible") || lower.contains("viewer") {
+        hints.push("Call workspace_doctor and workspace_list_viewers before retrying workspace_open_viewer.".to_string());
+    }
+    if lower.contains("window")
+        || lower.contains("xdotool")
+        || lower.contains("click")
+        || lower.contains("key")
+    {
+        hints.push("Call workspace_list_windows with include_hidden=true and retry with window_id or app_id.".to_string());
+        hints.push(
+            "Call workspace_observe with include_hidden=true if the visible target is unclear."
+                .to_string(),
+        );
+    }
+    if lower.contains("app") || lower.contains("pid") || lower.contains("process") {
+        hints.push(
+            "Call workspace_list_apps with running=true and use the returned app_id.".to_string(),
+        );
+    }
+    if lower.contains("browser")
+        || lower.contains("devtools")
+        || lower.contains("target")
+        || lower.contains("remote-debugging")
+    {
+        hints.push("Call workspace_browser_targets to select a browser_target_id, then retry with target_id.".to_string());
+        hints.push("Call workspace_list_apps to choose the browser app_id if more than one browser is running.".to_string());
+    }
+    if lower.contains("workspace") || lower.contains("socket") || lower.contains("not running") {
+        hints.push(
+            "Call workspace_list and workspace_status to verify the selected workspace id."
+                .to_string(),
+        );
+    }
+    if hints.is_empty() {
+        hints.push("Call mcp_agent_context for current mode, handles, viewer, browser, and next recovery tools.".to_string());
+    }
+    hints
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !value.is_empty() && !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 
@@ -8392,6 +9320,79 @@ mod tests {
             last_event_sequence: 7,
             apps,
         }
+    }
+
+    #[test]
+    fn ipc_target_handles_collect_stable_ids() {
+        let mut response = error_response(
+            "workspace observed".to_string(),
+            Some(sample_workspace_status(
+                "default",
+                vec![sample_workspace_app("app-1", Some("browser"), true)],
+            )),
+        );
+        response.ok = true;
+        response.windows = Some(vec![workspace::WorkspaceWindow {
+            id: "win-1".to_string(),
+            title: "Browser".to_string(),
+            wm_class: Some("Chromium".to_string()),
+            wm_instance: None,
+            pid: Some(1234),
+            app_id: Some("app-1".to_string()),
+            visible: true,
+            geometry: workspace::WindowGeometry {
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+                screen: None,
+            },
+        }]);
+        response.browser_targets = Some(browser::WorkspaceBrowserTargets {
+            ok: true,
+            message: "targets".to_string(),
+            id: "default".to_string(),
+            app_id: Some("app-1".to_string()),
+            app_pid: Some(1234),
+            workspace_user_data_dir: None,
+            host_user_data_dir: None,
+            devtools_active_port_path: None,
+            devtools_endpoint: None,
+            targets: vec![browser::BrowserTarget {
+                id: "target-1".to_string(),
+                target_type: "page".to_string(),
+                title: "Amazon".to_string(),
+                url: "https://www.amazon.com".to_string(),
+                web_socket_debugger_url: None,
+            }],
+            browser_target_ids: vec!["target-1".to_string()],
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: Vec::new(),
+            warnings: Vec::new(),
+        });
+
+        let handles = target_handles_from_ipc_response(&response);
+
+        assert_eq!(handles.workspace_id.as_deref(), Some("default"));
+        assert_eq!(handles.app_ids, vec!["app-1"]);
+        assert_eq!(handles.window_ids, vec!["win-1"]);
+        assert_eq!(handles.browser_target_ids, vec!["target-1"]);
+    }
+
+    #[test]
+    fn recovery_hints_point_agents_to_next_tools() {
+        let hints = recovery_hints_for_message(
+            "MCP live control is read_only; xdotool click failed because browser target is missing",
+        );
+
+        assert!(hints.iter().any(|hint| hint.contains("mcp_control_state")));
+        assert!(hints
+            .iter()
+            .any(|hint| hint.contains("workspace_list_windows")));
+        assert!(hints
+            .iter()
+            .any(|hint| hint.contains("workspace_browser_targets")));
     }
 
     fn recommendation_checkpoint<'a>(
@@ -8995,6 +9996,7 @@ mod tests {
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
+                open_viewer: None,
             },
             headless,
             profile_ids,
@@ -9233,6 +10235,7 @@ mod tests {
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
+                open_viewer: None,
             },
             false,
             Vec::new(),
@@ -9419,6 +10422,7 @@ mod tests {
                 cart_mutation_approved: true,
                 final_cart_reviewed: true,
                 real_world_action_approved: true,
+                open_viewer: None,
             },
             false,
             Vec::new(),
@@ -9478,6 +10482,7 @@ mod tests {
                 cart_mutation_approved: true,
                 final_cart_reviewed: true,
                 real_world_action_approved: false,
+                open_viewer: None,
             },
             false,
             Vec::new(),
@@ -9527,6 +10532,7 @@ mod tests {
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
+                open_viewer: None,
             },
             false,
             Vec::new(),
@@ -9780,6 +10786,7 @@ mod tests {
                 cart_mutation_approved: false,
                 final_cart_reviewed: false,
                 real_world_action_approved: false,
+                open_viewer: None,
             },
             &McpPermissionState::default(),
             false,
@@ -9968,6 +10975,43 @@ mod tests {
         assert!(
             task_step(&headless_plan, "open_viewer_when_browser_runs").is_none(),
             "headless plans should not offer a host-visible viewer: {headless_plan:?}"
+        );
+    }
+
+    #[test]
+    fn task_plan_respects_explicit_viewer_opt_out() {
+        let plan = task_plan_from_params(
+            McpTaskPlanParams {
+                intent: "app QA".to_string(),
+                workspace_id: None,
+                profile_id: None,
+                project_path: Some(PathBuf::from("/tmp/example-project")),
+                browser_path: None,
+                user_data_dir: None,
+                target_url: None,
+                shopping_list: None,
+                budget: None,
+                fulfillment: None,
+                substitution_policy: None,
+                profile_is_disposable_copy: false,
+                cart_draft_steps_validated: false,
+                cart_mutation_approved: false,
+                final_cart_reviewed: false,
+                real_world_action_approved: false,
+                open_viewer: Some(false),
+            },
+            false,
+            Vec::new(),
+            vec![DEFAULT_WORKSPACE_ID.to_string()],
+        );
+
+        assert!(plan.viewer_available);
+        assert!(
+            !plan
+                .steps
+                .iter()
+                .any(|step| step.tool == "workspace_open_viewer"),
+            "open_viewer=false should suppress viewer-first plan steps: {plan:?}"
         );
     }
 }

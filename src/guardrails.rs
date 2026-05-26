@@ -4,12 +4,22 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct GuardrailSummary {
     pub version: u32,
+    pub agent_rules: Vec<AgentGuardrailRule>,
     pub acknowledgements: Vec<GuardrailRule>,
     pub previews: Vec<GuardrailRule>,
     pub explicit_overrides: Vec<GuardrailRule>,
     pub policy_modes: Vec<GuardrailRule>,
     pub timeout_terminations: Vec<GuardrailRule>,
     pub scope_notes: Vec<GuardrailRule>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AgentGuardrailRule {
+    pub surface: String,
+    pub allowed: String,
+    pub blocked: String,
+    pub requires_ack: String,
+    pub exact_parameter: String,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -24,7 +34,58 @@ pub struct GuardrailRule {
 
 pub fn guardrail_summary() -> GuardrailSummary {
     GuardrailSummary {
-        version: 14,
+        version: 15,
+        agent_rules: vec![
+            agent_rule(
+                "workspace_start",
+                "dry_run=true previews; real start allowed only when live control is active",
+                "real start is blocked without acknowledge_hidden_workspace=true",
+                "hidden workspace acknowledgement",
+                "acknowledge_hidden_workspace=true",
+            ),
+            agent_rule(
+                "workspace_open_profile",
+                "dry_run=true previews start/setup/startup; real open allowed only when live control is active",
+                "real open is blocked without hidden-workspace ack and any required policy ack",
+                "hidden workspace acknowledgement and possibly unenforced policy acknowledgement",
+                "acknowledge_hidden_workspace=true, acknowledge_unenforced_policy=true",
+            ),
+            agent_rule(
+                "profile_put/profile_import/profile_delete",
+                "dry_run=true previews profile writes/deletes",
+                "real writes/deletes are blocked unless live control is active",
+                "user approval before changing the saved profile store",
+                "dry_run=true for preview; replace=true only for explicit overwrite",
+            ),
+            agent_rule(
+                "workspace_launch_app/workspace_run_app",
+                "dry_run=true previews command/cwd/env/policy; real launch/run allowed only when live control is active",
+                "profile policy requests can block until acknowledged or enforced",
+                "unenforced policy acknowledgement when profile_check reports it",
+                "acknowledge_unenforced_policy=true",
+            ),
+            agent_rule(
+                "workspace_browser_navigate",
+                "normal browsing/search navigation is allowed only while live control is active",
+                "checkout, purchase, payment, order submission, and account changes stay blocked until separately approved",
+                "separate real-world action approval for checkout/account/payment changes",
+                "target_id from workspace_browser_targets when multiple pages exist",
+            ),
+            agent_rule(
+                "workspace_open_viewer",
+                "allowed while active/read_only/paused when not headless and host display is ready",
+                "blocked by --headless or workspace_doctor.ready_for_host_viewer=false",
+                "host-visible UI approval when the user has not already asked to watch",
+                "always_on_top=true only when explicitly requested",
+            ),
+            agent_rule(
+                "workspace_close_viewer",
+                "dry_run=true previews registered viewer cleanup; real close is allowed for repo-owned viewer pids",
+                "non-registered host windows are never targeted by this tool",
+                "approval before closing visible viewer windows unless it is stale cleanup",
+                "id=<viewer_id> or all=true, dry_run=true for preview",
+            ),
+        ],
         acknowledgements: vec![
             rule(
                 "hidden-workspace-start",
@@ -307,6 +368,22 @@ pub fn guardrail_summary() -> GuardrailSummary {
                 "Sensitive text actions are recorded as metadata such as character counts.",
             ),
         ],
+    }
+}
+
+fn agent_rule(
+    surface: &str,
+    allowed: &str,
+    blocked: &str,
+    requires_ack: &str,
+    exact_parameter: &str,
+) -> AgentGuardrailRule {
+    AgentGuardrailRule {
+        surface: surface.to_string(),
+        allowed: allowed.to_string(),
+        blocked: blocked.to_string(),
+        requires_ack: requires_ack.to_string(),
+        exact_parameter: exact_parameter.to_string(),
     }
 }
 

@@ -970,6 +970,12 @@ pub struct IpcResponse {
     pub browser_search_results: Option<crate::browser::WorkspaceBrowserSearchResults>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser_navigate: Option<crate::browser::WorkspaceBrowserNavigate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
 }
 
 pub fn default_workspace_id() -> String {
@@ -1096,6 +1102,9 @@ pub fn start_workspace(options: WorkspaceStartOptions) -> Result<IpcResponse> {
             browser_snapshot: None,
             browser_search_results: None,
             browser_navigate: None,
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: Vec::new(),
         }),
         WorkspaceStartPlan::Start(daemon_options) => {
             spawn_detached_daemon(&daemon_options)?;
@@ -1127,6 +1136,9 @@ pub fn preview_workspace_start(options: WorkspaceStartOptions) -> Result<IpcResp
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     })
 }
 
@@ -1839,6 +1851,9 @@ pub fn preview_launch_app(
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     })
 }
 
@@ -3643,6 +3658,9 @@ fn read_events_from_workspace_log(
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     }))
 }
 
@@ -3693,6 +3711,9 @@ fn read_app_log_from_workspace_manifest(
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     }))
 }
 
@@ -3737,6 +3758,9 @@ fn list_apps_from_workspace_manifest(
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     }))
 }
 
@@ -3765,6 +3789,9 @@ fn response_with_status(
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     }
 }
 
@@ -6681,6 +6708,9 @@ fn observe_workspace(
         browser_snapshot: None,
         browser_search_results: None,
         browser_navigate: None,
+        agent_mode: None,
+        target_handles: None,
+        recovery_hints: Vec::new(),
     })
 }
 

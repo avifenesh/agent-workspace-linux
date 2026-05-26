@@ -30,14 +30,25 @@ pub struct WorkspaceBrowserTargets {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<BrowserTarget>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browser_target_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 
 impl WorkspaceBrowserTargets {
     pub fn error(id: String, error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        let recovery_hints = browser_recovery_hints(&message);
+        let target_handles = Some(browser_target_handles(Some(id.clone()), None, Vec::new()));
         Self {
             ok: false,
-            message: error.to_string(),
+            message,
             id,
             app_id: None,
             app_pid: None,
@@ -46,6 +57,10 @@ impl WorkspaceBrowserTargets {
             devtools_active_port_path: None,
             devtools_endpoint: None,
             targets: Vec::new(),
+            browser_target_ids: Vec::new(),
+            agent_mode: None,
+            target_handles,
+            recovery_hints,
             warnings: Vec::new(),
         }
     }
@@ -65,22 +80,37 @@ pub struct WorkspaceBrowserSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<BrowserTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_target_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<BrowserPageSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 
 impl WorkspaceBrowserSnapshot {
     pub fn error(id: String, error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        let recovery_hints = browser_recovery_hints(&message);
+        let target_handles = Some(browser_target_handles(Some(id.clone()), None, Vec::new()));
         Self {
             ok: false,
-            message: error.to_string(),
+            message,
             id,
             app_id: None,
             app_pid: None,
             devtools_endpoint: None,
             target: None,
+            browser_target_id: None,
             page: None,
+            agent_mode: None,
+            target_handles,
+            recovery_hints,
             warnings: Vec::new(),
         }
     }
@@ -100,22 +130,37 @@ pub struct WorkspaceBrowserSearchResults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<BrowserTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_target_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<BrowserSearchResultsPage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 
 impl WorkspaceBrowserSearchResults {
     pub fn error(id: String, error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        let recovery_hints = browser_recovery_hints(&message);
+        let target_handles = Some(browser_target_handles(Some(id.clone()), None, Vec::new()));
         Self {
             ok: false,
-            message: error.to_string(),
+            message,
             id,
             app_id: None,
             app_pid: None,
             devtools_endpoint: None,
             target: None,
+            browser_target_id: None,
             page: None,
+            agent_mode: None,
+            target_handles,
+            recovery_hints,
             warnings: Vec::new(),
         }
     }
@@ -134,28 +179,43 @@ pub struct WorkspaceBrowserNavigate {
     pub devtools_endpoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<BrowserTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_target_id: Option<String>,
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation: Option<BrowserNavigationResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<BrowserPageSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_handles: Option<crate::agent::AgentTargetHandles>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 
 impl WorkspaceBrowserNavigate {
     pub fn error(id: String, url: String, error: anyhow::Error) -> Self {
+        let message = error.to_string();
+        let recovery_hints = browser_recovery_hints(&message);
+        let target_handles = Some(browser_target_handles(Some(id.clone()), None, Vec::new()));
         Self {
             ok: false,
-            message: error.to_string(),
+            message,
             id,
             app_id: None,
             app_pid: None,
             devtools_endpoint: None,
             target: None,
+            browser_target_id: None,
             url,
             navigation: None,
             page: None,
+            agent_mode: None,
+            target_handles,
+            recovery_hints,
             warnings: Vec::new(),
         }
     }
@@ -252,6 +312,51 @@ pub struct BrowserNavigationResult {
     pub loader_id: Option<String>,
 }
 
+fn browser_target_handles(
+    workspace_id: Option<String>,
+    app_id: Option<String>,
+    browser_target_ids: Vec<String>,
+) -> crate::agent::AgentTargetHandles {
+    let mut handles = crate::agent::AgentTargetHandles {
+        workspace_id,
+        ..Default::default()
+    };
+    if let Some(app_id) = app_id {
+        handles.app_ids.push(app_id);
+    }
+    handles.browser_target_ids = browser_target_ids;
+    handles
+}
+
+fn browser_recovery_hints(message: &str) -> Vec<String> {
+    let mut hints = vec![
+        "Call workspace_list_apps with running=true to choose the browser app_id.".to_string(),
+        "Call workspace_browser_targets with that app_id to discover browser_target_id values."
+            .to_string(),
+    ];
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("devtools")
+        || lower.contains("remote-debugging")
+        || lower.contains("user-data-dir")
+    {
+        hints.push(
+            "Relaunch the workspace browser with --user-data-dir and --remote-debugging-port=0."
+                .to_string(),
+        );
+    }
+    if lower.contains("target") || lower.contains("tab") || lower.contains("page") {
+        hints.push(
+            "Pass target_id, title_contains, or url_contains from workspace_browser_targets when multiple pages are open."
+                .to_string(),
+        );
+    }
+    hints.push(
+        "Use workspace_observe or workspace_screenshot_window for visual fallback if DevTools is unavailable."
+            .to_string(),
+    );
+    hints
+}
+
 #[derive(Debug, Clone)]
 struct BrowserAppSelection {
     app: WorkspaceApp,
@@ -330,21 +435,35 @@ pub(crate) fn workspace_browser_targets_from_status(
     let (endpoint, targets, mut endpoint_warnings) =
         read_targets_with_optional_wait(&selection, &active_port_path, timeout)?;
     warnings.append(&mut endpoint_warnings);
+    let browser_target_ids = targets
+        .iter()
+        .map(|target| target.id.clone())
+        .collect::<Vec<_>>();
+    let app_id = app.id.clone();
+    let target_handles = Some(browser_target_handles(
+        Some(status.id.clone()),
+        Some(app_id.clone()),
+        browser_target_ids.clone(),
+    ));
 
     Ok(WorkspaceBrowserTargets {
         ok: true,
         message: format!(
             "workspace browser targets returned for app {} through workspace-owned Chrome DevTools",
-            app.id
+            app_id
         ),
         id: status.id.clone(),
-        app_id: Some(app.id),
+        app_id: Some(app_id),
         app_pid: Some(app.pid),
         workspace_user_data_dir: selection.workspace_user_data_dir,
         host_user_data_dir: Some(host_user_data_dir),
         devtools_active_port_path: Some(active_port_path),
         devtools_endpoint: Some(endpoint),
         targets,
+        browser_target_ids,
+        agent_mode: None,
+        target_handles,
+        recovery_hints: Vec::new(),
         warnings,
     })
 }
@@ -435,7 +554,15 @@ pub(crate) fn workspace_browser_snapshot_from_status(
         app_pid: selected.targets.app_pid,
         devtools_endpoint: selected.targets.devtools_endpoint.clone(),
         target: Some(selected.target.clone()),
+        browser_target_id: Some(selected.target.id.clone()),
         page: Some(page),
+        agent_mode: None,
+        target_handles: Some(browser_target_handles(
+            Some(selected.targets.id.clone()),
+            selected.targets.app_id.clone(),
+            vec![selected.target.id.clone()],
+        )),
+        recovery_hints: Vec::new(),
         warnings,
     };
     Ok(response)
@@ -539,7 +666,15 @@ pub(crate) fn workspace_browser_search_results_from_status(
         app_pid: selected.targets.app_pid,
         devtools_endpoint: selected.targets.devtools_endpoint.clone(),
         target: Some(selected.target.clone()),
+        browser_target_id: Some(selected.target.id.clone()),
         page: Some(page),
+        agent_mode: None,
+        target_handles: Some(browser_target_handles(
+            Some(selected.targets.id.clone()),
+            selected.targets.app_id.clone(),
+            vec![selected.target.id.clone()],
+        )),
+        recovery_hints: Vec::new(),
         warnings,
     };
     Ok(response)
@@ -651,9 +786,17 @@ pub(crate) fn workspace_browser_navigate_from_status(
         app_pid: selected.targets.app_pid,
         devtools_endpoint: selected.targets.devtools_endpoint.clone(),
         target: Some(selected.target.clone()),
+        browser_target_id: Some(selected.target.id.clone()),
         url,
         navigation: Some(navigation),
         page,
+        agent_mode: None,
+        target_handles: Some(browser_target_handles(
+            Some(selected.targets.id.clone()),
+            selected.targets.app_id.clone(),
+            vec![selected.target.id.clone()],
+        )),
+        recovery_hints: Vec::new(),
         warnings,
     };
     Ok(response)
@@ -2056,6 +2199,7 @@ mod tests {
             app_pid: Some(4242),
             devtools_endpoint: Some("http://127.0.0.1:9222".to_string()),
             target: Some(target),
+            browser_target_id: Some("page-1".to_string()),
             page: Some(BrowserPageSnapshot {
                 title: "Private Grocery Cart".to_string(),
                 url: "https://example-grocery.test/cart".to_string(),
@@ -2069,6 +2213,9 @@ mod tests {
                     href: "https://example-grocery.test/checkout".to_string(),
                 }],
             }),
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: Vec::new(),
             warnings: Vec::new(),
         };
 
@@ -2100,6 +2247,7 @@ mod tests {
             app_pid: Some(4242),
             devtools_endpoint: Some("http://127.0.0.1:9222".to_string()),
             target: Some(target),
+            browser_target_id: Some("page-2".to_string()),
             page: Some(BrowserSearchResultsPage {
                 title: "Amazon GPU Search".to_string(),
                 url: "https://www.amazon.com/s?k=gpu".to_string(),
@@ -2119,6 +2267,9 @@ mod tests {
                     text_excerpt: "PNY Test GPU 48GB | $4,899.00".to_string(),
                 }],
             }),
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: Vec::new(),
             warnings: Vec::new(),
         };
 
@@ -2148,6 +2299,7 @@ mod tests {
             app_pid: Some(4242),
             devtools_endpoint: Some("http://127.0.0.1:9222".to_string()),
             target: Some(target),
+            browser_target_id: Some("page-3".to_string()),
             url: "https://example-grocery.test/search?q=milk".to_string(),
             navigation: Some(BrowserNavigationResult {
                 frame_id: Some("frame".to_string()),
@@ -2165,6 +2317,9 @@ mod tests {
                     href: "https://example-grocery.test/item/milk".to_string(),
                 }],
             }),
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: Vec::new(),
             warnings: Vec::new(),
         };
 
@@ -2202,6 +2357,9 @@ mod tests {
             browser_snapshot: None,
             browser_search_results: None,
             browser_navigate: None,
+            agent_mode: None,
+            target_handles: None,
+            recovery_hints: Vec::new(),
         }
     }
 

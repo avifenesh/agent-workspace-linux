@@ -134,6 +134,7 @@ impl Default for ViewerOptions {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ViewerLaunch {
     pub id: String,
+    pub viewer_id: String,
     pub pid: u32,
     pub backend: String,
     pub always_on_top: bool,
@@ -167,6 +168,7 @@ pub struct ViewerList {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ViewerListEntry {
     pub id: String,
+    pub viewer_id: String,
     pub pid: u32,
     pub backend: String,
     pub always_on_top: bool,
@@ -192,6 +194,7 @@ pub struct ViewerClose {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ViewerCloseEntry {
     pub id: String,
+    pub viewer_id: String,
     pub pid: u32,
     pub backend: String,
     pub always_on_top: bool,
@@ -2778,6 +2781,7 @@ pub fn list_viewers() -> Result<ViewerList> {
         .into_iter()
         .map(|(registry_path, entry)| ViewerListEntry {
             id: entry.id.clone(),
+            viewer_id: entry.id.clone(),
             pid: entry.pid,
             backend: entry.backend.clone(),
             always_on_top: entry.always_on_top,
@@ -2838,6 +2842,7 @@ fn close_viewer_registry_entry(
 ) {
     let close_entry = |reason: String| ViewerCloseEntry {
         id: entry.id.clone(),
+        viewer_id: entry.id.clone(),
         pid: entry.pid,
         backend: entry.backend.clone(),
         always_on_top: entry.always_on_top,
@@ -2938,6 +2943,7 @@ fn best_viewer_launch_for_id(
 
 fn viewer_launch_from_registry_entry(path: PathBuf, entry: ViewerRegistryEntry) -> ViewerLaunch {
     ViewerLaunch {
+        viewer_id: entry.id.clone(),
         id: entry.id,
         pid: entry.pid,
         backend: entry.backend,
@@ -3153,6 +3159,7 @@ pub fn open_viewer(
         eprintln!("failed to record agent workspace viewer instance: {error}");
     }
     Ok(ViewerLaunch {
+        viewer_id: id.clone(),
         id,
         pid,
         backend: backend.launch_label(always_on_top).to_string(),

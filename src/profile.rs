@@ -90,6 +90,8 @@ pub struct ProfileDeleteResult {
     pub dry_run: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<WorkspaceProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -109,6 +111,10 @@ pub struct ProfilePutResult {
     pub profile: Option<WorkspaceProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub existing_profile: Option<WorkspaceProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::agent::AgentModeSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -147,6 +153,8 @@ impl ProfilePutResult {
             dry_run,
             profile: Some(profile),
             existing_profile: None,
+            agent_mode: None,
+            recovery_hints: Vec::new(),
         }
     }
 
@@ -165,6 +173,8 @@ impl ProfilePutResult {
             dry_run,
             profile: None,
             existing_profile: None,
+            agent_mode: None,
+            recovery_hints: Vec::new(),
         }
     }
 }
@@ -711,6 +721,8 @@ pub fn put_profile(
         dry_run,
         profile: Some(profile),
         existing_profile,
+        agent_mode: None,
+        recovery_hints: Vec::new(),
     })
 }
 
@@ -732,6 +744,7 @@ pub fn delete_profile(id: &str, dry_run: bool) -> Result<ProfileDeleteResult> {
         would_delete,
         dry_run,
         profile,
+        agent_mode: None,
     })
 }
 
