@@ -97,7 +97,7 @@ The single most important thing to understand is **who sets the limits in each s
 | **Live viewer control** (pause / read-only) | The **human watching**, in real time | Best-effort: honors a runtime pause when the shared control state is readable, and fails open if it isn't. | It's a convenience layer, **not** the security boundary — the ceiling above is. |
 | **Workspace vs. host** | The **runtime** | Input, screenshots, windows, clipboard, and browser control target the hidden workspace **only** — never your real desktop or host Chrome. | Leakage to the host is a reportable bug. |
 
-In short: **by default the agent host owns permission**, a developer can **lock a hard, daemon-enforced ceiling** via flag or env, and the **viewer gives a human a best-effort live stop** — layered, not conflicting. See [docs/permission-boundary-roadmap.md](docs/permission-boundary-roadmap.md) and [SECURITY.md](SECURITY.md) for the full model and trust assumptions.
+In short: **by default the agent host owns permission**, a developer can **lock a hard, daemon-enforced ceiling** via flag or env, and the **viewer gives a human a best-effort live stop** — layered, not conflicting. See [docs/permission-model.md](docs/permission-model.md) and [SECURITY.md](SECURITY.md) for the full model and trust assumptions.
 
 ## Core concepts
 
@@ -131,9 +131,8 @@ The MCP exposes ~86 tools. To avoid dumping them all into the agent's context, i
 
 ## Docs
 
-- [Permission boundary roadmap](docs/permission-boundary-roadmap.md) — the authority model.
+- [Permission boundary](docs/permission-model.md) — the authority model.
 - [GPUI viewer direction](docs/gpui-viewer-direction.md) — the visible control surface.
-- [Public readiness](docs/public-readiness.md) — gates and release model.
 - [SECURITY.md](SECURITY.md) — trust model and how to report a vulnerability.
 
 ## Contributing

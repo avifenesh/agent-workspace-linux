@@ -1,14 +1,23 @@
-# Permission Boundary Roadmap
+# Permission Boundary
 
-This project is currently in developer-open dogfood mode. The existing
-acknowledgement parameters and approval bundles are useful API shape and audit
-metadata, but they are not a final human permission boundary while the MCP tools
-are directly available to an agent.
+How the workspace permission boundary works today, and what is still planned.
 
-Hard permission enforcement should wait until the core workspace flows are
-validated end to end. Until then, keep development easy and preserve the
-approval-bundle contract so the final boundary can be added without reshaping
-the product.
+A configured permission ceiling — set with `--permissions PATH` or the
+`AGENT_WORKSPACE_PERMISSIONS` environment variable — is enforced, not aspirational:
+the MCP front-end rejects any request that exceeds it, and the workspace daemon
+re-enforces it on every IPC request, so workspace-launched apps and other
+same-uid callers are held to the same ceiling. This is implemented and covered by
+tests.
+
+With no ceiling configured, the server imposes no boundary of its own and defers
+to the host tool's approval flow (Claude Code, Codex, and similar). In that mode
+the acknowledgement parameters and approval bundles are API shape and audit
+metadata for the host UI; a richer human-approval experience in Codex for Linux
+is the part still being built. Live viewer control (read_only/paused) is a
+best-effort convenience, not an authoritative boundary.
+
+See [Status and remaining work](#status-and-remaining-work) for what is done and
+what is still planned.
 
 ## Target Authority Model
 
@@ -201,9 +210,11 @@ Rules:
   intended for the Codex for Linux bridge when it discovers a locked MCP server
   config and needs to avoid bypassing that ceiling.
 
-## Gates Before Hard Enforcement
+## Status and remaining work
 
-Current gate status on 2026-05-25:
+The permission ceiling is enforced today at both the MCP front-end and the
+workspace daemon. The items below track what is validated and the gaps that
+remain (status as of 2026-05-26):
 
 - A is validated for the current X11/bubblewrap runtime surface covered by the
   integration smoke. Real MCP dogfood and `scripts/integration_smoke.sh` have
@@ -220,7 +231,7 @@ Current gate status on 2026-05-25:
   MCP process. A
   Codex-spawned MCP pass on this repository also revalidated project-dev
   mounts, Rust toolchain access, GUI input, events, Chrome, and current network
-  enforcement. `cargo test` currently passes 84 tests.
+  enforcement. `cargo test` currently passes 149 tests.
 - A still has known product gaps: host-localhost bridging for `local_only` and
   more varied real-project coverage. Broad network allowlists and egress proxy
   filtering are out of scope for this pass; the product network model is
@@ -259,10 +270,9 @@ Current gate status on 2026-05-25:
   that path the default
   recommendation for shopping-style tasks.
 
-### A. Prove Runtime Claims With Real Workloads
+### A. Runtime claims validated with real workloads
 
-Before making permissions hard, validate that the current claims actually hold
-under real usage:
+These runtime claims hold under real usage:
 
 - Validated: Chrome/Chromium launches inside the agent workspace and is
   controllable through workspace-local window, keyboard, and paste operations
@@ -299,8 +309,8 @@ under real usage:
 
 ### B. Provide Native Workspace Visibility
 
-Before final permission hardening, the user should be able to see and control
-what the agent is doing without depending on a Codex-only conversation embed:
+The user should be able to see and control what the agent is doing without
+depending on a Codex-only conversation embed:
 
 - Use the runtime-owned GPUI viewer as the canonical visible surface.
 - Keep the viewer small, movable, resizable, readable, and not always-on-top by
@@ -317,8 +327,7 @@ what the agent is doing without depending on a Codex-only conversation embed:
 
 ### C. Validate Capability Coverage
 
-Before locking permissions down, confirm the primitive set covers the optional
-tasks users may reasonably ask for:
+The primitive set should cover the optional tasks users may reasonably ask for:
 
 - Desktop app QA with project mounts, setup commands, local dev servers, browser
   testing, screenshots, logs, and cleanup.
@@ -332,6 +341,7 @@ tasks users may reasonably ask for:
 - Recovery and inspection flows: list active/stopped workspaces, inspect
   artifacts, read logs/events, stop, cleanup, and delete saved environments.
 
-Hard enforcement should be implemented only after these gates have been tested
-well enough that failures are known product gaps rather than permission-system
+The ceiling is enforced today; the remaining work above (broader viewer
+compositor coverage, the host-side human-approval UX, and capability breadth) is
+tracked so any gaps are known product limits rather than permission-system
 surprises.

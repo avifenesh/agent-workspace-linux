@@ -497,7 +497,7 @@ s.close()
 PY
 )"
   BROWSER_README_URL="http://127.0.0.1:${BROWSER_PORT}/README.md"
-  BROWSER_DOC_URL="http://127.0.0.1:${BROWSER_PORT}/docs/public-readiness.md"
+  BROWSER_DOC_URL="http://127.0.0.1:${BROWSER_PORT}/docs/permission-model.md"
   WORKSPACE_IDS+=("$BROWSER_ID")
   run_awl workspace start --ack-hidden-workspace --id "$BROWSER_ID" --purpose "Browser local-dev smoke" > "$SMOKE_DIR/browser-start.json"
   run_awl workspace launch --id "$BROWSER_ID" --name dev-server --cwd "$ROOT_DIR" -- python3 -m http.server "$BROWSER_PORT" --bind 127.0.0.1 > "$SMOKE_DIR/browser-server.json"
@@ -520,10 +520,10 @@ else:
   run_awl workspace key-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --timeout-ms 5000 ctrl+l > "$SMOKE_DIR/browser-key-address.json"
   run_awl workspace paste-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --timeout-ms 5000 "$BROWSER_DOC_URL" > "$SMOKE_DIR/browser-paste-address.json"
   run_awl workspace key-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --timeout-ms 5000 Return > "$SMOKE_DIR/browser-key-return.json"
-  run_awl workspace wait-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --title public-readiness.md --timeout-ms 10000 > "$SMOKE_DIR/browser-wait-doc-window.json"
-  assert_json '.ok == true and (.windows[0].title | contains("public-readiness.md"))' "$SMOKE_DIR/browser-wait-doc-window.json"
+  run_awl workspace wait-window --id "$BROWSER_ID" --app "$BROWSER_APP_ID" --title permission-model.md --timeout-ms 10000 > "$SMOKE_DIR/browser-wait-doc-window.json"
+  assert_json '.ok == true and (.windows[0].title | contains("permission-model.md"))' "$SMOKE_DIR/browser-wait-doc-window.json"
   run_awl workspace observe --id "$BROWSER_ID" --screenshot --events --events-tail 20 > "$SMOKE_DIR/browser-observe.json"
-  assert_json '(.screenshot.bytes > 0) and (.active_window.title | contains("public-readiness.md"))' "$SMOKE_DIR/browser-observe.json"
+  assert_json '(.screenshot.bytes > 0) and (.active_window.title | contains("permission-model.md"))' "$SMOKE_DIR/browser-observe.json"
   run_awl workspace stop --id "$BROWSER_ID" > "$SMOKE_DIR/browser-stop.json"
   assert_json '.ok == true and (.apps[] | select(.name == "dev-server" and .running == false)) and (.apps[] | select(.name == "browser-local-dev" and .running == false))' "$SMOKE_DIR/browser-stop.json"
 
