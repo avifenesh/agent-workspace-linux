@@ -340,8 +340,10 @@ For MCP hosts that read `.mcp.json`, the equivalent manual shape is:
 ```
 
 Use `["mcp", "--headless"]` when the MCP host must never open a host-visible
-viewer window. Without `--headless`, agents can still run fully headless, but
-`workspace_open_viewer` remains available as an explicit live-monitor action.
+viewer window. Without `--headless`, `workspace_start` and
+`workspace_open_profile` open the small GPUI viewer by default whenever a host
+display is available; pass `open_viewer=false` on that specific tool call only
+when the embedding host or user explicitly wants no monitor window.
 
 After adding the server, restart or reload the MCP host and call
 `workspace_doctor` first. The server speaks MCP over stdio; running
@@ -373,7 +375,7 @@ exiting. The clean MCP smoke starts `mcp --headless` with no
 `configured=false`, the action catalog stays advisory, and app-QA/browser plans
 do not invent permission blockers. The non-headless MCP viewer smoke starts
 plain `mcp` with no `--headless` flag and verifies that host-visible viewer
-steps are offered only as explicit open-world checkpoints. A companion
+auto-open happens by default when a workspace starts. A companion
 no-host-display smoke unsets `DISPLAY` and `WAYLAND_DISPLAY` to prove a normal
 non-headless MCP still runs workspace/planning flows, but suppresses viewer
 recommendations and refuses `workspace_open_viewer` with a doctor-backed host
@@ -1137,15 +1139,18 @@ the agent continue to act. Dry-run approval previews remain callable while live
 control is `read_only` or `paused`; host-output writes such as `profile_export`
 with `output_path` are blocked until control returns to `active`.
 
-`workspace_open_viewer` opens the viewer as a small host-visible GPUI monitor
-intended for passive monitoring while the user keeps working elsewhere. The MCP
-does not have to show this window; if the server is started with `--headless`,
-the tool refuses instead of launching any host-visible UI. By default it does
-not request always-on-top state; optional Wayland layer-shell or X11/Xwayland
-above/sticky behavior is used only when `always_on_top` is explicitly requested.
-Repeated opens for the same workspace reuse any registered live viewer for that
-workspace instead of creating duplicate detached windows, even if a later request
-asks for a different topmost mode.
+`workspace_start` and `workspace_open_profile` open the viewer by default as a
+small host-visible GPUI monitor intended for passive monitoring while the user
+keeps working elsewhere. The MCP suppresses that default only when the server is
+started with `--headless`, a host display is unavailable, or the tool call sets
+`open_viewer=false`. `workspace_open_viewer` remains available to reopen or
+reuse the monitor explicitly. By default it does not request always-on-top
+state; optional Wayland layer-shell or X11/Xwayland above/sticky behavior is
+used only when `viewer_always_on_top=true` on workspace start/profile open or
+`always_on_top=true` on an explicit viewer call. Repeated opens for the same
+workspace reuse any registered live viewer for that workspace instead of
+creating duplicate detached windows, even if a later request asks for a
+different topmost mode.
 Viewers launched through `workspace_open_viewer` are bound to the selected
 workspace and exit once that workspace runtime is removed, so a finished run
 does not leave an orphan GPUI window behind. The viewer runtime registry keeps

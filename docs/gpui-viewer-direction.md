@@ -11,8 +11,10 @@ control contract.
 
 - `agent-workspace-linux mcp` runs the stdio MCP server.
 - `agent-workspace-linux viewer` opens the native GPUI monitor directly.
-- `workspace_open_viewer` opens or reuses a target-bound viewer from MCP when
-  the server is not headless and `workspace_doctor.ready_for_host_viewer=true`.
+- `workspace_start` and `workspace_open_profile` open a target-bound viewer by
+  default when the server is not headless and
+  `workspace_doctor.ready_for_host_viewer=true`.
+- `workspace_open_viewer` reopens or reuses a target-bound viewer explicitly.
 - The viewer runs as a child/subcommand process, not inside the MCP stdio event
   loop.
 
@@ -23,6 +25,8 @@ footer mode in the user's XDG config directory.
 
 ## Viewer Contract
 
+- The default viewer opens unless the MCP is started with `--headless`, the host
+  display is unavailable, or the tool call sets `open_viewer=false`.
 - The default viewer does not request always-on-top state.
 - `--always-on-top` and `workspace_open_viewer(always_on_top=true)` are opt-in
   overlay modes for hosts or users that explicitly ask for that behavior.

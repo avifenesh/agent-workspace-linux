@@ -212,11 +212,19 @@ async function main() {
   assert(started.ok === true, `workspace_start failed: ${JSON.stringify(started)}`);
 
   try {
+    const autoOpened = started.viewer_auto_open;
+    assert(
+      autoOpened?.ok === true &&
+        autoOpened.launch?.pid > 0 &&
+        autoOpened.launch?.exit_when_workspace_gone === true,
+      `workspace_start should auto-open a target-bound viewer by default: ${JSON.stringify(started)}`,
+    );
+
     const opened = await callTool("workspace_open_viewer", { id: workspaceId }, 15000);
     assert(opened.ok === true, `workspace_open_viewer failed: ${JSON.stringify(opened)}`);
     assert(
-      opened.launch?.pid > 0 && opened.launch?.exit_when_workspace_gone === true,
-      `workspace_open_viewer should return a target-bound child pid: ${JSON.stringify(opened)}`,
+      opened.launch?.reused === true && opened.launch?.pid === autoOpened.launch.pid,
+      `workspace_open_viewer should reuse the viewer auto-opened by workspace_start: ${JSON.stringify(opened)}`,
     );
 
     const listed = await poll("registered live viewer", async () => {
@@ -224,7 +232,7 @@ async function main() {
       return viewers.viewers?.find((viewer) => viewer.id === workspaceId && viewer.alive === true);
     });
     assert(
-      listed.pid === opened.launch.pid,
+      listed.pid === autoOpened.launch.pid,
       `workspace_list_viewers should find the launched pid: listed=${JSON.stringify(listed)} opened=${JSON.stringify(opened)}`,
     );
     assert(pidExists(listed.pid), `launched viewer pid ${listed.pid} should exist before close`);
@@ -238,7 +246,7 @@ async function main() {
       duplicate.ok === true &&
         duplicate.launch?.reused === true &&
         duplicate.launch?.pid === listed.pid &&
-        duplicate.launch?.always_on_top === opened.launch.always_on_top,
+        duplicate.launch?.always_on_top === autoOpened.launch.always_on_top,
       `workspace_open_viewer should reuse an existing viewer for the workspace instead of opening a second window: duplicate=${JSON.stringify(duplicate)} opened=${JSON.stringify(opened)}`,
     );
 

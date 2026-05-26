@@ -182,6 +182,8 @@ async function main() {
   assert(
     /configured=false/.test(instructions) &&
       /host-visible\/open-world/.test(instructions) &&
+      /workspace_start/.test(instructions) &&
+      /auto-open/.test(instructions) &&
       /--headless/.test(instructions),
     `non-headless MCP initialize instructions should explain clean permissions and host-visible UI boundaries: ${instructions}`,
   );
@@ -205,6 +207,18 @@ async function main() {
     (viewerTool.annotations?.idempotentHint ?? viewerTool.annotations?.idempotent_hint) === true,
     "workspace_open_viewer should be annotated as idempotent because repeated calls reuse the existing viewer",
   );
+  for (const name of ["workspace_start", "workspace_open_profile"]) {
+    const tool = toolByName.get(name);
+    assert(tool, `tools/list did not include ${name}`);
+    const description = tool.description || "";
+    assert(
+      (tool.annotations?.openWorldHint ?? tool.annotations?.open_world_hint) === true &&
+        /GPUI viewer|viewer/i.test(description) &&
+        /open_viewer=false/.test(description) &&
+        /--headless/.test(description),
+      `${name} should be annotated as host-visible/open-world and document default viewer auto-open: ${description}`,
+    );
+  }
 
   const permissions = await callTool("mcp_permissions");
   assert(
@@ -215,6 +229,20 @@ async function main() {
   const catalog = await callTool("mcp_action_catalog");
   const catalogByName = assertCatalogMatchesTools(catalog, toolByName, "non-headless clean MCP");
   const viewerCatalog = catalogByName.get("workspace_open_viewer");
+  for (const name of ["workspace_start", "workspace_open_profile"]) {
+    const catalogEntry = catalogByName.get(name);
+    assert(
+      catalogEntry?.open_world === true &&
+        /viewer/i.test(catalogEntry.notes || "") &&
+        catalogEntry?.parameter_notes?.some(
+          (note) =>
+            note.parameter === "open_viewer" &&
+            /suppress/i.test(note.effect || "") &&
+            /does not make the MCP headless/i.test(note.live_control || ""),
+        ),
+      `${name} catalog entry should expose default viewer auto-open and explicit non-headless opt-out: ${JSON.stringify(catalogEntry)}`,
+    );
+  }
   assert(
     viewerCatalog?.open_world === true &&
       viewerCatalog?.idempotent === true &&

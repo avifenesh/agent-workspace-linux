@@ -218,6 +218,13 @@ async function main() {
     15000,
   );
   assert(started.ok === true, `workspace_start should still work without a host display: ${JSON.stringify(started)}`);
+  assert(
+    started.viewer_auto_open?.requested === true &&
+      started.viewer_auto_open?.attempted === false &&
+      started.viewer_auto_open?.ok === false &&
+      /ready_for_host_viewer=false|DISPLAY|WAYLAND_DISPLAY/.test(started.viewer_auto_open?.message || ""),
+    `workspace_start should report why default viewer auto-open was skipped without silently becoming headless: ${JSON.stringify(started)}`,
+  );
   try {
     const runningBrief = await callTool("mcp_session_brief");
     assert(

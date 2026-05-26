@@ -229,6 +229,18 @@ async function main() {
     catalogByName.get("workspace_start")?.control_behavior === "blocked_when_not_active_unless_dry_run",
     "clean MCP should still classify workspace_start behavior instead of adding a ceiling",
   );
+  for (const name of ["workspace_start", "workspace_open_profile"]) {
+    const tool = toolByName.get(name);
+    const catalogEntry = catalogByName.get(name);
+    const openWorldHint = tool?.annotations?.openWorldHint ?? tool?.annotations?.open_world_hint;
+    assert(
+      openWorldHint === true &&
+        catalogEntry?.open_world === true &&
+        /open_viewer=false/.test(tool?.description || "") &&
+        catalogEntry?.parameter_notes?.some((note) => note.parameter === "open_viewer"),
+      `clean MCP should expose ${name} viewer auto-open as host-visible/open-world with an explicit opt-out: tool=${JSON.stringify(tool)} catalog=${JSON.stringify(catalogEntry)}`,
+    );
+  }
   assert(
     catalogByName.get("workspace_open_viewer")?.open_world === true,
     "clean MCP should still classify host-visible viewer as open-world",

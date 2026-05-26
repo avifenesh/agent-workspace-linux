@@ -239,7 +239,6 @@ async function main() {
     "mcp_task_plan",
     "mcp_control_state",
     "mcp_control_update",
-    "workspace_open_profile",
     "workspace_launch_app",
     "workspace_run_app",
     "workspace_run_profile_setup",
@@ -254,6 +253,18 @@ async function main() {
     assert(
       openWorldHint !== true,
       `${name} should not request open-world approval; hidden-workspace approval and MCP ceilings own that boundary`,
+    );
+  }
+  for (const name of ["workspace_start", "workspace_open_profile"]) {
+    const tool = toolByName.get(name);
+    assert(tool, `tools/list did not include ${name}`);
+    const openWorldHint = tool.annotations?.openWorldHint ?? tool.annotations?.open_world_hint;
+    assert(
+      openWorldHint === true &&
+        /viewer/i.test(tool.description || "") &&
+        /open_viewer=false/.test(tool.description || "") &&
+        /--headless/.test(tool.description || ""),
+      `${name} should expose its default host-visible viewer auto-open and explicit opt-out: ${JSON.stringify(tool)}`,
     );
   }
   const permissionsDescription = toolByName.get("mcp_permissions")?.description || "";
@@ -330,8 +341,16 @@ async function main() {
   );
   assert(
     catalogByName.get("workspace_start")?.control_behavior ===
-      "blocked_when_not_active_unless_dry_run",
-    "mcp_action_catalog should classify workspace_start as dry-run-previewable live-control mutation",
+      "blocked_when_not_active_unless_dry_run" &&
+      catalogByName.get("workspace_start")?.open_world === true &&
+      catalogByName
+        .get("workspace_start")
+        ?.parameter_notes?.some((note) => note.parameter === "open_viewer" && /suppress/i.test(note.effect || "")) &&
+      catalogByName.get("workspace_open_profile")?.open_world === true &&
+      catalogByName
+        .get("workspace_open_profile")
+        ?.parameter_notes?.some((note) => note.parameter === "open_viewer" && /suppress/i.test(note.effect || "")),
+    "mcp_action_catalog should classify workspace starts as dry-run-previewable mutations with default host-visible viewer auto-open and explicit open_viewer opt-out",
   );
   assert(
     catalogByName.get("workspace_stop")?.control_behavior === "safety_stop_allowed",

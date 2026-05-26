@@ -126,6 +126,141 @@ impl AgentWorkspaceLinux {
         response.agent_mode = Some(build_agent_mode_summary(self.headless));
         response
     }
+
+    fn auto_open_workspace_viewer_for_response(
+        &self,
+        workspace_id: Option<&str>,
+        requested: bool,
+        always_on_top: bool,
+    ) -> WorkspaceViewerAutoOpen {
+        if !requested {
+            return WorkspaceViewerAutoOpen {
+                requested,
+                attempted: false,
+                ok: true,
+                message: "viewer auto-open disabled by open_viewer=false".to_string(),
+                launch: None,
+            };
+        }
+        let Some(workspace_id) = workspace_id else {
+            return WorkspaceViewerAutoOpen {
+                requested,
+                attempted: false,
+                ok: false,
+                message: "viewer auto-open skipped because the workspace did not start".to_string(),
+                launch: None,
+            };
+        };
+        if self.headless {
+            return WorkspaceViewerAutoOpen {
+                requested,
+                attempted: false,
+                ok: false,
+                message: "viewer auto-open disabled because this MCP process was explicitly started with --headless".to_string(),
+                launch: None,
+            };
+        }
+        let doctor = workspace::doctor_report();
+        if !doctor.ready_for_host_viewer {
+            return WorkspaceViewerAutoOpen {
+                requested,
+                attempted: false,
+                ok: false,
+                message: format!(
+                    "viewer auto-open skipped because workspace_doctor.ready_for_host_viewer=false: {}",
+                    doctor.viewer_blockers.join("; ")
+                ),
+                launch: None,
+            };
+        }
+
+        match viewer::open_viewer(
+            Some(workspace_id.to_string()),
+            &self.permissions,
+            always_on_top,
+        ) {
+            Ok(launch) => WorkspaceViewerAutoOpen {
+                requested,
+                attempted: true,
+                ok: true,
+                message: if launch.reused {
+                    "workspace viewer already open".to_string()
+                } else {
+                    "workspace viewer opened automatically".to_string()
+                },
+                launch: Some(launch),
+            },
+            Err(error) => WorkspaceViewerAutoOpen {
+                requested,
+                attempted: true,
+                ok: false,
+                message: format!("viewer auto-open failed: {error}"),
+                launch: None,
+            },
+        }
+    }
+
+    fn open_profile_workspace_with_default_viewer(
+        &self,
+        options: WorkspaceStartOptions,
+        profile_id: &str,
+        open_options: profile::ProfileWorkspaceOpenOptions,
+        open_viewer: bool,
+        viewer_always_on_top: bool,
+    ) -> Result<(profile::ProfileWorkspaceOpen, WorkspaceViewerAutoOpen)> {
+        let workspace_id = options.id.clone();
+        let start = workspace::start_workspace(options)?;
+        let viewer_auto_open = self.auto_open_workspace_viewer_for_response(
+            start.status.as_ref().map(|status| status.id.as_str()),
+            open_viewer,
+            viewer_always_on_top,
+        );
+        let (setup, startup) = if start.ok {
+            let setup = if open_options.run_setup {
+                Some(profile::launch_profile_setup(
+                    &workspace_id,
+                    profile_id,
+                    open_options.setup,
+                )?)
+            } else {
+                None
+            };
+            let setup_succeeded = setup
+                .as_ref()
+                .and_then(|setup| setup.succeeded)
+                .unwrap_or(true);
+            let startup = if setup_succeeded {
+                Some(profile::launch_profile_startup_apps(
+                    &workspace_id,
+                    profile_id,
+                    open_options.startup,
+                )?)
+            } else {
+                None
+            };
+            (setup, startup)
+        } else {
+            (None, None)
+        };
+        let setup_succeeded = setup.as_ref().and_then(|setup| setup.succeeded);
+        let startup_launched = startup
+            .as_ref()
+            .is_some_and(|startup| startup.launched.iter().all(|response| response.ok));
+        let ready = start.ok && setup_succeeded.unwrap_or(true) && startup_launched;
+        Ok((
+            profile::ProfileWorkspaceOpen {
+                workspace_id,
+                profile_id: profile_id.to_string(),
+                ready,
+                setup_succeeded,
+                startup_launched,
+                start,
+                setup,
+                startup,
+            },
+            viewer_auto_open,
+        ))
+    }
 }
 
 #[tool_router]
@@ -646,20 +781,22 @@ impl AgentWorkspaceLinux {
 
     #[tool(
         name = "workspace_start",
-        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. Set dry_run=true for a pre-daemon approval preview: it checks acknowledgement, runtime, and policy requirements without creating a runtime directory, daemon, display, or apps. Dry-run responses include an approval bundle for UI confirmation. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount, disabled-network, and local_only network profiles are enforced with bubblewrap when available; local_only uses a loopback-only namespace and does not bridge host localhost services. The current product network modes are closed/disabled, local/local_only, and open/inherit_host; allowlist network profiles are advanced/legacy declared intent only. Profiles with require_enforced_policy=true reject unenforced policy instead of accepting acknowledgement.",
+        description = "Start an isolated X11 agent workspace with its own display and control IPC socket. By default, when this MCP process is not --headless and workspace_doctor.ready_for_host_viewer=true, the tool also opens the small host-visible GPUI viewer immediately; set open_viewer=false to explicitly opt out. Set dry_run=true for a pre-daemon approval preview: it checks acknowledgement, runtime, and policy requirements without creating a runtime directory, daemon, display, viewer, or apps. Dry-run responses include an approval bundle for UI confirmation. Set acknowledge_hidden_workspace=true to confirm the user knows this creates a separate agent-controlled environment. Optional purpose records a human-readable reason in status and the start event. If the selected profile requests currently unenforced mount or network restrictions, also set acknowledge_unenforced_policy=true. Mount, disabled-network, and local_only network profiles are enforced with bubblewrap when available; local_only uses a loopback-only namespace and does not bridge host localhost services. The current product network modes are closed/disabled, local/local_only, and open/inherit_host; allowlist network profiles are advanced/legacy declared intent only. Profiles with require_enforced_policy=true reject unenforced policy instead of accepting acknowledgement.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = true,
-            open_world_hint = false
+            open_world_hint = true
         )
     )]
     fn workspace_start(
         &self,
         Parameters(params): Parameters<WorkspaceStartParams>,
-    ) -> Json<IpcResponse> {
+    ) -> Json<WorkspaceStartResult> {
         let dry_run = params.dry_run;
         let profile_id = params.profile.clone();
+        let open_viewer = params.open_viewer.unwrap_or(true);
+        let viewer_always_on_top = params.viewer_always_on_top;
         let result = params.into_options().and_then(|options| {
             self.enforce_agent_mutation_unless_dry_run(dry_run, "workspace_start")?;
             if let Some(profile_id) = &profile_id {
@@ -673,17 +810,32 @@ impl AgentWorkspaceLinux {
                 workspace::start_workspace(options)
             }
         });
-        Json(self.result_response(result))
+        let mut response = self.result_response(result);
+        let viewer_auto_open = (!dry_run).then(|| {
+            self.auto_open_workspace_viewer_for_response(
+                response.status.as_ref().map(|status| status.id.as_str()),
+                open_viewer,
+                viewer_always_on_top,
+            )
+        });
+        if let Some(auto_open) = &viewer_auto_open {
+            merge_viewer_auto_open_handles(&mut response.target_handles, auto_open);
+            append_viewer_auto_open_hint(&mut response.recovery_hints, auto_open);
+        }
+        Json(WorkspaceStartResult {
+            response,
+            viewer_auto_open,
+        })
     }
 
     #[tool(
         name = "workspace_open_profile",
-        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. Set dry_run=true for a pre-daemon approval preview: it returns the start preview plus setup/startup declarations without creating a runtime directory, daemon, display, or apps. The preview approval bundle merges all required acknowledgements. Setup/startup entries in this pre-daemon preview are declarations; daemon-attached launch previews are available only after a workspace is running. Set startup_wait_window=true to wait for each startup app's first visible window, or startup_screenshot_window=true to also capture each first startup window.",
+        description = "Start a profile-backed isolated workspace, optionally record a human-readable purpose, optionally wait for profile setup, optionally kill timed-out setup commands, and launch that profile's startup apps in one operation after setup succeeds. By default, when this MCP process is not --headless and workspace_doctor.ready_for_host_viewer=true, the small host-visible GPUI viewer opens immediately after the workspace starts and before setup/startup apps run; set open_viewer=false to explicitly opt out. Set dry_run=true for a pre-daemon approval preview: it returns the start preview plus setup/startup declarations without creating a runtime directory, daemon, display, viewer, or apps. The preview approval bundle merges all required acknowledgements. Setup/startup entries in this pre-daemon preview are declarations; daemon-attached launch previews are available only after a workspace is running. Set startup_wait_window=true to wait for each startup app's first visible window, or startup_screenshot_window=true to also capture each first startup window.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = false
+            open_world_hint = true
         )
     )]
     fn workspace_open_profile(
@@ -705,24 +857,42 @@ impl AgentWorkspaceLinux {
                         &profile_id,
                         params.to_open_options(),
                     )
-                    .map(|preview| (None, Some(preview)));
+                    .map(|preview| (None, None, Some(preview)));
                 }
-                profile::open_profile_workspace(options, &profile_id, params.to_open_options())
-                    .map(|open| (Some(open), None))
+                self.open_profile_workspace_with_default_viewer(
+                    options,
+                    &profile_id,
+                    params.to_open_options(),
+                    params.open_viewer.unwrap_or(true),
+                    params.viewer_always_on_top,
+                )
+                .map(|(open, viewer_auto_open)| (Some(open), Some(viewer_auto_open), None))
             }) {
-                Ok((open, preview)) => ProfileWorkspaceOpenResult {
-                    ok: true,
-                    message: if preview.is_some() {
-                        "profile workspace open dry run returned".to_string()
-                    } else {
-                        "profile workspace opened".to_string()
-                    },
-                    target_handles: profile_open_target_handles(open.as_ref(), preview.as_ref()),
-                    agent_mode: Some(build_agent_mode_summary(self.headless)),
-                    recovery_hints: Vec::new(),
-                    open,
-                    preview,
-                },
+                Ok((open, viewer_auto_open, preview)) => {
+                    let mut target_handles =
+                        profile_open_target_handles(open.as_ref(), preview.as_ref());
+                    if let Some(auto_open) = &viewer_auto_open {
+                        merge_viewer_auto_open_handles(&mut target_handles, auto_open);
+                    }
+                    let mut recovery_hints = Vec::new();
+                    if let Some(auto_open) = &viewer_auto_open {
+                        append_viewer_auto_open_hint(&mut recovery_hints, auto_open);
+                    }
+                    ProfileWorkspaceOpenResult {
+                        ok: true,
+                        message: if preview.is_some() {
+                            "profile workspace open dry run returned".to_string()
+                        } else {
+                            "profile workspace opened".to_string()
+                        },
+                        target_handles,
+                        agent_mode: Some(build_agent_mode_summary(self.headless)),
+                        recovery_hints,
+                        open,
+                        viewer_auto_open,
+                        preview,
+                    }
+                }
                 Err(error) => {
                     let message = error.to_string();
                     ProfileWorkspaceOpenResult {
@@ -732,6 +902,7 @@ impl AgentWorkspaceLinux {
                         recovery_hints: recovery_hints_for_message(&message),
                         message,
                         open: None,
+                        viewer_auto_open: None,
                         preview: None,
                     }
                 }
@@ -2599,6 +2770,7 @@ impl AgentWorkspaceLinux {
 Use mcp_agent_context for one low-noise snapshot with active/read_only/paused, headless/no-host-display, viewer, app_id/window_id/viewer_id/browser_target_id handles, and recovery hints. Use mcp_permissions first when the host may have spawned this MCP with a permissions ceiling, mcp_control_state to check whether live user control has put the server in active, read_only, or paused mode, mcp_action_catalog when deciding whether a tool is read-only, idempotent, destructive, host-visible/open-world, or blocked by live control, mcp_session_brief when you need a condensed session summary with suggested next actions, and mcp_task_plan when the user intent is app QA, browser/shopping, observation, or cleanup and you need a safe read-only plan before calling mutating tools. \
 If configured=true, any populated permission dimensions are an immutable spawn-time ceiling for profile, start, launch, setup, and startup actions; clients may only narrow those dimensions. If configured=true but restricted=false, the MCP has an explicit empty/open ceiling, so enforcement stays open while the configured state remains visible. If configured=false, the MCP does not impose its own ceiling; respect the host/client harness boundary and use mcp_action_catalog plus each tool's annotations and description to classify the action type before acting. \
 Use mcp_control_update only when the user or controlling UI asks to switch active/read_only/paused; when reactivating from read_only or paused to active, pass confirmed_user_request=true only after explicit user or controlling UI approval. read_only and paused block mutating agent actions while preserving inspection and safety stop. \
+workspace_start and workspace_open_profile are host-visible/open-world by default because non-headless sessions with workspace_doctor.ready_for_host_viewer=true auto-open the GPUI monitor; pass open_viewer=false only when the user or embedding host explicitly wants no monitor. \
 workspace_open_viewer is host-visible and open-world; it can launch the GPUI monitor unless this MCP process was started with --headless or workspace_doctor reports ready_for_host_viewer=false, in which case it must run without host-visible UI. Use workspace_list_viewers and workspace_close_viewer for repo-owned GPUI viewer lifecycle control when compositor/window automation cannot see or close the viewer; workspace_close_viewer only signals registered viewer pids whose command line still matches the registry entry, and dry_run=true previews the close. Use workspace_guardrails to inspect acknowledgement, dry-run, explicit override, timeout-termination, and workspace-scope rules for UI approval flows. Use workspace_doctor to check runtime readiness, viewer host-display readiness, and optional policy backend candidates. Use profile_list/profile_get/profile_check/profile_validate/profile_template/profile_put/profile_import/profile_export/profile_delete to manage saved environment profiles. Use profile_validate to preflight a local JSON profile file without saving it. Use profile_export to return a saved profile and optionally write it to output_path; set replace=true only when intentionally overwriting an existing file. Use profile_put with dry_run=true to preview whether a profile would be created, replaced, or rejected without writing. Use profile_import when the UI has a local JSON file path instead of an already parsed profile object. Use profile_delete with dry_run=true to return the saved profile without deleting it. profile_template can generate starter JSON such as project-dev, restricted-chrome, and browser-session before saving with profile_put; restricted-chrome and browser-session intentionally expose their --no-sandbox browser commands for bubblewrap namespace compatibility. browser-session requires user_data_dir and is intended only for explicitly user-approved browser data directories. profile_check preflights acknowledgement requirements and unenforced policy warnings before workspace_start. Preview scope matters: workspace_start dry_run=true and workspace_open_profile dry_run=true are pre-daemon approval previews that do not create runtime state; workspace_launch_app, workspace_run_app, workspace_run_profile_setup, and workspace_launch_profile_apps dry_run=true are daemon-attached previews and require an already running workspace. Dry-run preview responses include an approval bundle when acknowledgement UI data is available. workspace_start requires acknowledge_hidden_workspace=true before creating a new hidden agent-controlled environment. Pass purpose when a human-readable reason should be shown in workspace_status and the start event. If a profile requests policy that remains unenforced, workspace_start also requires acknowledge_unenforced_policy=true. Mount profiles, disabled-network profiles, and local_only network profiles are enforced with bubblewrap when bubblewrap is available; local_only uses a loopback-only sandbox namespace and does not bridge host localhost services. The current product network modes are closed/disabled, local/local_only, and open/inherit_host; allowlist network profiles are advanced/legacy declared intent only and are not enforced by the X11 runtime. workspace_status reports live daemon state, including the applied profile policy snapshot, discovered backend candidates from start time, and enforcement state. Use workspace_manifest to inspect saved manifest state from disk for live or stopped workspaces without contacting the workspace daemon. Use workspace_artifacts to inventory saved runtime files such as manifest, event log, daemon logs, app logs, and screenshots when present; set existing_only=true when only present paths are needed. Use workspace_ipc_info to verify daemon IPC protocol metadata, transport, framing, encoding, and socket path. Use workspace_env to get DISPLAY, XAUTHORITY, runtime directory, and control socket values for external tools that need to attach to the hidden workspace. Use workspace_list to discover known/running workspaces and workspace_cleanup_stale with dry_run=true to preview unreachable runtime directories and verified orphan process cleanup before deletion. Use workspace_list_apps to inspect launched apps, including named apps and running/stopped state; it can read the saved app snapshot after a workspace has stopped. Use workspace_browser_targets after launching Chrome/Chromium with --remote-debugging-port=0 to discover workspace-owned page targets, workspace_browser_snapshot to read page title/text/links, and workspace_browser_navigate to change the workspace browser page without using the host Chrome bridge or external browser automation. App action and log-read responses include the directly affected app in the top-level apps field when available. Use workspace_open_profile to start a profile-backed workspace, optionally wait for setup, and open startup apps after setup succeeds in one call. Use workspace_start before launching apps manually. workspace_launch_profile_apps opens startup apps declared by the selected profile. workspace_run_app is the preferred one-shot helper for QA commands that should return stdout/stderr; set kill_on_timeout=true to terminate timed-out commands. workspace_wait_app also accepts kill_on_timeout=true to terminate an already launched app when its wait timeout elapses. workspace_launch_app and workspace_run_app accept optional names, workspace_list_apps can filter by app name or running pid or app_id, and named apps can be referenced anywhere an app target is accepted, including logs, waits, kill dry-runs, kills, and window app_id filters. workspace_launch_app, workspace_run_profile_setup, workspace_focus_window, workspace_focus_matching_window, workspace_close_window, workspace_close_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click, workspace_click_window, workspace_move_pointer, workspace_move_pointer_window, workspace_drag, workspace_drag_window, workspace_scroll, workspace_scroll_window, workspace_key, workspace_key_window, workspace_type_text, workspace_type_window, workspace_set_clipboard, workspace_get_clipboard, workspace_paste_text, and workspace_paste_window run only inside the isolated agent workspace; they do not target the user's host desktop. Use workspace_wait_window, workspace_active_window, workspace_pointer, workspace_observe, workspace_focus_matching_window, workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, workspace_show_window, workspace_click_window, workspace_move_pointer_window, workspace_drag_window, workspace_scroll_window, workspace_key_window, workspace_type_window, or workspace_paste_window after launching GUI apps. Prefer window-targeted tools when acting on a specific app window rather than the workspace root or current focus. Window match filters accept title_contains, class_contains, pid, or app_id; class_contains matches wm_class and wm_instance. Use workspace_move_window, workspace_resize_window, workspace_raise_window, workspace_minimize_window, and workspace_show_window to arrange app windows before screenshots or repeated QA interactions. workspace_show_window match filters include hidden windows, so it can restore minimized apps by title/class/pid/app without first listing its raw X11 id. Use workspace_list_windows with title_contains, class_contains, pid, or app_id filters to inspect specific current app windows. Use workspace_list_windows or workspace_observe with include_hidden=true when a minimized or hidden app needs to be found again; returned windows include wm_class, wm_instance, and app_id when X11/process metadata is available. Use workspace_paste_text or workspace_paste_window when inserting long text is more reliable than synthetic typing. Use workspace_run_profile_setup with wait=true when setup command completion matters; set kill_on_timeout=true to clean up timed-out setup commands. Use workspace_status or workspace_observe when a full live app snapshot is useful. Use workspace_observe, workspace_screenshot, workspace_screenshot_window, workspace_list_apps, workspace_browser_targets, workspace_browser_snapshot, workspace_list_windows, workspace_active_window, workspace_pointer, workspace_wait_app, workspace_read_app_log, workspace_get_clipboard, and workspace_events to inspect the workspace before acting. For incremental event polling, pass workspace_events since_sequence with the last seen event sequence. workspace_screenshot_window captures a specific app window by id/title/class/pid/app filters. workspace_read_app_log can read saved stdout/stderr after a workspace has stopped when its manifest remains on disk. workspace_events records IPC activity without storing raw typed text, raw clipboard-set text, or raw pasted text, and can read saved event history after a workspace has stopped. workspace_close_window, workspace_close_matching_window, workspace_kill_app, workspace_minimize_window, and workspace_show_window affect only workspace-local windows/apps. workspace_close_window and workspace_close_matching_window with dry_run=true resolve the targeted window without closing it. workspace_kill_app with dry_run=true resolves the matched app without terminating it. workspace_stop with dry_run=true previews currently running apps without stopping; without dry_run it terminates the workspace and apps launched inside it, then waits for the daemon IPC socket to close."
 )]
 impl ServerHandler for AgentWorkspaceLinux {}
@@ -7048,16 +7220,30 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 true,
                 false,
                 true,
-                false,
+                true,
                 "blocked_when_not_active_unless_dry_run",
-                "Creates a hidden workspace unless dry_run=true.",
+                "Creates a hidden workspace unless dry_run=true. By default, non-headless MCP sessions with a ready host display also open the GPUI viewer unless open_viewer=false.",
             )
             .with_parameter_note(
                 "dry_run",
                 "true",
-                "Preview acknowledgement, runtime, and policy requirements without creating a workspace.",
+                "Preview acknowledgement, runtime, and policy requirements without creating a workspace or viewer.",
                 "Allowed while live control is read_only or paused.",
                 "Use as the approval surface before hidden-workspace creation.",
+            )
+            .with_parameter_note(
+                "open_viewer",
+                "false",
+                "Explicitly suppresses the default host-visible viewer auto-open.",
+                "Allowed; this narrows host-visible UI behavior and does not make the MCP headless.",
+                "Use only when the user or embedding host explicitly does not want the viewer window.",
+            )
+            .with_parameter_note(
+                "viewer_always_on_top",
+                "true",
+                "Requests overlay/above window-manager behavior for the auto-opened viewer.",
+                "Allowed only when the default viewer can open; blocked by --headless or no host display.",
+                "Use only after the user or host explicitly asks for an always-on-top monitor.",
             ),
             mcp_action(
                 "workspace_open_profile",
@@ -7066,16 +7252,30 @@ fn mcp_action_catalog() -> McpActionCatalog {
                 true,
                 false,
                 false,
-                false,
+                true,
                 "blocked_when_not_active_unless_dry_run",
-                "Starts a profile-backed workspace and may run setup/startup apps unless dry_run=true.",
+                "Starts a profile-backed workspace and may run setup/startup apps unless dry_run=true. By default, non-headless MCP sessions with a ready host display open the GPUI viewer immediately after workspace start unless open_viewer=false.",
             )
             .with_parameter_note(
                 "dry_run",
                 "true",
-                "Preview start/setup/startup requirements without creating a workspace or launching apps.",
+                "Preview start/setup/startup requirements without creating a workspace, viewer, or launching apps.",
                 "Allowed while live control is read_only or paused.",
                 "Use as the combined approval surface before running the profile.",
+            )
+            .with_parameter_note(
+                "open_viewer",
+                "false",
+                "Explicitly suppresses the default host-visible viewer auto-open.",
+                "Allowed; this narrows host-visible UI behavior and does not make the MCP headless.",
+                "Use only when the user or embedding host explicitly does not want the viewer window.",
+            )
+            .with_parameter_note(
+                "viewer_always_on_top",
+                "true",
+                "Requests overlay/above window-manager behavior for the auto-opened viewer.",
+                "Allowed only when the default viewer can open; blocked by --headless or no host display.",
+                "Use only after the user or host explicitly asks for an always-on-top monitor.",
             )
             .with_parameter_note(
                 "setup_kill_on_timeout",
@@ -8057,11 +8257,21 @@ struct ProfileStartupResult {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
+struct WorkspaceStartResult {
+    #[serde(flatten)]
+    response: IpcResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    viewer_auto_open: Option<WorkspaceViewerAutoOpen>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct ProfileWorkspaceOpenResult {
     ok: bool,
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     open: Option<profile::ProfileWorkspaceOpen>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    viewer_auto_open: Option<WorkspaceViewerAutoOpen>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview: Option<profile::ProfileWorkspaceOpenPreview>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -8086,6 +8296,16 @@ struct WorkspaceRunResult {
     target_handles: Option<AgentTargetHandles>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recovery_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct WorkspaceViewerAutoOpen {
+    requested: bool,
+    attempted: bool,
+    ok: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    launch: Option<viewer::ViewerLaunch>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -8134,6 +8354,10 @@ struct WorkspaceStartParams {
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
+    #[serde(default)]
+    open_viewer: Option<bool>,
+    #[serde(default)]
+    viewer_always_on_top: bool,
 }
 
 impl WorkspaceStartParams {
@@ -8194,6 +8418,10 @@ struct WorkspaceOpenProfileParams {
     startup_window_timeout_ms: Option<u64>,
     #[serde(default)]
     startup_screenshot_window: bool,
+    #[serde(default)]
+    open_viewer: Option<bool>,
+    #[serde(default)]
+    viewer_always_on_top: bool,
 }
 
 impl WorkspaceOpenProfileParams {
@@ -9112,6 +9340,32 @@ fn viewer_target_handles(viewer_id: &str) -> AgentTargetHandles {
     };
     handles.viewer_ids.push(viewer_id.to_string());
     handles
+}
+
+fn merge_viewer_auto_open_handles(
+    target: &mut Option<AgentTargetHandles>,
+    auto_open: &WorkspaceViewerAutoOpen,
+) {
+    let Some(launch) = auto_open.launch.as_ref() else {
+        return;
+    };
+    let mut handles = target.take().unwrap_or_default();
+    merge_target_handles(&mut handles, viewer_target_handles(&launch.id));
+    *target = Some(handles);
+}
+
+fn append_viewer_auto_open_hint(
+    recovery_hints: &mut Vec<String>,
+    auto_open: &WorkspaceViewerAutoOpen,
+) {
+    if auto_open.ok || !auto_open.requested {
+        return;
+    }
+    push_unique(recovery_hints, auto_open.message.clone());
+    push_unique(
+        recovery_hints,
+        "Call workspace_doctor and workspace_list_viewers to inspect viewer readiness.".to_string(),
+    );
 }
 
 fn viewer_close_target_handles(close: &viewer::ViewerClose) -> AgentTargetHandles {
