@@ -15,6 +15,10 @@ DRY_RUN=0
 SKIP_BUILD=0
 CONFIGURE_CODEX=1
 RUN_DOCTOR=1
+INSTALL_SKILL=1
+SKILL_NAME="agent-workspace-linux"
+SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"
+SKILL_SRC="$ROOT_DIR/skills/$SKILL_NAME/SKILL.md"
 
 usage() {
   cat <<USAGE
@@ -27,6 +31,8 @@ Options:
   --skip-build           Install an already-built target/release binary.
   --no-codex-config      Do not edit the Codex MCP config.
   --no-doctor            Do not run agent-workspace-linux doctor after install.
+  --no-skill             Do not install the agent-workspace-linux skill.
+  --skills-dir PATH      Install the skill under PATH (default: ~/.claude/skills).
   --prefix PATH          Install under PATH (default: ~/.local).
   --bindir PATH          Install binary into PATH (default: PREFIX/bin).
   --codex-home PATH      Use this Codex home (default: ~/.codex).
@@ -49,6 +55,13 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-doctor)
       RUN_DOCTOR=0
+      ;;
+    --no-skill)
+      INSTALL_SKILL=0
+      ;;
+    --skills-dir)
+      SKILLS_DIR="${2:?missing value for --skills-dir}"
+      shift
       ;;
     --prefix)
       PREFIX="${2:?missing value for --prefix}"
@@ -160,6 +173,27 @@ write_codex_config() {
   echo "Registered Codex MCP server '$CODEX_MCP_SERVER_NAME' in $CODEX_CONFIG"
 }
 
+install_skill() {
+  local dest_dir dest
+  dest_dir="$SKILLS_DIR/$SKILL_NAME"
+  dest="$dest_dir/SKILL.md"
+
+  if [ ! -f "$SKILL_SRC" ]; then
+    echo "missing skill source: $SKILL_SRC" >&2
+    return
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "Would install skill '$SKILL_NAME' to $dest"
+    return
+  fi
+
+  mkdir -p "$dest_dir"
+  install -Dm644 "$SKILL_SRC" "$dest"
+  echo "Installed skill '$SKILL_NAME' to $dest"
+  echo "The skill is the lightweight entry point; workspace MCP tools load on demand instead of all at once."
+}
+
 warn_running_mcp_processes() {
   local matches
 
@@ -212,6 +246,10 @@ else
   fi
   install -Dm755 "$SOURCE_BIN" "$DEST_BIN"
   echo "Installed $DEST_BIN"
+fi
+
+if [ "$INSTALL_SKILL" -eq 1 ]; then
+  install_skill
 fi
 
 if [ "$CONFIGURE_CODEX" -eq 1 ]; then

@@ -1,21 +1,30 @@
 # Contributing
 
-Thanks for taking a look. This project is still pre-1.0, so small focused
-changes with strong evidence are much easier to review than broad rewrites.
+Thanks for taking a look. This project is pre-1.0, so small focused changes with
+strong evidence are much easier to review than broad rewrites.
 
-## Local Setup
+## Prerequisites
 
-On Debian/Ubuntu-like systems:
+You need:
+
+- **Rust toolchain** — install via [rustup](https://rustup.rs/)
+- **System dependencies** (Debian/Ubuntu):
 
 ```bash
-sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip bubblewrap pkg-config libxkbcommon-x11-dev
-cargo build --locked
-cargo run -- doctor
+sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip \
+    bubblewrap pkg-config libxkbcommon-x11-dev
 ```
 
-## Checks
+## Build
 
-Run the focused checks for ordinary changes:
+```bash
+cargo build --locked
+cargo run -- doctor   # quick self-check
+```
+
+## Quality Gates
+
+Run all four gates before pushing:
 
 ```bash
 cargo fmt --check
@@ -24,18 +33,60 @@ cargo test --locked
 git diff --check
 ```
 
-For runtime, MCP, permission, viewer, or release-gate changes, also run:
+All four gates must pass. PRs that fail any gate will not be merged.
+
+## Integration Smoke Test
+
+For changes that touch runtime behaviour — MCP tool handling, permissions,
+workspace control, viewer lifecycle, browser integration, or release gates — also
+run the integration smoke:
 
 ```bash
-scripts/prod_readiness_smoke.sh
+scripts/integration_smoke.sh
 ```
 
 When a real GPUI viewer is already open and you do not want the smoke to open a
 second monitor:
 
 ```bash
-AGENT_WORKSPACE_NO_NEW_VIEWER=1 scripts/prod_readiness_smoke.sh
+AGENT_WORKSPACE_NO_NEW_VIEWER=1 scripts/integration_smoke.sh
 ```
+
+## Project Layout
+
+```
+agent-workspace-linux/
+├── src/                # Single Rust crate
+│   ├── main.rs         # Binary entry point
+│   ├── server.rs       # MCP server core
+│   ├── workspace.rs    # Workspace lifecycle
+│   ├── permissions.rs  # Permission ceiling enforcement
+│   ├── viewer.rs       # GPUI live viewer
+│   ├── browser.rs      # Workspace browser integration
+│   ├── agent.rs        # Agent context helpers
+│   ├── control.rs      # Live control state (active/read_only/paused)
+│   ├── guardrails.rs   # Action guardrails
+│   ├── profile.rs      # Profile management
+│   ├── policy.rs       # Policy enforcement
+│   └── approval.rs     # Human approval gate
+├── scripts/            # Shell and Python smoke/QA scripts
+├── skills/             # MCP skill definitions
+└── docs/               # Additional documentation
+```
+
+## Pull Requests
+
+- Keep PRs small and focused on a single concern.
+- Include evidence that the change works: test output, smoke run excerpt, or
+  `doctor` output as appropriate.
+- Describe what changed and why; reviewers should not have to guess intent.
+- All four gates plus `scripts/integration_smoke.sh` must pass for any change
+  touching runtime behaviour.
+
+## Release Model
+
+Releases are tagged manually. A human final-diff review of all changes precedes
+any version tag. There is no automated release cut.
 
 ## Public Hygiene
 
