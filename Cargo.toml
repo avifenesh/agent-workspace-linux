@@ -1,17 +1,18 @@
 [package]
 name = "agent-workspace-linux"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Isolated Linux desktop workspaces for AI agents."
 readme = "README.md"
 keywords = ["mcp", "linux", "desktop", "automation", "workspace"]
 categories = ["command-line-utilities", "development-tools"]
-# Not published to crates.io: `gpui`/`gpui_platform` are git dependencies (no
-# crates.io version), which `cargo publish` rejects. Release-on-tag ships
-# prebuilt binaries via GitHub Releases (.github/workflows/release.yml) and the
-# npm wrapper. Flip this to publish and add a crates step only once gpui is
-# available on crates.io.
+# Not published to crates.io: this package still uses git dependencies
+# (`gpui` is pinned to git here, and `gpui_platform` is not available on
+# crates.io), which `cargo publish` rejects. Release-on-tag ships prebuilt
+# binaries via GitHub Releases (.github/workflows/release.yml) and the npm
+# wrapper. Flip this to publish and add a crates step once the viewer
+# dependencies are registry-backed.
 publish = false
 
 [dependencies]
