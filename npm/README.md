@@ -1,6 +1,6 @@
 # agent-workspace-linux
 
-npm distribution wrapper for the [`agent-workspace-linux`](https://github.com/avifenesh/agent-workspace-linux) MCP server — isolated Linux desktop workspaces for AI agents.
+npm distribution wrapper for the [`agent-workspace-linux`](https://github.com/agent-sh/agent-workspace-linux) MCP server — isolated Linux desktop workspaces for AI agents.
 
 ## Installation
 
@@ -8,7 +8,7 @@ npm distribution wrapper for the [`agent-workspace-linux`](https://github.com/av
 npm install -g agent-workspace-linux
 ```
 
-The installer automatically downloads the prebuilt binary for your architecture from the matching [GitHub Release](https://github.com/avifenesh/agent-workspace-linux/releases).
+The installer automatically downloads the prebuilt binary for your architecture from the matching [GitHub Release](https://github.com/agent-sh/agent-workspace-linux/releases).
 
 **Linux only.** `x64` (x86_64) and `arm64` (aarch64) are supported.
 
@@ -41,7 +41,7 @@ It is an [MCP](https://modelcontextprotocol.io/) server that speaks JSON-RPC ove
 ## Source and full documentation
 
 All source code, tool documentation, and issue tracking are at:
-**<https://github.com/avifenesh/agent-workspace-linux>**
+**<https://github.com/agent-sh/agent-workspace-linux>**
 
 ## License
 

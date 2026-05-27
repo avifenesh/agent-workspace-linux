@@ -5,12 +5,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/avifenesh/agent-workspace-linux.git",
+    "url": "https://github.com/agent-sh/agent-workspace-linux.git",
     "directory": "npm"
   },
-  "homepage": "https://github.com/avifenesh/agent-workspace-linux#readme",
+  "homepage": "https://github.com/agent-sh/agent-workspace-linux#readme",
   "bugs": {
-    "url": "https://github.com/avifenesh/agent-workspace-linux/issues"
+    "url": "https://github.com/agent-sh/agent-workspace-linux/issues"
   },
   "keywords": [
     "mcp",

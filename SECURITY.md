@@ -16,7 +16,7 @@ exist. Only the current `0.1.x` line receives fixes.
 ## Reporting
 
 Please report vulnerabilities **privately** using
-[GitHub private security advisories](https://github.com/avifenesh/agent-workspace-linux/security/advisories/new)
+[GitHub private security advisories](https://github.com/agent-sh/agent-workspace-linux/security/advisories/new)
 for this repository. Do not open a public issue for security reports.
 
 Do not include live credentials, copied browser profiles, private logs, or raw

@@ -8,7 +8,7 @@ name: Publish npm package
 #   Go to https://www.npmjs.com/settings/<username>/tokens, create an
 #   "Automation" granular token scoped to the `agent-workspace-linux` package,
 #   then add it as a repository secret named NPM_TOKEN at:
-#   https://github.com/avifenesh/agent-workspace-linux/settings/secrets/actions
+#   https://github.com/agent-sh/agent-workspace-linux/settings/secrets/actions
 
 on:
   release:
