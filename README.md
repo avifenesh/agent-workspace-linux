@@ -3,7 +3,7 @@
 [![CI](https://github.com/agent-sh/agent-workspace-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/agent-sh/agent-workspace-linux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational)
-![Status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange)
+[![Release](https://img.shields.io/github/v/release/agent-sh/agent-workspace-linux?label=release&color=blue)](https://github.com/agent-sh/agent-workspace-linux/releases/latest)
 
 **An isolated, hidden Linux desktop that an AI agent fully controls — over MCP — without ever touching your real mouse, keyboard, focus, or browser.**
 
@@ -61,7 +61,13 @@ For MCP hosts that read `.mcp.json`:
 }
 ```
 
-Once a release is published, an npm wrapper is also available (downloads the prebuilt Linux binary): `npm install -g agent-workspace-linux`.
+Or install the npm wrapper, which downloads the matching prebuilt Linux binary:
+
+```bash
+npm install -g agent-workspace-linux
+```
+
+Prebuilt `x86_64` and `aarch64` Linux binaries are also attached to each [GitHub Release](https://github.com/agent-sh/agent-workspace-linux/releases/latest) — download the one for your architecture, `chmod +x`, and put it on your `PATH`.
 
 ## Quick start
 
