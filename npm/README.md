@@ -25,7 +25,7 @@ Once installed, the server is on your PATH (the command stays unscoped):
 agent-workspace-linux
 ```
 
-It is an [MCP](https://modelcontextprotocol.io/) server that speaks JSON-RPC over stdio. Wire it into your MCP client config, e.g. for Claude Code:
+It is an [MCP](https://modelcontextprotocol.io/) server that speaks JSON-RPC over stdio. For Codex for Linux, prefer the dedicated **Agent Workspaces** feature page so command paths, permission rules, and reconnect/restart control stay out of the generic MCP settings page. If an older Codex install still shows this backend in generic MCP/configuration pages, remove the stale `agent-workspace-linux` MCP tables before reconnecting through the feature page. For other MCP clients, wire it into the client config, e.g. for Claude Code:
 
 ```json
 {

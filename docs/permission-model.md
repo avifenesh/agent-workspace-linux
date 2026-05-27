@@ -104,9 +104,15 @@ Possible MCP config shape:
 }
 ```
 
-`./install.sh --permissions PATH` writes this locked MCP registration for Codex
-without hand-editing `config.toml`; running `./install.sh` without that flag
-keeps the default UI-owned open registration.
+`./install.sh --permissions PATH` is an explicit opt-in path that writes this
+locked MCP registration for generic Codex MCP-host workflows without
+hand-editing `config.toml`. Running `./install.sh` without `--permissions` or
+`--codex-configure` does not edit Codex MCP config; Codex for Linux should use
+the dedicated Agent Workspaces feature page to own permission-file mutation,
+restart/reconnect, and user-visible control instead of surfacing this backend
+through the generic MCP settings page. `./install.sh --clean-codex-config`
+removes stale `agent-workspace-linux` MCP server and nested tool tables from
+older installs.
 
 Rules:
 
@@ -252,8 +258,9 @@ remain (status as of 2026-05-26):
   app configuration, PID-less arbitrary app window targeting, and
   recovery/inspection flows work at the primitive level.
   MCP-locked permission ceilings and app allowlists have a first MCP-enforced
-  slice, and `./install.sh --permissions PATH` now gives locked MCP hosts a
-  repeatable setup path without hand-editing Codex config. The CLI also has
+  slice, and `./install.sh --permissions PATH` now gives locked MCP hosts an
+  explicit setup path without hand-editing Codex config. The default installer
+  stays skill-first and leaves generic Codex MCP settings untouched. The CLI also has
   `permissions template open|closed|local` and
   `permissions validate --json PATH` so non-Codex hosts can generate and check a
   ceiling before spawning MCP. The Codex for Linux app picker now accepts both

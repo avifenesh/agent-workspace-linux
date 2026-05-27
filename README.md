@@ -25,7 +25,7 @@ It is deliberately **not** a tool for driving your actual desktop — for that, 
 
 ## Install
 
-Requires Linux. Install the runtime dependencies, then build + register in one step:
+Requires Linux. Install the runtime dependencies, then build and install in one step:
 
 ```bash
 sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip \
@@ -33,7 +33,7 @@ sudo apt install xvfb openbox xdotool xauth x11-utils imagemagick xclip \
 ./install.sh
 ```
 
-`./install.sh` builds the release binary, installs it to `~/.local/bin/`, installs the bundled skill, and registers the MCP server in `~/.codex/config.toml`. It is safe to rerun. See [`install.sh --help`](install.sh) for flags (`--permissions`, `--skills-dir`, `--no-skill`, `--dry-run`).
+`./install.sh` builds the release binary, installs it to `~/.local/bin/`, and installs the bundled skill to `~/.codex/skills/` by default. It is safe to rerun. Codex MCP registration is opt-in: use `--codex-configure` only for generic MCP-host workflows. In Codex for Linux, use the dedicated **Agent Workspaces** feature page to configure the backend and permission ceiling so the generic MCP settings/configuration pages stay clean. If an older install still appears in generic MCP/configuration pages, run `./install.sh --clean-codex-config` to remove the stale `agent-workspace-linux` server and tool tables. See [`install.sh --help`](install.sh) for flags (`--permissions`, `--clean-codex-config`, `--skills-dir`, `--no-skill`, `--dry-run`).
 
 ### Install with cargo (from source)
 
@@ -43,7 +43,7 @@ It builds from source straight from git — no crates.io needed. Install the sys
 # latest from main
 cargo install --git https://github.com/agent-sh/agent-workspace-linux
 # or pin a tagged release
-cargo install --git https://github.com/agent-sh/agent-workspace-linux --tag v0.1.0
+cargo install --git https://github.com/agent-sh/agent-workspace-linux --tag v0.1.1
 ```
 
 That puts `agent-workspace-linux` on your `PATH`. Unlike `install.sh`, it installs only the binary — register it with your MCP host manually (below), and copy `skills/agent-workspace-linux/` into your skills directory if you want the bundled skill.
@@ -115,7 +115,7 @@ In short: **by default the agent host owns permission**, a developer can **lock 
 
 ## The skill (progressive tool loading)
 
-The MCP exposes ~86 tools. To avoid dumping them all into the agent's context, it ships a skill at [`skills/agent-workspace-linux/SKILL.md`](skills/agent-workspace-linux/SKILL.md). Only the skill's short description stays loaded; when a task needs an isolated desktop or browser, the agent reads the skill and it routes to the right tools per phase (orient → start → observe → act → stop), loading tool schemas on demand. `./install.sh` installs it to `~/.claude/skills/` (override with `--skills-dir`).
+The MCP exposes ~86 tools. To avoid dumping them all into the agent's context, it ships a skill at [`skills/agent-workspace-linux/SKILL.md`](skills/agent-workspace-linux/SKILL.md). Only the skill's short description stays loaded; when a task needs an isolated desktop or browser, the agent reads the skill and it routes to the right tools per phase (orient → start → observe → act → stop), loading tool schemas on demand. `./install.sh` installs it to `~/.codex/skills/` by default (override with `--skills-dir`; Claude users can pass `--skills-dir ~/.claude/skills`).
 
 ## Features
 
