@@ -48,7 +48,7 @@ const pkg = require("../package.json");
 const version = pkg.version; // e.g. "0.1.0"
 const assetName = `agent-workspace-linux-${rustTarget}`;
 const downloadUrl =
-  `https://github.com/avifenesh/agent-workspace-linux/releases/download/` +
+  `https://github.com/agent-sh/agent-workspace-linux/releases/download/` +
   `v${version}/${assetName}`;
 
 const binDir = path.join(__dirname, "..", "bin");

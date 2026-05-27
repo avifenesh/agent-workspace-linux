@@ -1,6 +1,6 @@
 # agent-workspace-linux
 
-[![CI](https://github.com/avifenesh/agent-workspace-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/avifenesh/agent-workspace-linux/actions/workflows/ci.yml)
+[![CI](https://github.com/agent-sh/agent-workspace-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/agent-sh/agent-workspace-linux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational)
 ![Status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange)
@@ -21,7 +21,7 @@ Agents that "use a computer" normally take over *your* screen — they move your
 - **Use it when** you need a clean Linux desktop to run, screenshot, and inspect an app, then tear it down.
 - **Use it when** a long-running or headless agent needs a desktop it can drive without a human babysitting the real one.
 
-It is deliberately **not** a tool for driving your actual desktop — for that, use a host-desktop automation MCP. This one is the *separate, agent-owned* environment.
+It is deliberately **not** a tool for driving your actual desktop — for that, use its sibling [computer-use-linux](https://github.com/agent-sh/computer-use-linux). This one is the *separate, agent-owned* environment; the two are complements.
 
 ## Install
 
@@ -41,9 +41,9 @@ It builds from source straight from git — no crates.io needed. Install the sys
 
 ```bash
 # latest from main
-cargo install --git https://github.com/avifenesh/agent-workspace-linux
+cargo install --git https://github.com/agent-sh/agent-workspace-linux
 # or pin a tagged release
-cargo install --git https://github.com/avifenesh/agent-workspace-linux --tag v0.1.0
+cargo install --git https://github.com/agent-sh/agent-workspace-linux --tag v0.1.0
 ```
 
 That puts `agent-workspace-linux` on your `PATH`. Unlike `install.sh`, it installs only the binary — register it with your MCP host manually (below), and copy `skills/agent-workspace-linux/` into your skills directory if you want the bundled skill.
@@ -134,6 +134,10 @@ The MCP exposes ~86 tools. To avoid dumping them all into the agent's context, i
 - [Permission boundary](docs/permission-model.md) — the authority model.
 - [GPUI viewer direction](docs/gpui-viewer-direction.md) — the visible control surface.
 - [SECURITY.md](SECURITY.md) — trust model and how to report a vulnerability.
+
+## Related
+
+- [computer-use-linux](https://github.com/agent-sh/computer-use-linux) — the sibling MCP that drives the **user's real** Linux desktop. It is the inverse of this project: `computer-use-linux` automates the desktop you are already on, while `agent-workspace-linux` gives the agent a separate, isolated desktop of its own. Use them together — host control vs. sandboxed agent workspace.
 
 ## Contributing
 
