@@ -2171,7 +2171,13 @@ impl Render for AgentWorkspaceViewer {
                                     )),
                                     on_toggle_more,
                                 )
-                            }),
+                            })
+                            .child(button_with_tooltip(
+                                "viewer-close",
+                                "✕",
+                                Some(tooltip_text("Close the viewer (the workspace keeps running)")),
+                                |_event, _window, cx| cx.quit(),
+                            )),
                     ),
             )
             // Secondary control cluster, revealed by the "More" toggle. Holds
