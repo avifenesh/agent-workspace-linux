@@ -64,7 +64,7 @@ For MCP hosts that read `.mcp.json`:
 Or install the npm wrapper, which downloads the matching prebuilt Linux binary:
 
 ```bash
-npm install -g agent-workspace-linux
+npm install -g @agent-sh/agent-workspace-linux
 ```
 
 Prebuilt `x86_64` and `aarch64` Linux binaries are also attached to each [GitHub Release](https://github.com/agent-sh/agent-workspace-linux/releases/latest) — download the one for your architecture, `chmod +x`, and put it on your `PATH`.

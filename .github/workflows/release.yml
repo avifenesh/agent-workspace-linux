@@ -105,7 +105,7 @@ jobs:
           generate_release_notes: true
 
   # After both target binaries are attached to the Release, publish the npm
-  # wrapper so `npm install -g agent-workspace-linux` resolves the new version.
+  # wrapper so `npm install -g @agent-sh/agent-workspace-linux` resolves the new version.
   # The wrapper's postinstall downloads the matching binary from the Release, so
   # those assets must exist first — hence `needs: build`. This replaces the old
   # cross-workflow `release: published` trigger, which never fired because a

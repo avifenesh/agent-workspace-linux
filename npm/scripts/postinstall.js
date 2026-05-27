@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // postinstall.js — downloads the matching prebuilt binary from GitHub Releases.
 //
-// Invoked automatically by npm after `npm install -g agent-workspace-linux`.
+// Invoked automatically by npm after `npm install -g @agent-sh/agent-workspace-linux`.
 // If --ignore-scripts was used (e.g. pnpm default, some CI setups) this script
 // will NOT run; the binary won't be present and the launcher will print a clear
 // error at runtime. To recover, re-run installation with scripts enabled or
-// invoke this file directly: `node node_modules/agent-workspace-linux/scripts/postinstall.js`
+// invoke this file directly: `node node_modules/@agent-sh/agent-workspace-linux/scripts/postinstall.js`
 //
 // Checksum verification is not wired in because the release workflow contract
 // does not publish .sha256 sidecar files. If that changes, add a step here that
