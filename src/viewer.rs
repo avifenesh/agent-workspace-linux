@@ -7,9 +7,9 @@ use crate::{
 use anyhow::{bail, Context as AnyhowContext, Result};
 use gpui::{
     div, img, layer_shell::Anchor, layer_shell::KeyboardInteractivity, layer_shell::Layer,
-    layer_shell::LayerShellOptions, point, prelude::*, px, rgb, size, AnyElement, App, Bounds,
-    ClickEvent, Context, CursorStyle, Div, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render,
+    layer_shell::LayerShellOptions, point, prelude::*, px, rgb, rgba, size, AnyElement, App,
+    Bounds, ClickEvent, Context, CursorStyle, Div, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Pixels, Point, Render,
     RenderImage, ResizeEdge, SharedString, Size, Stateful, Styled, Task, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
@@ -38,38 +38,56 @@ use x11rb::{
     wrapper::ConnectionExt as X11WrapperConnectionExt,
 };
 
-const BG: u32 = 0x111315;
-const SURFACE: u32 = 0x1a1d21;
-const SURFACE_2: u32 = 0x24282e;
-const BORDER: u32 = 0x343a42;
-const TEXT: u32 = 0xf0f2f4;
-const MUTED: u32 = 0xa3abb5;
-const BUTTON_BG: u32 = 0x1e2125;
-const BUTTON_BG_HOVER: u32 = 0x24282d;
-const BUTTON_EDGE: u32 = 0x9aa3ad;
-const BUTTON_EDGE_SOFT: u32 = 0x727b85;
-const BUTTON_SELECTED_BG: u32 = 0x25292e;
-const BUTTON_SELECTED_BG_HOVER: u32 = 0x2b3036;
-const BUTTON_SELECTED_EDGE: u32 = 0xaeb7c1;
-const BUTTON_DISABLED_BG: u32 = 0x171a1d;
-const BUTTON_DISABLED_EDGE: u32 = 0x535c66;
-const BUTTON_RADIUS: f32 = 11.0;
-const TOOLTIP_BG: u32 = 0x202428;
-const TOOLTIP_EDGE: u32 = 0x6f7a86;
-const DANGER_BG: u32 = 0x241d20;
-const DANGER_EDGE: u32 = 0x7e777d;
-const DANGER_EDGE_HOVER: u32 = 0xa09aa0;
-const DANGER_HOVER: u32 = 0x2d2428;
-const DANGER_TEXT: u32 = 0xe7c7cc;
-const GREEN: u32 = 0x22c55e;
-const GREEN_SOFT: u32 = 0x11281b;
-const GREEN_BORDER: u32 = 0x2d6a3d;
-const AMBER: u32 = 0xf59e0b;
-const AMBER_SOFT: u32 = 0x302715;
-const AMBER_BORDER: u32 = 0x6b4b18;
-const RED: u32 = 0xef4444;
-const RED_SOFT: u32 = 0x32181b;
-const RED_BORDER: u32 = 0x62262a;
+// Polished opaque silver-graphite palette — premium brushed metal, not flat.
+// GNOME (the X11/Xwayland popup path) cannot blur, so the panel is an opaque
+// graphite solid and the "metal" comes from strong silvery edges plus a bright
+// brushed top highlight. Text is soft silver-white; status accents are reserved
+// for the footer status dot only — the chrome stays silver/neutral.
+
+/// Opaque root panel fill (`0xRRGGBBAA`, alpha ff) — a deep, lifted cool
+/// graphite that reads as a solid premium surface (no translucency, since the
+/// GNOME path cannot blur). Rendered via `rgba(..)`.
+const BG_GLASS: u32 = 0x171c23ff;
+const SURFACE: u32 = 0x20262e;
+const SURFACE_2: u32 = 0x2c333d;
+const BORDER: u32 = 0x49525e;
+/// Bright silvery metallic edge for the panel's primary borders (its "chrome").
+const EDGE_SILVER: u32 = 0xc4ccd6;
+/// Near-white brushed-metal highlight for the bright top/inner edge.
+const EDGE_HIGHLIGHT: u32 = 0xe4eaf1;
+const TEXT: u32 = 0xe9edf2;
+const MUTED: u32 = 0x9aa3ae;
+const BUTTON_BG: u32 = 0x252c35;
+const BUTTON_BG_HOVER: u32 = 0x2f3742;
+const BUTTON_EDGE: u32 = 0xc4ccd6;
+const BUTTON_EDGE_SOFT: u32 = 0x7b848d;
+const BUTTON_SELECTED_BG: u32 = 0x37454f;
+const BUTTON_SELECTED_BG_HOVER: u32 = 0x3f4e5a;
+const BUTTON_SELECTED_EDGE: u32 = 0xe4eaf1;
+const BUTTON_DISABLED_BG: u32 = 0x191e24;
+const BUTTON_DISABLED_EDGE: u32 = 0x4a525c;
+const BUTTON_DISABLED_TEXT: u32 = 0x6c7681;
+/// Single unified pill radius (shared by buttons and the tooltip surface).
+const BUTTON_RADIUS: f32 = 8.0;
+/// Single unified pill height for every button state.
+const BUTTON_HEIGHT: f32 = 24.0;
+/// Single unified horizontal padding for every button state.
+const BUTTON_PAD_X: f32 = 11.0;
+/// Single unified button label size.
+const BUTTON_TEXT: f32 = 12.0;
+const TOOLTIP_BG: u32 = 0x232932;
+const TOOLTIP_EDGE: u32 = 0x70797f;
+// Danger state stays silver-chrome with a faint warm tint so it reads as a
+// distinct, restrained accent rather than a loud red button.
+const DANGER_BG: u32 = 0x2a2228;
+const DANGER_EDGE: u32 = 0x9a8e92;
+const DANGER_EDGE_HOVER: u32 = 0xc2b3b7;
+const DANGER_HOVER: u32 = 0x342a30;
+const DANGER_TEXT: u32 = 0xe6cbcf;
+// Status-dot accents (footer running light only).
+const GREEN: u32 = 0x36d07a;
+const AMBER: u32 = 0xf0b84a;
+const RED: u32 = 0xef5a5a;
 
 const VIEWER_APP_ID: &str = "agent-workspace-linux-viewer";
 const VIEWER_BACKEND_ENV: &str = "AGENT_WORKSPACE_VIEWER_BACKEND";
@@ -294,6 +312,10 @@ struct AgentWorkspaceViewer {
     footer_mode: FooterMode,
     refresh_in_flight: bool,
     action_in_flight: Option<ViewerAction>,
+    /// Whether the secondary "More" cluster (refresh, live, capture, revoke,
+    /// clean, profile, workspace, artifacts, footer mode) is expanded. Transient
+    /// UI state only — not persisted.
+    show_more: bool,
     pending_cleanup: Option<PendingCleanup>,
     pending_revoke: Option<PendingRevoke>,
     interaction_drag: Option<InteractionDrag>,
@@ -356,7 +378,76 @@ struct InteractionDrag {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum DragKind {
     Move,
-    Resize,
+    Resize(ResizeEdge),
+}
+
+impl DragKind {
+    fn is_resize(self) -> bool {
+        matches!(self, DragKind::Resize(_))
+    }
+}
+
+/// Which window axes a resize edge affects, and whether the origin moves when
+/// that edge is dragged (left/top edges grow the window away from a fixed far
+/// corner, so the origin shifts; right/bottom keep the origin fixed).
+struct EdgeAxes {
+    moves_left: bool,
+    moves_top: bool,
+    affects_width: bool,
+    affects_height: bool,
+}
+
+fn resize_edge_axes(edge: ResizeEdge) -> EdgeAxes {
+    match edge {
+        ResizeEdge::Right => EdgeAxes {
+            moves_left: false,
+            moves_top: false,
+            affects_width: true,
+            affects_height: false,
+        },
+        ResizeEdge::Bottom => EdgeAxes {
+            moves_left: false,
+            moves_top: false,
+            affects_width: false,
+            affects_height: true,
+        },
+        ResizeEdge::BottomRight => EdgeAxes {
+            moves_left: false,
+            moves_top: false,
+            affects_width: true,
+            affects_height: true,
+        },
+        ResizeEdge::Left => EdgeAxes {
+            moves_left: true,
+            moves_top: false,
+            affects_width: true,
+            affects_height: false,
+        },
+        ResizeEdge::Top => EdgeAxes {
+            moves_left: false,
+            moves_top: true,
+            affects_width: false,
+            affects_height: true,
+        },
+        ResizeEdge::TopLeft => EdgeAxes {
+            moves_left: true,
+            moves_top: true,
+            affects_width: true,
+            affects_height: true,
+        },
+        ResizeEdge::TopRight => EdgeAxes {
+            moves_left: false,
+            moves_top: true,
+            affects_width: true,
+            affects_height: true,
+        },
+        ResizeEdge::BottomLeft => EdgeAxes {
+            moves_left: true,
+            moves_top: false,
+            affects_width: true,
+            affects_height: true,
+        },
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -545,6 +636,7 @@ impl AgentWorkspaceViewer {
             footer_mode,
             refresh_in_flight: false,
             action_in_flight: None,
+            show_more: false,
             pending_cleanup: None,
             pending_revoke: None,
             interaction_drag: None,
@@ -975,20 +1067,26 @@ impl AgentWorkspaceViewer {
 
     fn begin_resize(
         &mut self,
+        edge: ResizeEdge,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let x11 = x11_drag_session();
         self.interaction_drag = Some(InteractionDrag {
-            kind: DragKind::Resize,
+            kind: DragKind::Resize(edge),
             start_position: event.position,
             start_size: window.bounds().size,
         });
         if let Some(x11) = x11 {
-            self.spawn_x11_interaction(DragKind::Resize, x11, cx);
+            // X11 popups: drive the resize ourselves through the configure path
+            // in spawn_x11_interaction (the compositor move/resize hint is not
+            // wired for popups here).
+            self.spawn_x11_interaction(DragKind::Resize(edge), x11, cx);
         } else {
-            window.start_window_resize(ResizeEdge::BottomRight);
+            // Wayland layer-shell / normal windows: ask the compositor to take
+            // over the interactive resize from the matching edge.
+            window.start_window_resize(edge);
         }
         cx.notify();
     }
@@ -1034,7 +1132,7 @@ impl AgentWorkspaceViewer {
     ) {
         if event.pressed_button != Some(MouseButton::Left) {
             if let Some(drag) = self.interaction_drag.take() {
-                if matches!(drag.kind, DragKind::Move | DragKind::Resize) {
+                if matches!(drag.kind, DragKind::Move) || drag.kind.is_resize() {
                     self.persist_window_bounds_preference(window.bounds());
                 }
             }
@@ -1046,12 +1144,32 @@ impl AgentWorkspaceViewer {
             return;
         };
 
-        if drag.kind == DragKind::Resize {
-            let delta_x = event.position.x - drag.start_position.x;
-            let delta_y = event.position.y - drag.start_position.y;
-            let width = (drag.start_size.width.as_f32() + delta_x.as_f32()).max(OVERLAY_MIN_WIDTH);
-            let height =
-                (drag.start_size.height.as_f32() + delta_y.as_f32()).max(OVERLAY_MIN_HEIGHT);
+        // Manual resize fallback. Reached only when neither the X11 configure
+        // path nor the compositor's interactive resize is driving the gesture
+        // (gpui's Window exposes `resize` for size but no origin reposition on
+        // this backend). Right/Bottom/BottomRight grow naturally from the fixed
+        // top-left; Left/Top edges can only resize here, so we grow width/height
+        // from the drag delta and let the compositor keep the origin. Sizes stay
+        // clamped to the overlay minimums.
+        if let DragKind::Resize(edge) = drag.kind {
+            let axes = resize_edge_axes(edge);
+            let delta_x = (event.position.x - drag.start_position.x).as_f32();
+            let delta_y = (event.position.y - drag.start_position.y).as_f32();
+
+            let start_w = drag.start_size.width.as_f32();
+            let start_h = drag.start_size.height.as_f32();
+            let mut width = start_w;
+            let mut height = start_h;
+
+            if axes.affects_width {
+                let signed = if axes.moves_left { -delta_x } else { delta_x };
+                width = (start_w + signed).max(OVERLAY_MIN_WIDTH);
+            }
+            if axes.affects_height {
+                let signed = if axes.moves_top { -delta_y } else { delta_y };
+                height = (start_h + signed).max(OVERLAY_MIN_HEIGHT);
+            }
+
             window.resize(size(px(width), px(height)));
         }
     }
@@ -1063,7 +1181,7 @@ impl AgentWorkspaceViewer {
         cx: &mut Context<Self>,
     ) {
         if let Some(drag) = self.interaction_drag.take() {
-            if matches!(drag.kind, DragKind::Move | DragKind::Resize) {
+            if matches!(drag.kind, DragKind::Move) || drag.kind.is_resize() {
                 self.persist_window_bounds_preference(window.bounds());
             }
             cx.notify();
@@ -1730,8 +1848,62 @@ impl Render for AgentWorkspaceViewer {
             this.cycle_footer_mode();
             cx.notify();
         });
+        let on_toggle_more = cx.listener(|this: &mut Self, _event: &ClickEvent, _window, cx| {
+            this.show_more = !this.show_more;
+            cx.notify();
+        });
+        // Live-control segmented control `[ Run · RO · Pause ]`. The current mode
+        // is the filled (non-interactive) segment; the other two are the
+        // switch-to choices and carry the matching control listener.
+        let control_mode = self.control_state.mode;
+        let control_segments = vec![
+            Segment {
+                id: "viewer-mcp-active",
+                label: "Run".into(),
+                active: control_mode == McpControlMode::Active,
+                tooltip: Some(tooltip_text(mcp_control_action_tooltip(
+                    control_mode,
+                    McpControlMode::Active,
+                ))),
+                on_click: Some(Box::new(on_control_active)),
+            },
+            Segment {
+                id: "viewer-mcp-read-only",
+                label: McpControlMode::ReadOnly.button_label().into(),
+                active: control_mode == McpControlMode::ReadOnly,
+                tooltip: Some(tooltip_text(mcp_control_action_tooltip(
+                    control_mode,
+                    McpControlMode::ReadOnly,
+                ))),
+                on_click: Some(Box::new(on_control_read_only)),
+            },
+            Segment {
+                id: "viewer-mcp-pause",
+                label: McpControlMode::Paused.button_label().into(),
+                active: control_mode == McpControlMode::Paused,
+                tooltip: Some(tooltip_text(mcp_control_action_tooltip(
+                    control_mode,
+                    McpControlMode::Paused,
+                ))),
+                on_click: Some(Box::new(on_control_pause)),
+            },
+        ];
         let on_window_move_start = cx.listener(Self::begin_move);
-        let on_resize_start = cx.listener(Self::begin_resize);
+        // One listener per resize edge/corner; each starts the resize bound to
+        // its own ResizeEdge.
+        let resize_listener = |edge: ResizeEdge| {
+            cx.listener(move |this: &mut Self, event: &MouseDownEvent, window, cx| {
+                this.begin_resize(edge, event, window, cx);
+            })
+        };
+        let on_resize_top = resize_listener(ResizeEdge::Top);
+        let on_resize_bottom = resize_listener(ResizeEdge::Bottom);
+        let on_resize_left = resize_listener(ResizeEdge::Left);
+        let on_resize_right = resize_listener(ResizeEdge::Right);
+        let on_resize_top_left = resize_listener(ResizeEdge::TopLeft);
+        let on_resize_top_right = resize_listener(ResizeEdge::TopRight);
+        let on_resize_bottom_left = resize_listener(ResizeEdge::BottomLeft);
+        let on_resize_bottom_right = resize_listener(ResizeEdge::BottomRight);
         let now = wall_clock_seconds();
         self.clear_stale_cleanup_prompt(now);
         self.clear_stale_revoke_prompt(now);
@@ -1763,8 +1935,6 @@ impl Render for AgentWorkspaceViewer {
         } else {
             "Stream workspace screen frames every 3s"
         };
-        let control_mode = self.control_state.mode;
-        let state_label = if running { "Running" } else { "Stopped" };
         let busy_action = self.action_in_flight.clone();
         let refreshing = self.refresh_in_flight;
         let workspace_position = self.workspace_position();
@@ -1893,18 +2063,32 @@ impl Render for AgentWorkspaceViewer {
             .size_full()
             .relative()
             .overflow_hidden()
-            .rounded(px(9.0))
-            .p(px(6.0))
-            .gap(px(5.0))
-            .bg(rgb(BG))
+            .rounded(px(10.0))
+            .p(px(8.0))
+            .gap(px(8.0))
+            // Translucent graphite fill so the window blur reads through as
+            // frosted glass; the silvery outer edge plus a brighter top edge
+            // fakes a brushed-metal rim.
+            .bg(rgba(BG_GLASS))
+            .text_size(px(12.0))
             .text_color(rgb(TEXT))
             .font_family(UI_FONT)
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(rgb(EDGE_SILVER))
             .cursor(CursorStyle::Arrow)
             .on_mouse_move(cx.listener(Self::update_interaction))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::end_interaction))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::end_interaction))
+            // Faint brushed-metal highlight row hugging the inner top edge.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(1.0))
+                    .bg(rgba((EDGE_HIGHLIGHT << 8) | 0xb0)),
+            )
             .child(
                 div()
                     .flex()
@@ -1924,230 +2108,30 @@ impl Render for AgentWorkspaceViewer {
                             .on_mouse_down(MouseButton::Left, on_window_move_start)
                             .child(
                                 div()
-                                    .text_size(px(11.0))
+                                    .text_size(px(13.0))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .line_height(px(16.0))
                                     .truncate()
                                     .child(SharedString::from(title)),
                             )
                             .child(
                                 div()
-                                    .text_size(px(9.0))
+                                    .text_size(px(11.0))
+                                    .line_height(px(14.0))
                                     .text_color(rgb(MUTED))
                                     .truncate()
                                     .child(SharedString::from(header_detail)),
                             ),
                     )
+                    // Minimal top row: live-control segmented control, the
+                    // primary Start/Stop, and a single "More" toggle. Everything
+                    // else lives in the secondary cluster below.
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
-                            .child(if busy_action.is_some() || refreshing {
-                                disabled_button_with_tooltip(
-                                    "viewer-refresh",
-                                    "Refresh",
-                                    Some(tooltip_text("Refresh waits for the current action")),
-                                )
-                            } else {
-                                button_with_tooltip(
-                                    "viewer-refresh",
-                                    "Refresh",
-                                    Some(tooltip_text("Refresh workspace state now")),
-                                    on_refresh,
-                                )
-                            })
-                            .child(if self.screen_stream {
-                                selected_button_with_tooltip(
-                                    "viewer-live",
-                                    live_label,
-                                    Some(tooltip_text(live_tooltip)),
-                                    on_live,
-                                )
-                            } else {
-                                button_with_tooltip(
-                                    "viewer-live",
-                                    live_label,
-                                    Some(tooltip_text(live_tooltip)),
-                                    on_live,
-                                )
-                            })
-                            .child(match control_mode {
-                                McpControlMode::Active => div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(3.0))
-                                    .child(compact_button_with_tooltip(
-                                        "viewer-mcp-read-only",
-                                        McpControlMode::ReadOnly.button_label(),
-                                        Some(tooltip_text(mcp_control_action_tooltip(
-                                            control_mode,
-                                            McpControlMode::ReadOnly,
-                                        ))),
-                                        on_control_read_only,
-                                    ))
-                                    .child(compact_danger_button_with_tooltip(
-                                        "viewer-mcp-pause",
-                                        McpControlMode::Paused.button_label(),
-                                        Some(tooltip_text(mcp_control_action_tooltip(
-                                            control_mode,
-                                            McpControlMode::Paused,
-                                        ))),
-                                        on_control_pause,
-                                    ))
-                                    .into_any_element(),
-                                McpControlMode::ReadOnly => div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(3.0))
-                                    .child(compact_button_with_tooltip(
-                                        "viewer-mcp-active",
-                                        "Run",
-                                        Some(tooltip_text(mcp_control_action_tooltip(
-                                            control_mode,
-                                            McpControlMode::Active,
-                                        ))),
-                                        on_control_active,
-                                    ))
-                                    .child(compact_danger_button_with_tooltip(
-                                        "viewer-mcp-pause",
-                                        McpControlMode::Paused.button_label(),
-                                        Some(tooltip_text(mcp_control_action_tooltip(
-                                            control_mode,
-                                            McpControlMode::Paused,
-                                        ))),
-                                        on_control_pause,
-                                    ))
-                                    .into_any_element(),
-                                McpControlMode::Paused => div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(3.0))
-                                    .child(compact_button_with_tooltip(
-                                        "viewer-mcp-active",
-                                        "Run",
-                                        Some(tooltip_text(mcp_control_action_tooltip(
-                                            control_mode,
-                                            McpControlMode::Active,
-                                        ))),
-                                        on_control_active,
-                                    ))
-                                    .child(compact_button_with_tooltip(
-                                        "viewer-mcp-read-only",
-                                        McpControlMode::ReadOnly.button_label(),
-                                        Some(tooltip_text(mcp_control_action_tooltip(
-                                            control_mode,
-                                            McpControlMode::ReadOnly,
-                                        ))),
-                                        on_control_read_only,
-                                    ))
-                                    .into_any_element(),
-                            })
-                            .child(if let Some(label) = workspace_cycle_label {
-                                if busy_action.is_some() || refreshing {
-                                    disabled_button_with_tooltip(
-                                        "viewer-workspace",
-                                        label,
-                                        Some(tooltip_text("Workspace switching waits for refresh")),
-                                    )
-                                } else {
-                                    compact_button_with_tooltip(
-                                        "viewer-workspace",
-                                        label,
-                                        Some(tooltip_text("Switch between known workspaces")),
-                                        on_workspace,
-                                    )
-                                }
-                            } else {
-                                div().into_any_element()
-                            })
-                            .child(if running || self.snapshot.profiles.is_empty() {
-                                div().into_any_element()
-                            } else if busy_action.is_some() {
-                                disabled_button_with_tooltip(
-                                    "viewer-profile",
-                                    "Profile",
-                                    Some(tooltip_text(
-                                        "Profile switching waits for the current action",
-                                    )),
-                                )
-                            } else {
-                                button_with_tooltip(
-                                    "viewer-profile",
-                                    "Profile",
-                                    Some(tooltip_text("Cycle the profile used by Start")),
-                                    on_profile,
-                                )
-                            })
-                            .child(if !running {
-                                div().into_any_element()
-                            } else if busy_action.is_some() || refreshing {
-                                disabled_button_with_tooltip(
-                                    "viewer-capture",
-                                    "Shot",
-                                    Some(tooltip_text("Screenshot waits for the current action")),
-                                )
-                            } else {
-                                compact_button_with_tooltip(
-                                    "viewer-capture",
-                                    "Shot",
-                                    Some(tooltip_text(
-                                        "Save a screenshot of the active workspace window",
-                                    )),
-                                    on_capture,
-                                )
-                            })
-                            .child(if !running {
-                                div().into_any_element()
-                            } else if busy_action.is_some() || refreshing {
-                                disabled_button_with_tooltip(
-                                    "viewer-revoke",
-                                    "Rev",
-                                    Some(tooltip_text("Revoke waits for the current action")),
-                                )
-                            } else if revoke_armed {
-                                compact_danger_button_with_tooltip(
-                                    "viewer-revoke-confirm",
-                                    "Sure?",
-                                    Some(tooltip_text(
-                                        "Confirm: stop workspace and remove runtime files",
-                                    )),
-                                    on_revoke,
-                                )
-                            } else {
-                                compact_danger_button_with_tooltip(
-                                    "viewer-revoke",
-                                    "Rev",
-                                    Some(tooltip_text(
-                                        "Revoke: stop workspace and remove runtime files",
-                                    )),
-                                    on_revoke,
-                                )
-                            })
-                            .child(if !has_workspace_artifacts || running {
-                                div().into_any_element()
-                            } else if busy_action.is_some() || refreshing {
-                                disabled_button_with_tooltip(
-                                    "viewer-clean",
-                                    "Clean",
-                                    Some(tooltip_text("Cleanup waits for the current action")),
-                                )
-                            } else if cleanup_armed {
-                                compact_danger_button_with_tooltip(
-                                    "viewer-clean-confirm",
-                                    "Sure?",
-                                    Some(tooltip_text(
-                                        "Confirm: remove stopped workspace runtime files",
-                                    )),
-                                    on_clean,
-                                )
-                            } else {
-                                compact_danger_button_with_tooltip(
-                                    "viewer-clean",
-                                    "Clean",
-                                    Some(tooltip_text("Remove stopped workspace runtime files")),
-                                    on_clean,
-                                )
-                            })
+                            .gap(px(6.0))
+                            .child(segmented_control(control_segments))
                             .child(if let Some(action) = &busy_action {
                                 disabled_button_with_tooltip(
                                     "viewer-action",
@@ -2170,44 +2154,283 @@ impl Render for AgentWorkspaceViewer {
                                     Some(tooltip_text(format!("Start {selected_profile_label}"))),
                                     on_start,
                                 )
+                            })
+                            .child(if self.show_more {
+                                selected_button_with_tooltip(
+                                    "viewer-more",
+                                    "More ▴",
+                                    Some(tooltip_text("Hide the secondary controls")),
+                                    on_toggle_more,
+                                )
+                            } else {
+                                button_with_tooltip(
+                                    "viewer-more",
+                                    "More ▾",
+                                    Some(tooltip_text(
+                                        "Show refresh, screen, capture, revoke, clean and artifact controls",
+                                    )),
+                                    on_toggle_more,
+                                )
                             }),
                     ),
             )
+            // Secondary control cluster, revealed by the "More" toggle. Holds
+            // every relocated action: refresh, the screen/Live toggle, capture,
+            // revoke, clean, profile/workspace switching, and the artifact and
+            // footer-mode buttons. No action is removed — only relocated here.
+            .when(self.show_more, |panel| {
+                panel.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(4.0))
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .bg(rgb(SURFACE))
+                        .px(px(6.0))
+                        .py(px(5.0))
+                        .cursor(CursorStyle::Arrow)
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .child(if busy_action.is_some() || refreshing {
+                            disabled_button_with_tooltip(
+                                "viewer-refresh",
+                                "Refresh",
+                                Some(tooltip_text("Refresh waits for the current action")),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-refresh",
+                                "Refresh",
+                                Some(tooltip_text("Refresh workspace state now")),
+                                on_refresh,
+                            )
+                        })
+                        .child(if self.screen_stream {
+                            selected_button_with_tooltip(
+                                "viewer-live",
+                                live_label,
+                                Some(tooltip_text(live_tooltip)),
+                                on_live,
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-live",
+                                live_label,
+                                Some(tooltip_text(live_tooltip)),
+                                on_live,
+                            )
+                        })
+                        .child(if let Some(label) = workspace_cycle_label {
+                            if busy_action.is_some() || refreshing {
+                                disabled_button_with_tooltip(
+                                    "viewer-workspace",
+                                    label,
+                                    Some(tooltip_text("Workspace switching waits for refresh")),
+                                )
+                            } else {
+                                button_with_tooltip(
+                                    "viewer-workspace",
+                                    label,
+                                    Some(tooltip_text("Switch between known workspaces")),
+                                    on_workspace,
+                                )
+                            }
+                        } else {
+                            div().into_any_element()
+                        })
+                        .child(if running || self.snapshot.profiles.is_empty() {
+                            div().into_any_element()
+                        } else if busy_action.is_some() {
+                            disabled_button_with_tooltip(
+                                "viewer-profile",
+                                "Profile",
+                                Some(tooltip_text(
+                                    "Profile switching waits for the current action",
+                                )),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-profile",
+                                "Profile",
+                                Some(tooltip_text("Cycle the profile used by Start")),
+                                on_profile,
+                            )
+                        })
+                        .child(if !running {
+                            div().into_any_element()
+                        } else if busy_action.is_some() || refreshing {
+                            disabled_button_with_tooltip(
+                                "viewer-capture",
+                                "Shot",
+                                Some(tooltip_text("Screenshot waits for the current action")),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-capture",
+                                "Shot",
+                                Some(tooltip_text(
+                                    "Save a screenshot of the active workspace window",
+                                )),
+                                on_capture,
+                            )
+                        })
+                        .child(if !running {
+                            div().into_any_element()
+                        } else if busy_action.is_some() || refreshing {
+                            disabled_button_with_tooltip(
+                                "viewer-revoke",
+                                "Rev",
+                                Some(tooltip_text("Revoke waits for the current action")),
+                            )
+                        } else if revoke_armed {
+                            danger_button_with_tooltip(
+                                "viewer-revoke-confirm",
+                                "Sure?",
+                                Some(tooltip_text(
+                                    "Confirm: stop workspace and remove runtime files",
+                                )),
+                                on_revoke,
+                            )
+                        } else {
+                            danger_button_with_tooltip(
+                                "viewer-revoke",
+                                "Rev",
+                                Some(tooltip_text(
+                                    "Revoke: stop workspace and remove runtime files",
+                                )),
+                                on_revoke,
+                            )
+                        })
+                        .child(if !has_workspace_artifacts || running {
+                            div().into_any_element()
+                        } else if busy_action.is_some() || refreshing {
+                            disabled_button_with_tooltip(
+                                "viewer-clean",
+                                "Clean",
+                                Some(tooltip_text("Cleanup waits for the current action")),
+                            )
+                        } else if cleanup_armed {
+                            danger_button_with_tooltip(
+                                "viewer-clean-confirm",
+                                "Sure?",
+                                Some(tooltip_text(
+                                    "Confirm: remove stopped workspace runtime files",
+                                )),
+                                on_clean,
+                            )
+                        } else {
+                            danger_button_with_tooltip(
+                                "viewer-clean",
+                                "Clean",
+                                Some(tooltip_text("Remove stopped workspace runtime files")),
+                                on_clean,
+                            )
+                        })
+                        .child(if !has_workspace_artifacts {
+                            div().into_any_element()
+                        } else if footer_locked {
+                            disabled_button_with_tooltip(
+                                "viewer-artifacts",
+                                "Files",
+                                Some(tooltip_text("Artifact folder waits for the current state")),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-artifacts",
+                                "Files",
+                                Some(tooltip_text("Open the workspace artifact folder")),
+                                on_artifacts,
+                            )
+                        })
+                        .child(if !has_workspace_artifacts {
+                            div().into_any_element()
+                        } else if footer_locked {
+                            disabled_button_with_tooltip(
+                                "viewer-events",
+                                "Evt",
+                                Some(tooltip_text("Event log waits for the current state")),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-events",
+                                "Evt",
+                                Some(tooltip_text("Open the workspace event log")),
+                                on_events,
+                            )
+                        })
+                        .child(if app_log_target.is_none() {
+                            div().into_any_element()
+                        } else if footer_locked {
+                            disabled_button_with_tooltip(
+                                "viewer-app-log",
+                                "Log",
+                                Some(tooltip_text("App log waits for the current state")),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-app-log",
+                                "Log",
+                                Some(tooltip_text("Open the active app log")),
+                                on_app_log,
+                            )
+                        })
+                        .child(if footer_locked {
+                            disabled_button_with_tooltip(
+                                "viewer-footer-mode",
+                                self.footer_mode.label(),
+                                Some(tooltip_text("Footer mode waits for the current state")),
+                            )
+                        } else {
+                            button_with_tooltip(
+                                "viewer-footer-mode",
+                                self.footer_mode.label(),
+                                Some(tooltip_text("Cycle footer: activity, task, isolation, apps")),
+                                on_footer_mode,
+                            )
+                        }),
+                )
+            })
+            // Screen view: spans the full content width of the panel and fills
+            // the remaining vertical space. The frame image covers the box
+            // edge-to-edge (no letterbox inset) while preserving aspect.
             .child(
                 div()
+                    .flex()
                     .flex_1()
+                    .w_full()
                     .min_h_0()
                     .relative()
-                    .rounded(px(7.0))
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.0))
                     .border_1()
                     .border_color(rgb(BORDER))
-                    .bg(rgb(0x090a0b))
+                    .bg(rgb(0x0b0d10))
                     .overflow_hidden()
                     .cursor(CursorStyle::Arrow)
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
-                    .child(
-                        div()
-                            .flex()
+                    .child(match image {
+                        Some(image) => img(image)
                             .size_full()
-                            .items_center()
-                            .justify_center()
-                            .overflow_hidden()
-                            .child(match image {
-                                Some(image) => img(image).w_full().h_full().into_any_element(),
-                                None => div()
-                                    .px(px(14.0))
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(MUTED))
-                                    .child(if running {
-                                        "Screen stream off"
-                                    } else {
-                                        "No running workspace yet"
-                                    })
-                                    .into_any_element(),
-                            }),
-                    ),
+                            .object_fit(ObjectFit::Cover)
+                            .into_any_element(),
+                        None => div()
+                            .px(px(14.0))
+                            .text_size(px(12.0))
+                            .text_color(rgb(MUTED))
+                            .child(if running {
+                                "Screen stream off"
+                            } else {
+                                "No running workspace yet"
+                            })
+                            .into_any_element(),
+                    }),
             )
             .child(
                 div()
@@ -2229,96 +2452,77 @@ impl Render for AgentWorkspaceViewer {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_size(px(10.0))
+                            .text_size(px(11.0))
+                            .line_height(px(14.0))
                             .text_color(rgb(MUTED))
                             .truncate()
                             .child(SharedString::from(footer_text)),
                     )
+                    // Footer right side: just the running status light (no text
+                    // banner). The artifact/footer-mode buttons moved into the
+                    // "More" cluster above.
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
-                            .child(if !has_workspace_artifacts {
-                                div().into_any_element()
-                            } else if footer_locked {
-                                disabled_button_with_tooltip(
-                                    "viewer-artifacts",
-                                    "Files",
-                                    Some(tooltip_text(
-                                        "Artifact folder waits for the current state",
-                                    )),
-                                )
-                            } else {
-                                compact_button_with_tooltip(
-                                    "viewer-artifacts",
-                                    "Files",
-                                    Some(tooltip_text("Open the workspace artifact folder")),
-                                    on_artifacts,
-                                )
-                            })
-                            .child(if !has_workspace_artifacts {
-                                div().into_any_element()
-                            } else if footer_locked {
-                                disabled_button_with_tooltip(
-                                    "viewer-events",
-                                    "Evt",
-                                    Some(tooltip_text("Event log waits for the current state")),
-                                )
-                            } else {
-                                compact_button_with_tooltip(
-                                    "viewer-events",
-                                    "Evt",
-                                    Some(tooltip_text("Open the workspace event log")),
-                                    on_events,
-                                )
-                            })
-                            .child(if app_log_target.is_none() {
-                                div().into_any_element()
-                            } else if footer_locked {
-                                disabled_button_with_tooltip(
-                                    "viewer-app-log",
-                                    "Log",
-                                    Some(tooltip_text("App log waits for the current state")),
-                                )
-                            } else {
-                                compact_button_with_tooltip(
-                                    "viewer-app-log",
-                                    "Log",
-                                    Some(tooltip_text("Open the active app log")),
-                                    on_app_log,
-                                )
-                            })
-                            .child(if footer_locked {
-                                disabled_button_with_tooltip(
-                                    "viewer-footer-mode",
-                                    self.footer_mode.label(),
-                                    Some(tooltip_text("Footer mode waits for the current state")),
-                                )
-                            } else {
-                                compact_button_with_tooltip(
-                                    "viewer-footer-mode",
-                                    self.footer_mode.label(),
-                                    Some(tooltip_text(
-                                        "Cycle footer: activity, task, isolation, apps",
-                                    )),
-                                    on_footer_mode,
-                                )
-                            })
-                            .child(if busy_action.is_some() {
-                                status_pill("Working", AMBER, AMBER_SOFT, AMBER_BORDER)
-                            } else if refreshing {
-                                status_pill("Syncing", AMBER, AMBER_SOFT, AMBER_BORDER)
-                            } else if self.error.is_some() {
-                                status_pill("Attention", RED, RED_SOFT, RED_BORDER)
-                            } else if running {
-                                status_pill(state_label, GREEN, GREEN_SOFT, GREEN_BORDER)
-                            } else {
-                                status_pill(state_label, MUTED, SURFACE_2, BORDER)
-                            }),
+                            .pl(px(8.0))
+                            .child(status_light(running_status_color(
+                                running,
+                                control_mode,
+                                self.error.is_some(),
+                            ))),
                     ),
             )
-            .child(resize_grip(on_resize_start))
+            // Resize hit-zones on every edge and corner. Edges are thin strips;
+            // corners are small squares layered on top so they win the overlap.
+            .child(resize_edge_zone(
+                "viewer-resize-top",
+                ResizeEdge::Top,
+                CursorStyle::ResizeUpDown,
+                on_resize_top,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-bottom",
+                ResizeEdge::Bottom,
+                CursorStyle::ResizeUpDown,
+                on_resize_bottom,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-left",
+                ResizeEdge::Left,
+                CursorStyle::ResizeLeftRight,
+                on_resize_left,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-right",
+                ResizeEdge::Right,
+                CursorStyle::ResizeLeftRight,
+                on_resize_right,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-top-left",
+                ResizeEdge::TopLeft,
+                CursorStyle::ResizeUpLeftDownRight,
+                on_resize_top_left,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-top-right",
+                ResizeEdge::TopRight,
+                CursorStyle::ResizeUpRightDownLeft,
+                on_resize_top_right,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-bottom-left",
+                ResizeEdge::BottomLeft,
+                CursorStyle::ResizeUpRightDownLeft,
+                on_resize_bottom_left,
+            ))
+            .child(resize_edge_zone(
+                "viewer-resize-bottom-right",
+                ResizeEdge::BottomRight,
+                CursorStyle::ResizeUpLeftDownRight,
+                on_resize_bottom_right,
+            ))
     }
 }
 
@@ -2471,7 +2675,11 @@ fn layer_shell_window_options() -> WindowOptions {
         is_minimizable: false,
         app_id: Some(VIEWER_APP_ID.to_string()),
         window_min_size: Some(size(px(OVERLAY_MIN_WIDTH), px(OVERLAY_MIN_HEIGHT))),
-        window_background: WindowBackgroundAppearance::Transparent,
+        // Frosted glass: blur the content behind the translucent panel. The
+        // Wayland layer-shell path supports this on compositors with a blur
+        // protocol; where unsupported it degrades to plain transparency and the
+        // translucent graphite fill still reads as a premium surface.
+        window_background: WindowBackgroundAppearance::Blurred,
         ..Default::default()
     }
 }
@@ -2516,7 +2724,9 @@ fn normal_window_options(cx: &App) -> WindowOptions {
         is_minimizable: true,
         app_id: Some(VIEWER_APP_ID.to_string()),
         window_min_size: Some(size(px(OVERLAY_MIN_WIDTH), px(OVERLAY_MIN_HEIGHT))),
-        window_background: WindowBackgroundAppearance::Transparent,
+        // Frosted glass where the compositor supports blur; otherwise it falls
+        // back to plain transparency over the translucent graphite panel.
+        window_background: WindowBackgroundAppearance::Blurred,
         ..Default::default()
     }
 }
@@ -2534,7 +2744,10 @@ fn x11_window_options(cx: &App) -> WindowOptions {
         is_minimizable: false,
         app_id: Some(VIEWER_APP_ID.to_string()),
         window_min_size: Some(size(px(OVERLAY_MIN_WIDTH), px(OVERLAY_MIN_HEIGHT))),
-        window_background: WindowBackgroundAppearance::Transparent,
+        // X11 popups generally cannot blur the backdrop, so this requests blur
+        // but in practice degrades to plain transparency; the translucent
+        // graphite panel keeps the premium frosted-metal look on this backend.
+        window_background: WindowBackgroundAppearance::Blurred,
         ..Default::default()
     }
 }
@@ -3412,12 +3625,45 @@ impl X11DragSession {
             DragKind::Move => {
                 self.move_to(self.start_bounds.x + delta_x, self.start_bounds.y + delta_y)?;
             }
-            DragKind::Resize => {
-                let width =
-                    (self.start_bounds.width as i32 + delta_x).max(OVERLAY_MIN_WIDTH as i32) as u32;
-                let height = (self.start_bounds.height as i32 + delta_y)
-                    .max(OVERLAY_MIN_HEIGHT as i32) as u32;
-                self.resize(width, height)?;
+            DragKind::Resize(edge) => {
+                // X11 popups can be reconfigured with both an origin and a size,
+                // so every edge is honored: right/bottom grow from the fixed
+                // top-left, while left/top edges move the origin and resize so
+                // the opposite corner stays pinned. Sizes clamp to the overlay
+                // minimums; a clamped left/top edge stops moving the origin.
+                let axes = resize_edge_axes(edge);
+                let min_w = OVERLAY_MIN_WIDTH as i32;
+                let min_h = OVERLAY_MIN_HEIGHT as i32;
+                let start_w = self.start_bounds.width as i32;
+                let start_h = self.start_bounds.height as i32;
+
+                let mut x = self.start_bounds.x;
+                let mut y = self.start_bounds.y;
+                let mut width = start_w;
+                let mut height = start_h;
+
+                if axes.affects_width {
+                    if axes.moves_left {
+                        width = (start_w - delta_x).max(min_w);
+                        x = self.start_bounds.x + (start_w - width);
+                    } else {
+                        width = (start_w + delta_x).max(min_w);
+                    }
+                }
+                if axes.affects_height {
+                    if axes.moves_top {
+                        height = (start_h - delta_y).max(min_h);
+                        y = self.start_bounds.y + (start_h - height);
+                    } else {
+                        height = (start_h + delta_y).max(min_h);
+                    }
+                }
+
+                if axes.moves_left || axes.moves_top {
+                    self.configure(x, y, width as u32, height as u32)?;
+                } else {
+                    self.resize(width as u32, height as u32)?;
+                }
             }
         }
         Ok(button_down)
@@ -3447,6 +3693,21 @@ impl X11DragSession {
         self.connection.configure_window(
             self.window,
             &ConfigureWindowAux::new().width(width).height(height),
+        )?;
+        self.connection.flush()?;
+        Ok(())
+    }
+
+    /// Reposition and resize together — needed for left/top edge drags where the
+    /// origin moves so the opposite corner stays fixed.
+    fn configure(&self, x: i32, y: i32, width: u32, height: u32) -> Result<()> {
+        self.connection.configure_window(
+            self.window,
+            &ConfigureWindowAux::new()
+                .x(x)
+                .y(y)
+                .width(width)
+                .height(height),
         )?;
         self.connection.flush()?;
         Ok(())
@@ -3559,38 +3820,64 @@ fn x11_window_matches(
         .unwrap_or(false)
 }
 
-fn resize_grip<F>(on_resize_start: F) -> AnyElement
+/// Thickness of the thin edge hit-zones (corner zones are this square).
+const RESIZE_EDGE_HIT: f32 = 6.0;
+
+/// Build one thin resize hit-zone pinned to the given edge/corner. `on_down`
+/// starts the resize for that edge; the visible bottom-right corner also carries
+/// a faint brushed-metal grip so the resize affordance stays discoverable.
+fn resize_edge_zone<F>(
+    id: &'static str,
+    edge: ResizeEdge,
+    cursor: CursorStyle,
+    on_down: F,
+) -> AnyElement
 where
     F: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 {
-    div()
-        .id("viewer-resize-grip")
-        .absolute()
-        .right_0()
-        .bottom_0()
-        .w(px(42.0))
-        .h(px(42.0))
-        .flex()
-        .items_end()
-        .justify_end()
-        .pr(px(7.0))
-        .pb(px(7.0))
-        .cursor(CursorStyle::ResizeUpLeftDownRight)
-        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-            on_resize_start(event, window, cx);
+    let thick = px(RESIZE_EDGE_HIT);
+    let mut zone = div().id(id).absolute().cursor(cursor).on_mouse_down(
+        MouseButton::Left,
+        move |event, window, cx| {
+            on_down(event, window, cx);
             cx.stop_propagation();
-        })
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_end()
-                .gap(px(2.0))
-                .child(div().w(px(6.0)).border_b_1().border_color(rgb(0x68717c)))
-                .child(div().w(px(10.0)).border_b_1().border_color(rgb(0x78828e)))
-                .child(div().w(px(14.0)).border_b_1().border_color(rgb(0x9099a5))),
-        )
-        .into_any_element()
+        },
+    );
+    zone = match edge {
+        ResizeEdge::Top => zone.top_0().left_0().right_0().h(thick),
+        ResizeEdge::Bottom => zone.bottom_0().left_0().right_0().h(thick),
+        ResizeEdge::Left => zone.left_0().top_0().bottom_0().w(thick),
+        ResizeEdge::Right => zone.right_0().top_0().bottom_0().w(thick),
+        ResizeEdge::TopLeft => zone.top_0().left_0().w(thick).h(thick),
+        ResizeEdge::TopRight => zone.top_0().right_0().w(thick).h(thick),
+        ResizeEdge::BottomLeft => zone.bottom_0().left_0().w(thick).h(thick),
+        ResizeEdge::BottomRight => zone.bottom_0().right_0().w(thick).h(thick),
+    };
+    if edge == ResizeEdge::BottomRight {
+        zone = zone
+            .w(px(16.0))
+            .h(px(16.0))
+            .flex()
+            .items_end()
+            .justify_end()
+            .pr(px(3.0))
+            .pb(px(3.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .gap(px(2.0))
+                    .child(div().w(px(6.0)).border_b_1().border_color(rgb(EDGE_SILVER)))
+                    .child(
+                        div()
+                            .w(px(10.0))
+                            .border_b_1()
+                            .border_color(rgb(EDGE_HIGHLIGHT)),
+                    ),
+            );
+    }
+    zone.into_any_element()
 }
 
 fn tooltip_text(text: impl Into<SharedString>) -> SharedString {
@@ -3645,6 +3932,171 @@ fn attach_tooltip(element: Stateful<Div>, tooltip: Option<SharedString>) -> Stat
     })
 }
 
+/// The visual state of the one and only button shape. Every viewer button is
+/// the same pill (one radius, one height, one horizontal padding, one font);
+/// state is expressed through fill + border + text color ONLY — never a
+/// different shape or size.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ButtonKind {
+    Normal,
+    Selected,
+    Danger,
+    Disabled,
+}
+
+impl ButtonKind {
+    /// (fill, border, text, hover_fill, hover_border) for this state.
+    fn colors(self) -> (u32, u32, u32, u32, u32) {
+        match self {
+            ButtonKind::Normal => (
+                BUTTON_BG,
+                BUTTON_EDGE_SOFT,
+                TEXT,
+                BUTTON_BG_HOVER,
+                BUTTON_EDGE,
+            ),
+            ButtonKind::Selected => (
+                BUTTON_SELECTED_BG,
+                BUTTON_SELECTED_EDGE,
+                TEXT,
+                BUTTON_SELECTED_BG_HOVER,
+                BUTTON_EDGE,
+            ),
+            ButtonKind::Danger => (
+                DANGER_BG,
+                DANGER_EDGE,
+                DANGER_TEXT,
+                DANGER_HOVER,
+                DANGER_EDGE_HOVER,
+            ),
+            ButtonKind::Disabled => (
+                BUTTON_DISABLED_BG,
+                BUTTON_DISABLED_EDGE,
+                BUTTON_DISABLED_TEXT,
+                BUTTON_DISABLED_BG,
+                BUTTON_DISABLED_EDGE,
+            ),
+        }
+    }
+}
+
+/// The single uniform button component. Builds the one pill shape and wires the
+/// optional click handler. `Disabled` renders the same pill with muted fill and
+/// no hover/click affordance.
+fn pill_button<F>(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    tooltip: Option<SharedString>,
+    kind: ButtonKind,
+    on_click: Option<F>,
+) -> AnyElement
+where
+    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
+    let (bg, border, text, hover_bg, hover_border) = kind.colors();
+    let interactive = !matches!(kind, ButtonKind::Disabled);
+    let base = div()
+        .id(id)
+        .px(px(BUTTON_PAD_X))
+        .h(px(BUTTON_HEIGHT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(BUTTON_RADIUS))
+        .bg(rgb(bg))
+        .text_size(px(BUTTON_TEXT))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .line_height(px(BUTTON_HEIGHT))
+        .text_color(rgb(text))
+        .border_1()
+        .border_color(rgb(border))
+        // Faint brushed-metal highlight on the top edge of the pill.
+        .border_t_1()
+        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        });
+    let base = if interactive {
+        base.cursor_pointer()
+            .hover(move |style| style.bg(rgb(hover_bg)).border_color(rgb(hover_border)))
+    } else {
+        base
+    };
+    let base = base.when_some(on_click.filter(|_| interactive), |element, on_click| {
+        element.on_click(on_click)
+    });
+    attach_tooltip(base.child(label.into()), tooltip).into_any_element()
+}
+
+/// A boxed click handler for a segmented-control segment.
+type SegmentClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// One segment in the segmented control: a stable id, its label, the live-mode
+/// flag (active segment is filled and non-interactive), an optional tooltip, and
+/// an optional click handler (present only for the inactive, switch-to segments).
+struct Segment {
+    id: &'static str,
+    label: SharedString,
+    active: bool,
+    tooltip: Option<SharedString>,
+    on_click: Option<SegmentClick>,
+}
+
+/// A connected segmented control — equal-width segments sharing one rounded
+/// silvery rim, with hairline dividers between them. The active segment shows
+/// the selected fill; the others are quiet and clickable. Used for the live
+/// control mode `[ Run · RO · Pause ]`.
+fn segmented_control(segments: Vec<Segment>) -> AnyElement {
+    let last = segments.len().saturating_sub(1);
+    let mut row = div()
+        .flex()
+        .items_center()
+        .h(px(BUTTON_HEIGHT))
+        .rounded(px(BUTTON_RADIUS))
+        .border_1()
+        .border_color(rgb(EDGE_SILVER))
+        .bg(rgb(SURFACE))
+        .overflow_hidden();
+
+    for (index, segment) in segments.into_iter().enumerate() {
+        let (bg, text) = if segment.active {
+            (BUTTON_SELECTED_BG, TEXT)
+        } else {
+            (SURFACE, MUTED)
+        };
+        let mut cell = div()
+            .id(segment.id)
+            .flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .h_full()
+            .px(px(10.0))
+            .bg(rgb(bg))
+            .text_size(px(BUTTON_TEXT))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .line_height(px(BUTTON_HEIGHT))
+            .text_color(rgb(text))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            });
+        if index < last {
+            // Hairline divider between segments.
+            cell = cell.border_r_1().border_color(rgb(BORDER));
+        }
+        if !segment.active {
+            cell = cell
+                .cursor_pointer()
+                .hover(|style| style.bg(rgb(SURFACE_2)).text_color(rgb(TEXT)));
+            if let Some(on_click) = segment.on_click {
+                cell = cell.on_click(move |event, window, app| on_click(event, window, app));
+            }
+        }
+        row = row.child(attach_tooltip(cell.child(segment.label), segment.tooltip));
+    }
+
+    row.into_any_element()
+}
+
 fn button_with_tooltip<F>(
     id: &'static str,
     label: impl Into<SharedString>,
@@ -3654,112 +4106,7 @@ fn button_with_tooltip<F>(
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    attach_tooltip(
-        div()
-            .id(id)
-            .px(px(10.0))
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(BUTTON_RADIUS))
-            .bg(rgb(BUTTON_BG))
-            .text_size(px(11.0))
-            .text_color(rgb(TEXT))
-            .border_1()
-            .border_color(rgb(BUTTON_EDGE_SOFT))
-            .hover(|style| {
-                style
-                    .bg(rgb(BUTTON_BG_HOVER))
-                    .border_color(rgb(BUTTON_EDGE))
-            })
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(on_click)
-            .child(label.into()),
-        tooltip,
-    )
-    .into_any_element()
-}
-
-fn compact_button_with_tooltip<F>(
-    id: &'static str,
-    label: impl Into<SharedString>,
-    tooltip: Option<SharedString>,
-    on_click: F,
-) -> AnyElement
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    attach_tooltip(
-        div()
-            .id(id)
-            .px(px(8.0))
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(BUTTON_RADIUS))
-            .bg(rgb(BUTTON_BG))
-            .text_size(px(10.0))
-            .text_color(rgb(TEXT))
-            .border_1()
-            .border_color(rgb(BUTTON_EDGE_SOFT))
-            .hover(|style| {
-                style
-                    .bg(rgb(BUTTON_BG_HOVER))
-                    .border_color(rgb(BUTTON_EDGE))
-            })
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(on_click)
-            .child(label.into()),
-        tooltip,
-    )
-    .into_any_element()
-}
-
-fn compact_danger_button_with_tooltip<F>(
-    id: &'static str,
-    label: impl Into<SharedString>,
-    tooltip: Option<SharedString>,
-    on_click: F,
-) -> AnyElement
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    attach_tooltip(
-        div()
-            .id(id)
-            .px(px(8.0))
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(BUTTON_RADIUS))
-            .bg(rgb(DANGER_BG))
-            .text_size(px(10.0))
-            .text_color(rgb(DANGER_TEXT))
-            .border_1()
-            .border_color(rgb(DANGER_EDGE))
-            .hover(|style| {
-                style
-                    .bg(rgb(DANGER_HOVER))
-                    .border_color(rgb(DANGER_EDGE_HOVER))
-            })
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(on_click)
-            .child(label.into()),
-        tooltip,
-    )
-    .into_any_element()
+    pill_button(id, label, tooltip, ButtonKind::Normal, Some(on_click))
 }
 
 fn danger_button_with_tooltip<F>(
@@ -3771,34 +4118,7 @@ fn danger_button_with_tooltip<F>(
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    attach_tooltip(
-        div()
-            .id(id)
-            .px(px(10.0))
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(BUTTON_RADIUS))
-            .bg(rgb(DANGER_BG))
-            .text_size(px(11.0))
-            .text_color(rgb(DANGER_TEXT))
-            .border_1()
-            .border_color(rgb(DANGER_EDGE))
-            .hover(|style| {
-                style
-                    .bg(rgb(DANGER_HOVER))
-                    .border_color(rgb(DANGER_EDGE_HOVER))
-            })
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(on_click)
-            .child(label.into()),
-        tooltip,
-    )
-    .into_any_element()
+    pill_button(id, label, tooltip, ButtonKind::Danger, Some(on_click))
 }
 
 fn selected_button_with_tooltip<F>(
@@ -3810,34 +4130,7 @@ fn selected_button_with_tooltip<F>(
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    attach_tooltip(
-        div()
-            .id(id)
-            .px(px(10.0))
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(BUTTON_RADIUS))
-            .bg(rgb(BUTTON_SELECTED_BG))
-            .text_size(px(11.0))
-            .text_color(rgb(TEXT))
-            .border_1()
-            .border_color(rgb(BUTTON_SELECTED_EDGE))
-            .hover(|style| {
-                style
-                    .bg(rgb(BUTTON_SELECTED_BG_HOVER))
-                    .border_color(rgb(BUTTON_EDGE))
-            })
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(on_click)
-            .child(label.into()),
-        tooltip,
-    )
-    .into_any_element()
+    pill_button(id, label, tooltip, ButtonKind::Selected, Some(on_click))
 }
 
 fn disabled_button_with_tooltip(
@@ -3845,53 +4138,39 @@ fn disabled_button_with_tooltip(
     label: impl Into<SharedString>,
     tooltip: Option<SharedString>,
 ) -> AnyElement {
-    attach_tooltip(
-        div()
-            .id(id)
-            .px(px(10.0))
-            .h(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(BUTTON_RADIUS))
-            .bg(rgb(BUTTON_DISABLED_BG))
-            .text_size(px(11.0))
-            .text_color(rgb(0x7e8792))
-            .border_1()
-            .border_color(rgb(BUTTON_DISABLED_EDGE))
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(label.into()),
+    pill_button(
+        id,
+        label,
         tooltip,
+        ButtonKind::Disabled,
+        None::<fn(&ClickEvent, &mut Window, &mut App)>,
     )
-    .into_any_element()
 }
 
-fn status_pill(label: impl Into<SharedString>, text: u32, bg: u32, border: u32) -> AnyElement {
-    div()
-        .h(px(22.0))
-        .px(px(7.0))
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(bg))
-        .text_size(px(10.0))
-        .text_color(rgb(text))
-        .child(status_dot(text))
-        .child(label.into())
-        .into_any_element()
+/// Pick the running indicator color: green when running, amber when paused or
+/// read-only (or when something needs attention), muted grey when stopped.
+fn running_status_color(running: bool, mode: McpControlMode, has_error: bool) -> u32 {
+    if has_error {
+        RED
+    } else if !matches!(mode, McpControlMode::Active) {
+        AMBER
+    } else if running {
+        GREEN
+    } else {
+        MUTED
+    }
 }
 
-fn status_dot(color: u32) -> AnyElement {
+/// A small filled status light (no text label) used as the running indicator.
+/// Carries a faint matching ring so it reads as a polished dot, not a flat blob.
+fn status_light(color: u32) -> AnyElement {
     div()
-        .w(px(7.0))
-        .h(px(7.0))
+        .w(px(8.0))
+        .h(px(8.0))
         .rounded_full()
         .bg(rgb(color))
+        .border_1()
+        .border_color(rgba((color << 8) | 0x40))
         .into_any_element()
 }
 
