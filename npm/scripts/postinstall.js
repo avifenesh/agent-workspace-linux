@@ -134,7 +134,10 @@ function download(url, tmpFile, maxRedirects = 5) {
     try {
       fs.unlinkSync(tmpPath);
     } catch (_) {}
-    console.error(`\nagent-workspace-linux: download failed — ${err.message}`);
+    // Strip CR/LF from the error detail before logging so a value that flows
+    // in from the download URL/target cannot forge extra log lines.
+    const detail = String(err.message).replace(/[\r\n]+/g, ' ');
+    console.error(`\nagent-workspace-linux: download failed — ${detail}`);
     process.exit(1);
   }
 
