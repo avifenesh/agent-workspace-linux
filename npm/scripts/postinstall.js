@@ -134,7 +134,15 @@ function download(url, tmpFile, maxRedirects = 5) {
     try {
       fs.unlinkSync(tmpPath);
     } catch (_) {}
-    console.error(`\nagent-workspace-linux: download failed — ${err.message}`);
+    // The download error text embeds the request URL (built from
+    // package.json's version + the target triple). Log a fixed message rather
+    // than interpolating that value, to avoid a log-injection sink; the URL
+    // itself is already printed above for debugging.
+    console.error(
+      "\nagent-workspace-linux: download failed. Verify the release exists " +
+        "for your platform and that the version in package.json matches " +
+        "(see the URL logged above)."
+    );
     process.exit(1);
   }
 
